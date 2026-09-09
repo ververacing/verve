@@ -61,13 +61,16 @@ if git remote get-url origin >/dev/null 2>&1; then
     git push origin HEAD
     git push -f origin "$TAG"
     echo "pushed to origin + tag $TAG"
-    # --- 5. GitHub Release with the zip (needs gh) ---
-    if command -v gh >/dev/null 2>&1; then
+    # --- 5. GitHub Release with the zip (needs gh, authed once via `gh auth login`) ---
+    GH_BIN="$(command -v gh 2>/dev/null || true)"
+    [[ -z "$GH_BIN" && -x "/c/Program Files/GitHub CLI/gh.exe" ]] && GH_BIN="/c/Program Files/GitHub CLI/gh.exe"
+    if [[ -n "$GH_BIN" ]] && "$GH_BIN" auth status >/dev/null 2>&1; then
         printf '%s\n' "$NOTES" > "$DIST/notes.txt"
-        gh release create "$TAG" "$ZIP" --title "Verve $TAG" --notes-file "$DIST/notes.txt" \
+        "$GH_BIN" release create "$TAG" "$ZIP" --title "Verve $TAG" --notes-file "$DIST/notes.txt" \
             && echo "GitHub Release $TAG created with zip attached"
     else
-        echo ">> gh not installed: create the Release on GitHub's web UI and attach $ZIP"
+        echo ">> gh not found or not logged in ('gh auth login'): create the Release on GitHub's"
+        echo "   web UI (Releases -> Draft) and attach $ZIP"
     fi
 else
     echo ">> no 'origin' remote yet: add it, then re-run (or push manually). Zip is at $ZIP"
