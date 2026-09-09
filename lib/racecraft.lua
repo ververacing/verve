@@ -12,11 +12,22 @@
 -- evaluate(i, dt) applies spline-offset + aggression itself and RETURNS a caution delta for the
 -- app to fold into the single setAICaution call (so it doesn't fight the human layer's caution).
 
+local Overrides = require('lib.overrides')
+
 local R = {}
 R.ENABLED   = true
 R.INTENSITY = 0.7        -- 0..1.5 scales the whole effect
 R.attacking = 0
 R.defending = 0
+
+-- per-car racecraft level (from the UI): how hard this driver races, on top of INTENSITY
+local LEVELMULT = { chill = 0.4, clean = 1.0, intense = 1.5 }
+local idCache = {}
+local function levelMult(i)
+    local id = idCache[i]
+    if id == nil then id = false; pcall(function() id = ac.getCarID(i) end); idCache[i] = id end
+    return LEVELMULT[Overrides.level(id or nil)] or 1.0
+end
 
 local ATTACK_GAP   = 0.008    -- spline-fraction gap to "start pressuring" the car ahead
 local PASS_GAP     = 0.0035   -- close enough (on a straight) to pull out for the pass
@@ -93,8 +104,12 @@ function R.evaluate(i, dt)
             if straight > 0.5 then targetOffset = DEFEND_OFFSET * side(i) * straight end
         end
 
-        caut = caut * R.INTENSITY
-        targetOffset = targetOffset * R.INTENSITY
+        -- per-car level scales the whole effect (chill = passive, intense = elbows out)
+        local lv = levelMult(i)
+        local eff = R.INTENSITY * lv
+        caut = caut * eff
+        targetOffset = targetOffset * eff
+        aggr = AGGR_CRUISE + (aggr - AGGR_CRUISE) * lv
 
         -- slew the line offset so the move is smooth, not a dart
         local cur = curOffset[i] or 0
@@ -113,6 +128,6 @@ function R.evaluate(i, dt)
 end
 
 function R.beginFrame() R.attacking = 0; R.defending = 0 end
-function R.reset() curOffset = {} end
+function R.reset() curOffset = {}; idCache = {} end
 
 return R

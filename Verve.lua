@@ -6,6 +6,7 @@ local Human     = require('lib.human')
 local Recovery  = require('lib.recovery')
 local Classes   = require('lib.classes')
 local Racecraft = require('lib.racecraft')
+local Overrides = require('lib.overrides')
 
 local settings = ac.storage({
     enabled     = true,
@@ -79,9 +80,21 @@ ac.onSessionStart(function()
 end)
 
 -- ------------------------------- UI -------------------------------
+local CLASS_OPTS = { 'auto', 'formula', 'prototype', 'hypercar', 'gt', 'road', 'touring', 'vintage', 'drift' }
+local LEVEL_OPTS = { 'chill', 'clean', 'intense' }
+
 local function toggle(label, key, help)
     if ui.checkbox(label, settings[key]) then settings[key] = not settings[key] end
     if help and ui.itemHovered() then ui.setTooltip(help) end
+end
+
+local function comboFor(tag, previewText, currentKey, opts, onPick)
+    ui.setNextItemWidth(130)
+    ui.combo(tag, previewText, nil, function()
+        for _, opt in ipairs(opts) do
+            if ui.selectable(opt, opt == currentKey) then onPick(opt) end
+        end
+    end)
 end
 
 function script.windowMain()
@@ -128,6 +141,37 @@ function script.windowMain()
     local bg = ui.slider('Base AI grip##bg', settings.baseGrip, 0.85, 1.20, '%.2f')
     if bg ~= settings.baseGrip then settings.baseGrip = bg end
     if ui.itemHovered() then ui.setTooltip('1.00 = no grip cheat (more human). 1.20 = stock AC AI. Pace still scales with the race difficulty %.') end
+
+    ui.newLine()
+    ui.separator()
+    ui.textColored('Per-car class & racecraft level', rgbm(0.6, 0.6, 0.6, 1))
+    ui.textWrapped('Auto-detected from tags/name. Override any car here; saved per car.')
+    if not settings.enabled then
+        ui.text('(enable Verve to edit)')
+    else
+        pcall(function()
+            local sim = ac.getSim()
+            if not sim then return end
+            local seen = {}
+            for i = 1, sim.carsCount - 1 do
+                local id = nil
+                pcall(function() id = ac.getCarID(i) end)
+                if id and not seen[id] then
+                    seen[id] = true
+                    local name = id
+                    pcall(function() name = ac.getCarName(i) or id end)
+                    local auto = Classes.autoKeyOf(i)
+                    local curClass = Overrides.classOverride(id) or 'auto'
+                    local classPreview = (curClass == 'auto') and ('auto (' .. auto .. ')') or curClass
+                    ui.text(name)
+                    comboFor('##cls' .. id, classPreview, curClass, CLASS_OPTS, function(opt) Overrides.setClass(id, opt) end)
+                    ui.sameLine()
+                    local lvl = Overrides.level(id)
+                    comboFor('##lvl' .. id, lvl, lvl, LEVEL_OPTS, function(opt) Overrides.setLevel(id, opt) end)
+                end
+            end
+        end)
+    end
 
     ui.newLine()
     ui.separator()
