@@ -5,10 +5,8 @@
 
 local U = {}
 U.LOCAL_VERSION = "0.6.6"
--- Point this at the raw version.json in the GitHub repo once it exists, e.g.
--- https://raw.githubusercontent.com/<user>/verve/main/version.json  (harmless until then: the
--- request just fails and no banner shows).
-U.VERSION_URL   = "https://raw.githubusercontent.com/REPLACE_ME/verve/main/version.json"
+-- Raw version.json in the GitHub repo (updated on every release by release.sh).
+U.VERSION_URL   = "https://raw.githubusercontent.com/tyleebs-hub/verve/main/version.json"
 
 U.latest, U.downloadUrl, U.summary = nil, nil, nil
 local checked = false
