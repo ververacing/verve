@@ -223,9 +223,9 @@ function script.windowMain()
     local rc = ui.slider('Racecraft intensity##rc', G.rcIntensity, 0.0, 1.5, '%.2f')
     if rc ~= G.rcIntensity then setG('rcIntensity', rc) end
     if ui.itemHovered() then ui.setTooltip('How hard they attack/defend. 0 = passive, 0.7 = default, 1.5 = elbows out. Per-car level multiplies this.') end
-    local bg = ui.slider('Base AI grip##bg', G.baseGrip, 0.85, 1.20, '%.2f')
+    local bg = ui.slider('Base AI grip##bg', G.baseGrip, 0.85, 1.50, '%.2f')
     if bg ~= G.baseGrip then setG('baseGrip', bg) end
-    if ui.itemHovered() then ui.setTooltip('Grip the AI has for its own racing line. 1.20 = stock AC AI (default; the line speeds are calibrated for this, so cars hold hard corners). Lower it (toward 1.00) for a more human, on-the-edge feel, but too low makes them wash wide. Pace still scales with the race difficulty %.') end
+    if ui.itemHovered() then ui.setTooltip('Grip the AI has for its own racing line. 1.20 = stock AC AI (default; line speeds are calibrated for this). Below that = more human/on-the-edge but they wash wide if too low. Above 1.20 = extra stick + speed (keeps them planted / competitive at lower difficulty). Pace also scales with the race difficulty %.') end
 
     ui.newLine()
     ui.separator()
