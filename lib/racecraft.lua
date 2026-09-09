@@ -46,15 +46,17 @@ local CORNER_TURN  = 0.01      -- min (1 - dot) between tangents to count as "a 
 
 -- per-class racecraft tactics: gap = striking range, offset = how far off-line, corner = how hard
 -- it commits to an inside dive (vs a straight slipstream pass), defend = defensive firmness.
+-- follow = how close it tucks in behind (high-downforce cars keep MORE distance -> dirty air
+-- costs them front grip, so tucking right up makes them twitchy/crash-prone).
 local TACTICS = {
-    formula   = { gap = 1.3,  offset = 0.8, corner = 0.5, defend = 1.0 },  -- slipstream from far, precise, prefers straight passes
-    prototype = { gap = 1.3,  offset = 0.9, corner = 0.6, defend = 1.0 },
-    hypercar  = { gap = 1.2,  offset = 0.9, corner = 0.7, defend = 1.0 },
-    gt        = { gap = 1.0,  offset = 1.0, corner = 1.1, defend = 1.1 },  -- out-brakes, close racing
-    touring   = { gap = 0.85, offset = 1.2, corner = 1.4, defend = 1.2 },  -- dive-bomb, elbows out
-    road      = { gap = 1.0,  offset = 1.0, corner = 1.0, defend = 1.0 },
-    vintage   = { gap = 1.1,  offset = 0.9, corner = 0.8, defend = 0.9 },  -- momentum, wider lines
-    drift     = { gap = 1.0,  offset = 1.0, corner = 1.0, defend = 1.0 },
+    formula   = { gap = 1.3,  offset = 0.7, corner = 0.5, defend = 1.0, follow = 0.4 },  -- slipstream from far, precise, keeps its distance
+    prototype = { gap = 1.3,  offset = 0.8, corner = 0.6, defend = 1.0, follow = 0.5 },
+    hypercar  = { gap = 1.2,  offset = 0.8, corner = 0.7, defend = 1.0, follow = 0.55 },
+    gt        = { gap = 1.0,  offset = 1.0, corner = 1.1, defend = 1.1, follow = 0.9 },  -- out-brakes, close racing
+    touring   = { gap = 0.85, offset = 1.2, corner = 1.4, defend = 1.2, follow = 1.2 },  -- dive-bomb, elbows out
+    road      = { gap = 1.0,  offset = 1.0, corner = 1.0, defend = 1.0, follow = 0.9 },
+    vintage   = { gap = 1.1,  offset = 0.9, corner = 0.8, defend = 0.9, follow = 0.8 },  -- momentum, wider lines
+    drift     = { gap = 1.0,  offset = 1.0, corner = 1.0, defend = 1.0, follow = 1.0 },
 }
 local LEVELMULT = { chill = 0.4, clean = 1.0, intense = 1.5 }
 
@@ -130,7 +132,7 @@ function R.evaluate(i, dt)
         if gapA < attackGap and spd >= aheadSpd - FASTER_MARGIN then
             state = 1
             aggr = AGGR_ATTACK
-            caut = CAUTION_ATTACK * (1 - gapA / attackGap)
+            caut = CAUTION_ATTACK * (1 - gapA / attackGap) * (t.follow or 1.0)   -- aero cars keep more distance
             if gapA < PASS_GAP then
                 local myTc = ac.worldCoordinateToTrack(me.position)
                 local progZ = myTc and myTc.z or mySpline
@@ -170,7 +172,10 @@ function R.evaluate(i, dt)
         local lv = LEVELMULT[Overrides.level(carId(i))] or 1.0
         local eff = R.INTENSITY * lv
         caut = caut * eff
-        target = clamp(target * eff, -1, 1)
+        -- high-speed damping: smaller line changes at speed (a big lateral move at 300 km/h is
+        -- what unsettles fast cars). Full effect up to ~180 km/h, tapering to half by ~360.
+        local speedDamp = clamp(1 - math.max(0, spd - 180) / 400, 0.5, 1)
+        target = clamp(target * eff * speedDamp, -1, 1)
         aggr = AGGR_CRUISE + (aggr - AGGR_CRUISE) * lv
 
         -- deadzone + side-hold: ignore tiny offsets (stay on the line), and hold the chosen side

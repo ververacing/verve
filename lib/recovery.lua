@@ -19,9 +19,12 @@ local STEER_GAIN  = 2.0
 local TARGET_AHEAD= 0.002
 local FLIP_INTERVAL = 0.8
 local FLIP_WORSE  = 0.12
-local REJOIN_DIST = 5.0
+local REJOIN_DIST = 9.0       -- hand back sooner (the AI returns to the line + accelerates faster than a crawl)
 local REJOIN_FACE = 0.7
 local REJOIN_SPEED= 12.0
+local ACCEL_GAS   = 0.7       -- once pointed forward and clear, accelerate back up to speed
+local DANGER_GAP  = 0.006     -- fast car within this spline gap behind -> hold, don't rejoin into it
+local DANGER_SPEED= 45.0      -- km/h: a car above this counts as "traffic" to watch for
 local STALL_MOVE    = 1.0
 local STALL_TRIGGER = 1.2
 local BACK_GAS      = 0.35
@@ -96,25 +99,47 @@ function R.update(dt)
                 return
             end
 
+            -- traffic awareness: a fast car bearing down from behind -> hold, don't pull into it
+            local danger = false
+            do
+                local mySp = car.splinePosition
+                if mySp then
+                    for j = 0, sim.carsCount - 1 do
+                        if j ~= i then
+                            local oc = ac.getCar(j)
+                            if oc and oc.splinePosition and (oc.speedKmh or 0) > DANGER_SPEED then
+                                local gap = mySp - oc.splinePosition; if gap < 0 then gap = gap + 1 end
+                                if gap > 0 and gap < DANGER_GAP then danger = true; break end
+                            end
+                        end
+                    end
+                end
+            end
+
             local target = ac.trackProgressToWorldCoordinate((progress + TARGET_AHEAD) % 1.0, false)
             if not target then return end
             local toT = (target - car.position):normalize()
             local fwd = car.look
+            local fdot = fwd:dot(toT)                     -- capture BEFORE cross (cross mutates fwd in place)
             local up  = car.up or vec3(0, 1, 0)
             local right = fwd:cross(up)
-            local fdot = fwd:dot(toT)
             local ldot = right:dot(toT)
             local err  = math.acos(clamp(fdot, -1, 1))
 
-            if nearDist < REJOIN_DIST and fdot > REJOIN_FACE and spd > REJOIN_SPEED then endRec(i); return end
+            -- recovered? hand back to the AI once it's pointed forward, moving, and safe -- it returns
+            -- to the racing line and gets up to speed far quicker than our gentle crawl.
+            if not danger and nearDist < REJOIN_DIST and fdot > REJOIN_FACE and spd > REJOIN_SPEED then
+                endRec(i); return
+            end
 
+            -- stall detection (a deliberate danger-hold is not "stuck")
             if stallRef[i] == nil then stallRef[i] = car.position; stallT[i] = 0 end
-            if car.position:distance(stallRef[i]) > STALL_MOVE then
+            if danger or car.position:distance(stallRef[i]) > STALL_MOVE then
                 stallRef[i] = car.position; stallT[i] = 0
             else
                 stallT[i] = (stallT[i] or 0) + dt
             end
-            if stallT[i] > (STALL_TRIGGER + hash01(i * 3 + 1) * 0.6) then
+            if not danger and stallT[i] > (STALL_TRIGGER + hash01(i * 3 + 1) * 0.6) then
                 backupN[i] = (backupN[i] or 0) + 1
                 if backupSign[i] == nil then backupSign[i] = (hash01(i * 7) < 0.5) and 1 or -1 end
                 backupT[i] = BACKUP_MIN + hash01(i * 13 + backupN[i]) * BACKUP_RANGE
@@ -137,7 +162,14 @@ function R.update(dt)
             local c = ac.overrideCarControls(i)
             if c then
                 c.requestedGearIndex = 1
-                c.gas = GAS; c.brake = 0; c.clutch = 0; c.steer = steer
+                c.clutch = 0
+                c.steer = steer
+                if danger then
+                    c.gas = 0; c.brake = 0.25                     -- wait for traffic to pass
+                else
+                    c.gas = (fdot > 0.5) and ACCEL_GAS or GAS     -- accelerate once pointed forward
+                    c.brake = 0
+                end
             end
         end)
     end
