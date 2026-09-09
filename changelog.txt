@@ -1,5 +1,11 @@
 Verve - changelog
 
+0.6.9
+- Fewer Formula/aero retirements: high-downforce cars keep more racing distance (they can't
+  follow closely in dirty air anyway), reducing contact in big fragile fields.
+- Late-race corners: halved the end-of-stint grip fade so it no longer stacks with AC's own
+  tyre wear and drag the AI under-gripped into run-wides.
+
 0.6.8
 - Packs no longer crawl/concertina to a halt before corners: the pack-density damping now only
   calms the line-changing (so starts stay tidy) and no longer makes cars hang back in traffic,
