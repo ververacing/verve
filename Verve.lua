@@ -6,6 +6,7 @@ local Recovery  = require('lib.recovery')
 local Classes   = require('lib.classes')
 local Racecraft = require('lib.racecraft')
 local Overrides = require('lib.overrides')
+local Update    = require('lib.update')
 
 -- defaults for the global settings (also used for "reset to defaults")
 local DEFAULTS = {
@@ -173,6 +174,15 @@ function script.windowMain()
     ui.popFont()
     ui.sameLine()
     ui.textColored('AI that feels human', rgbm(0.6, 0.6, 0.6, 1))
+
+    Update.check()
+    if Update.latest then
+        ui.textColored('Update available: v' .. Update.latest .. (Update.summary and ('  -  ' .. Update.summary) or ''), rgbm(0.4, 0.8, 1, 1))
+        if Update.downloadUrl then
+            if ui.button('Get the update##upd') then pcall(function() os.openURL(Update.downloadUrl) end) end
+            ui.sameLine(); ui.textColored(Update.downloadUrl, rgbm(0.5, 0.5, 0.5, 1))
+        end
+    end
 
     ui.separator()
     if ui.checkbox('Enable Verve', G.enabled) then setG('enabled', not G.enabled) end

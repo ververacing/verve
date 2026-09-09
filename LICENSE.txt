@@ -1,0 +1,23 @@
+Verve - License
+
+Copyright (c) 2026 terranitup
+
+Verve is free to download and use.
+
+You MAY:
+- Use it freely, in any session, singleplayer or otherwise.
+- Share the ORIGINAL, unmodified package, with a link back to the official source.
+
+You MAY NOT, without permission:
+- Sell it, or put it behind a paywall.
+- Re-host or mirror it on aggregator/mod-mirror sites. Link people to the official
+  source (OverTake / GitHub) instead.
+- Redistribute modified versions as your own.
+
+Verve is provided "as is", without warranty of any kind. Use at your own risk.
+
+Verve is original work. It contains no code from other AI mods. It was inspired by the
+AI-tuning ideas the Assetto Corsa community explored (notably AI Whisperer by Benovic
+Boucharenski, itself descended from Damgam's work) and is built on the Custom Shaders Patch
+Lua SDK by Ilja Jusupov (x4fab). Those projects are credited with thanks; none of their code
+is included here.

@@ -1,0 +1,49 @@
+Verve - changelog
+
+0.6.6
+- Base AI grip slider opened to 1.50 (above 1.20 = extra stick + speed).
+
+0.6.5
+- Base AI grip default returned to 1.20 (AC stock; fixes AI running wide at hard corners).
+
+0.6.4
+- Pack-density damping: cars hold formation in a crowd instead of all passing/defending at
+  once (much calmer race starts and traffic).
+
+0.6.3
+- Aggression: racecraft now uses the car's own aggression (the Quick Race slider) as a
+  baseline instead of overwriting it, and only adds a bit when fighting.
+- Calmer racecraft (bigger deadzone, longer side-hold, smaller offsets).
+- Cold-tyre corners handled better (esp. classic/muscle cars).
+- Formula DRS discipline: closes DRS outside a zone / out of range; in-zone DRS left to the game.
+- Per-car list split into "in this session" vs "saved overrides for other cars".
+
+0.6.2
+- Gentler racecraft for high-downforce cars (they keep more distance in dirty air).
+- Traffic-aware recovery: a spun car waits for a gap instead of rejoining into oncoming cars.
+- Faster recovery return (accelerates once pointed forward, hands back to the AI sooner).
+
+0.6.1
+- Fix: restored the app manifest (the app is now visible in the sidebar again).
+- De-skittish defending (hold the inside line into corners; don't mirror/weave).
+
+0.6.0
+- Physics-signal car classifier (reads downforce / aids / tyres / drivetrain when tags + name
+  don't identify a car).
+
+0.5.0
+- Corner-aware and defender-aware passing (dive the inside when open, pass where the defender
+  isn't) and per-class racecraft tactics.
+
+0.4.0
+- Auto-save vs session-only editing, per-car and global Reset, pre-race review list.
+
+0.3.0
+- Tag-aware classifier + per-car class overrides + per-car racecraft levels (chill/clean/intense).
+
+0.2.0
+- Our own racecraft: overtaking and defending.
+
+0.1.0
+- First build: human pace variability, class-aware tyre/weather physics, gentle class-aware
+  mistakes, and automatic self-recovery for spun/beached cars.
