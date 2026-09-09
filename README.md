@@ -31,8 +31,6 @@ Everything toggles and tunes in the in-game app panel.
   human); 1.20 = stock AC AI feel.
 
 ## Status
-v0.3 — human + robust layer, our own racecraft, a tag-aware class detector, and per-car
-overrides (force a class, set a Chill / Clean / Intense racecraft level) saved per car in the
-in-app panel. Next: corner-aware pass side; optional physics-signal classification.
+v0.4 — everything from v0.3 plus an auto-save / session-only model (edit live for one race, persist on Save), per-car and global Reset, and a review list that shows every car's detected class + override + level (editable on the grid before lights).
 
 Original work. Not affiliated with, and contains no code from, other AI mods.
