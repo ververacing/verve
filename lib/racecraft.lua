@@ -29,8 +29,10 @@ local ATTACK_GAP   = 0.008
 local PASS_GAP     = 0.0035
 local DEFEND_GAP   = 0.005
 local FASTER_MARGIN= 3.0
-local ATTACK_OFFSET= 0.4
-local DEFEND_OFFSET= 0.35
+local ATTACK_OFFSET= 0.35
+local DEFEND_OFFSET= 0.30
+local EDGE_SOFT    = 0.5       -- start easing the offset once the car is this far toward an edge
+local EDGE_HARD    = 0.9       -- fully suppressed by here (keeps cars off kerbs -> no trip/rollover)
 local CAUTION_ATTACK = -0.6
 local CAUTION_DEFEND = -0.25
 -- aggression = the car's own slider value (car.aiAggression) plus a small delta when fighting,
@@ -136,6 +138,7 @@ function R.evaluate(i, dt)
         local baseA = me.aiAggression
         if not baseA or baseA < 0 then baseA = AGGR_CRUISE end
         baseA = clamp(baseA, 0.2, 1.0)
+        local myLat = latOf(me.position)          -- current lateral on track (-1 left .. +1 right)
         local target, aggr = 0, baseA
 
         if gapA < attackGap and spd >= aheadSpd - FASTER_MARGIN then
@@ -182,12 +185,18 @@ function R.evaluate(i, dt)
         local eff = R.INTENSITY * lv
         -- pack damping: in a crowd (race start, traffic) hold formation instead of all trying to
         -- pass/defend at once -> much calmer starts and packs, resumes as the field spreads.
-        local crowdDamp = clamp(1 - math.max(0, crowd - 1) * 0.30, 0.25, 1)
+        local crowdDamp = clamp(1 - math.max(0, crowd - 1) * 0.40, 0.15, 1)
         caut = caut * eff * crowdDamp
         -- high-speed damping: smaller line changes at speed (a big lateral move at 300 km/h is
         -- what unsettles fast cars). Full effect up to ~180 km/h, tapering to half by ~360.
         local speedDamp = clamp(1 - math.max(0, spd - 180) / 400, 0.5, 1)
         target = clamp(target * eff * speedDamp * crowdDamp, -1, 1)
+
+        -- track-edge safety: never push a car further toward an edge it's already near. Stops
+        -- Verve from shoving a car onto a kerb at a corner exit (the near-rollover cause).
+        if (target > 0 and myLat > EDGE_SOFT) or (target < 0 and myLat < -EDGE_SOFT) then
+            target = target * clamp((EDGE_HARD - math.abs(myLat)) / (EDGE_HARD - EDGE_SOFT), 0, 1)
+        end
         aggr = baseA + (aggr - baseA) * lv
 
         -- deadzone + side-hold: ignore tiny offsets (stay on the line), and hold the chosen side

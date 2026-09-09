@@ -1,5 +1,10 @@
 Verve - changelog
 
+0.6.7
+- Track-edge safety: Verve no longer pushes a car further toward an edge it's already near,
+  so it won't shove a car onto a kerb at a corner exit (fixes a near-rollover).
+- Calmer race starts and packs (stronger pack-density damping); smaller pass/defend offsets.
+
 0.6.6
 - Base AI grip slider opened to 1.50 (above 1.20 = extra stick + speed).
 
