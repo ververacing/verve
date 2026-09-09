@@ -7,7 +7,8 @@
 --   dirty   = grip lost following through a corner (aero wake)
 --
 -- Detection order: (1) user override (per car, from the UI); (2) car TAGS (real metadata, the
--- reliable signal for well-tagged mods); (3) car-id keywords (fallback); (4) "road" default.
+-- reliable signal for well-tagged mods); (3) car-id keywords; (3b) physics signals from the
+-- car's data files (downforce/aids/tyres/steer-lock/drivetrain); (4) "road" default.
 -- Unknown -> road is safe: its mistakes are gentle and grip-slew-limited, so a misclassify can't
 -- spin a car, and the per-car override in the UI fixes anything the auto-detector gets wrong.
 
@@ -78,6 +79,42 @@ local function classifyId(id)
     return nil
 end
 
+-- (3b) physics signals from the car's own data files. Only used when tags + id keywords both
+-- miss, to upgrade the "road" default into a sensible race class. Conservative: non-race cars
+-- stay road. All reads guarded; a per-car override in the UI fixes anything this gets wrong.
+local function classifyPhysics(i)
+    local key = nil
+    pcall(function()
+        local function g(file, sec, k, d)
+            local v = d
+            pcall(function() v = ac.INIConfig.carData(i, file):get(sec, k, d) end)
+            return v
+        end
+        local steer = tonumber(g('car.ini', 'CONTROLS', 'STEER_LOCK', 400)) or 400
+        local wings = 0
+        for w = 0, 3 do if tostring(g('aero.ini', 'WING_' .. w, 'NAME', '')) ~= '' then wings = wings + 1 end end
+        local abs  = (tonumber(g('electronics.ini', 'ABS', 'PRESENT', 0)) or 0) > 0
+                     or tostring(g('electronics.ini', 'ABS_V2', 'PRESENT', '')) ~= ''
+        local tc   = (tonumber(g('electronics.ini', 'TRACTION_CONTROL', 'PRESENT', 0)) or 0) > 0
+                     or tostring(g('electronics.ini', 'TRACTION_CONTROL_2', 'PRESENT', '')) ~= ''
+        local hasAids = abs or tc
+        local tyre = tostring(g('tyres.ini', 'FRONT', 'NAME', '')):lower()
+        local slick = tyre:find('slick') ~= nil
+        local semi  = tyre:find('semi') ~= nil
+        local drive = tostring(g('drivetrain.ini', 'TRACTION', 'TYPE', 'RWD')):upper()
+
+        local downforce = wings >= 2
+        local raceish = slick or downforce or steer <= 280
+        if not raceish then return end                          -- stays road (default)
+        if downforce and steer <= 260 and not hasAids then key = 'formula'
+        elseif drive == 'FWD' and (slick or semi) then key = 'touring'
+        elseif downforce and not hasAids then key = 'prototype'
+        elseif downforce or slick then key = 'gt'
+        end
+    end)
+    return key
+end
+
 local autoCache = {}
 local idCache = {}
 
@@ -95,7 +132,7 @@ end
 function M.autoKeyOf(i)
     local c = autoCache[i]
     if c ~= nil then return c end
-    local key = classifyTags(i) or classifyId(carIdOf(i)) or M.DEFAULT
+    local key = classifyTags(i) or classifyId(carIdOf(i)) or classifyPhysics(i) or M.DEFAULT
     autoCache[i] = key
     return key
 end
