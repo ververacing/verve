@@ -9,6 +9,9 @@ racing, on **any** car and track:
   caution, and dirty-air grip loss when following closely through corners. Scaled by car class.
 - **Human errors** — occasional *gentle* bobbles on forgiving cars, never on high-downforce
   open-wheelers. Grip changes are slew-limited so an error never snaps a car into a spin.
+- **Racecraft** — AI close up and pressure the car ahead, pull off-line to pass on straights,
+  and make one clean defensive move to cover. Collision-awareness stays on, so they position
+  and race rather than ram.
 - **Self-recovery** — spun or beached AI that aren't wrecked get themselves going again:
   gentle throttle + steering back to the racing line, reversing off walls and out of
   car-to-car locks. Never touches the race start or pit exit.
@@ -28,6 +31,7 @@ Everything toggles and tunes in the in-game app panel.
   human); 1.20 = stock AC AI feel.
 
 ## Status
-v0.1 — the "human + robust" layer. Our own racecraft (overtaking / defending) is planned next.
+v0.2 — human + robust layer plus our own racecraft (overtaking / defending). Next: per-car
+manual class override, a smarter class detector, and per-car racecraft "levels".
 
 Original work. Not affiliated with, and contains no code from, other AI mods.

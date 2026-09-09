@@ -15,6 +15,7 @@ local H = {}
 -- driven by the app each frame:
 H.ENABLED       = true
 H.INTENSITY     = 0.5      -- variability scale (0 = none, 1 = subtle, 1.5 = strong)
+H.HUMAN_VAR     = true     -- personality / drift / fade / pressure / slipstream
 H.HUMAN_ERRORS  = true     -- occasional gentle bobbles
 H.CLASS_PHYSICS = true     -- cold-tyre warm-up / wet / dirty air
 
@@ -222,10 +223,13 @@ function H.getModifiers(i)
     seed(i)
     local now = os.clock()
 
-    local dwv = 0.6 * math.sin(now * 0.050 + phase[i]) + 0.4 * math.sin(now * 0.017 + phase[i] * 1.7)
-    dwv = dwv / cons[i]
-    local vGrip = pers[i] + dwv * DRIFT_AMP
-    local vCaut = -dwv * CAUTION_AMP
+    local vGrip, vCaut = 0, 0
+    if H.HUMAN_VAR then
+        local dwv = 0.6 * math.sin(now * 0.050 + phase[i]) + 0.4 * math.sin(now * 0.017 + phase[i] * 1.7)
+        dwv = dwv / cons[i]
+        vGrip = pers[i] + dwv * DRIFT_AMP
+        vCaut = -dwv * CAUTION_AMP
+    end
     local pGrip, pCaut = 0, 0
 
     pcall(function()
@@ -233,26 +237,28 @@ function H.getModifiers(i)
         if not car then return end
         local cm = Classes.multOf(i)
 
-        local f = fadeFrac(i, car) ^ 1.3
-        vGrip = vGrip - FADE_MAX_GRIP * f
-        vCaut = vCaut + FADE_MAX_CAUTION * f
+        if H.HUMAN_VAR then
+            local f = fadeFrac(i, car) ^ 1.3
+            vGrip = vGrip - FADE_MAX_GRIP * f
+            vCaut = vCaut + FADE_MAX_CAUTION * f
 
-        local p = pressure01(i, car, now)
-        if p > 0 then vGrip = vGrip - PRESSURE_NERVES * p end
-        if H.HUMAN_ERRORS and cm.mistake > 0 then
-            local dtp = lastT[i] and (now - lastT[i]) or 0
-            if dtp > 0 and dtp < 1 and (not mistakeUntil[i] or now > mistakeUntil[i]) then
-                local rate = (MISTAKE_BASE + MISTAKE_RATE * p) * cm.mistake
-                if math.random() < rate * dtp then mistakeUntil[i] = now + MISTAKE_DUR end
+            local p = pressure01(i, car, now)
+            if p > 0 then vGrip = vGrip - PRESSURE_NERVES * p end
+            if H.HUMAN_ERRORS and cm.mistake > 0 then
+                local dtp = lastT[i] and (now - lastT[i]) or 0
+                if dtp > 0 and dtp < 1 and (not mistakeUntil[i] or now > mistakeUntil[i]) then
+                    local rate = (MISTAKE_BASE + MISTAKE_RATE * p) * cm.mistake
+                    if math.random() < rate * dtp then mistakeUntil[i] = now + MISTAKE_DUR end
+                end
+                if mistakeUntil[i] and now < mistakeUntil[i] then vGrip = vGrip - MISTAKE_GRIP end
+            else
+                mistakeUntil[i] = nil
             end
-            if mistakeUntil[i] and now < mistakeUntil[i] then vGrip = vGrip - MISTAKE_GRIP end
-        else
-            mistakeUntil[i] = nil
-        end
-        lastT[i] = now
+            lastT[i] = now
 
-        local tow = slipstream01(i, car)
-        if tow > 0 then vGrip = vGrip + TOW_GRIP * tow; vCaut = vCaut - TOW_CAUT * tow end
+            local tow = slipstream01(i, car)
+            if tow > 0 then vGrip = vGrip + TOW_GRIP * tow; vCaut = vCaut - TOW_CAUT * tow end
+        end
 
         if H.CLASS_PHYSICS then
             local wu = warmupFrac(i, car)
