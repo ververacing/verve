@@ -29,16 +29,18 @@ local ATTACK_GAP   = 0.008
 local PASS_GAP     = 0.0035
 local DEFEND_GAP   = 0.005
 local FASTER_MARGIN= 3.0
-local ATTACK_OFFSET= 0.5
-local DEFEND_OFFSET= 0.45
+local ATTACK_OFFSET= 0.4
+local DEFEND_OFFSET= 0.35
 local CAUTION_ATTACK = -0.6
 local CAUTION_DEFEND = -0.25
-local AGGR_ATTACK  = 0.82
-local AGGR_DEFEND  = 0.75
-local AGGR_CRUISE  = 0.55
-local OFFSET_SLEW  = 0.8       -- units/sec offset may move (lower = smoother, less skittish)
-local DEADZONE     = 0.08      -- ignore tiny offsets (stay on the line)
-local SIDE_HOLD    = 0.8       -- s to hold a chosen side before allowing a flip (anti-dart)
+-- aggression = the car's own slider value (car.aiAggression) plus a small delta when fighting,
+-- so the Quick Race aggression slider stays meaningful instead of being overwritten.
+local ATTACK_AGGR_ADD = 0.25
+local DEFEND_AGGR_ADD = 0.12
+local AGGR_CRUISE  = 0.55       -- fallback baseline only if the car's aggression can't be read
+local OFFSET_SLEW  = 0.8        -- units/sec offset may move (lower = smoother, less skittish)
+local DEADZONE     = 0.12       -- ignore tiny offsets (stay on the line)
+local SIDE_HOLD    = 1.2        -- s to hold a chosen side before allowing a flip (anti-dart)
 local OFFLINE_MAX  = 0.75      -- don't defend against a car this far off the racing line
 local SPEED_MIN    = 30.0
 local SAMPLE_D     = 0.004     -- spline fraction between racing-line samples (~20m on a 5km track)
@@ -127,11 +129,15 @@ function R.evaluate(i, dt)
 
         local attackGap = ATTACK_GAP * t.gap
         local defendGap = DEFEND_GAP
-        local target, aggr = 0, AGGR_CRUISE
+        -- baseline aggression = the car's own (slider) value; Verve adds a bit when fighting
+        local baseA = me.aiAggression
+        if not baseA or baseA < 0 then baseA = AGGR_CRUISE end
+        baseA = clamp(baseA, 0.2, 1.0)
+        local target, aggr = 0, baseA
 
         if gapA < attackGap and spd >= aheadSpd - FASTER_MARGIN then
             state = 1
-            aggr = AGGR_ATTACK
+            aggr = math.min(1, baseA + ATTACK_AGGR_ADD)
             caut = CAUTION_ATTACK * (1 - gapA / attackGap) * (t.follow or 1.0)   -- aero cars keep more distance
             if gapA < PASS_GAP then
                 local myTc = ac.worldCoordinateToTrack(me.position)
@@ -156,7 +162,7 @@ function R.evaluate(i, dt)
             local aLat = behindIdx >= 0 and latOf(ac.getCar(behindIdx).position) or 0
             if math.abs(aLat) < OFFLINE_MAX then
                 state = 2
-                aggr = AGGR_DEFEND
+                aggr = math.min(1, baseA + DEFEND_AGGR_ADD)
                 caut = CAUTION_DEFEND
                 local myTc = ac.worldCoordinateToTrack(me.position)
                 local progZ = myTc and myTc.z or mySpline
@@ -176,7 +182,7 @@ function R.evaluate(i, dt)
         -- what unsettles fast cars). Full effect up to ~180 km/h, tapering to half by ~360.
         local speedDamp = clamp(1 - math.max(0, spd - 180) / 400, 0.5, 1)
         target = clamp(target * eff * speedDamp, -1, 1)
-        aggr = AGGR_CRUISE + (aggr - AGGR_CRUISE) * lv
+        aggr = baseA + (aggr - baseA) * lv
 
         -- deadzone + side-hold: ignore tiny offsets (stay on the line), and hold the chosen side
         -- briefly so the car doesn't dart back and forth when the other car moves around.

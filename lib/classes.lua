@@ -23,7 +23,7 @@ M.MULT = {
     gt        = { mistake = 1.0, warmup = 1.0, wet = 1.0, dirty = 0.4 },
     road      = { mistake = 0.9, warmup = 1.0, wet = 1.0, dirty = 0.2 },
     touring   = { mistake = 1.1, warmup = 0.8, wet = 0.9, dirty = 0.2 },
-    vintage   = { mistake = 1.2, warmup = 0.4, wet = 0.9, dirty = 0.1 },
+    vintage   = { mistake = 1.2, warmup = 0.6, wet = 0.9, dirty = 0.1 },
     drift     = { mistake = 0.0, warmup = 0.5, wet = 1.0, dirty = 0.0 },
 }
 M.DEFAULT = "road"

@@ -10,7 +10,7 @@ local Overrides = require('lib.overrides')
 -- defaults for the global settings (also used for "reset to defaults")
 local DEFAULTS = {
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
-    classPhys = true, racecraft = true, recovery = true,
+    classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.00,
 }
 
@@ -18,10 +18,11 @@ local DEFAULTS = {
 -- be live without being saved until the user commits).
 local S = ac.storage({
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
-    classPhys = true, racecraft = true, recovery = true,
+    classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.00,
     autosave = true,
 })
+local drsCd = {}
 local G = {}
 for k in pairs(DEFAULTS) do G[k] = S[k] end
 
@@ -74,6 +75,17 @@ function script.update(dt)
             if behaviourOn then
                 physics.setAICaution(i, clamp(1.0 + cOff + rcCaut, 0.0, 16.0))
             end
+            -- Formula DRS discipline: close DRS when the game says it isn't available (outside a
+            -- zone / not within range). Toggle-based with a cooldown so it doesn't flip-flop.
+            if G.drsDiscipline and Classes.keyOf(i) == 'formula' and car.drsPresent
+               and car.drsActive and not car.drsAvailable then
+                local nowc = os.clock()
+                if (drsCd[i] or 0) < nowc then
+                    local c = ac.overrideCarControls(i)
+                    if c then c.drs = true end
+                    drsCd[i] = nowc + 1.0
+                end
+            end
             if G.controlGrip or behaviourOn then n = n + 1 end
         end)
     end
@@ -106,44 +118,52 @@ local function comboFor(tag, previewText, currentKey, opts, onPick)
     end)
 end
 
+local function renderCarRow(id, name, idx)
+    local auto = idx and Classes.autoKeyOf(idx) or nil
+    local curClass = Overrides.classOverride(id) or 'auto'
+    local classPreview = (curClass == 'auto') and (auto and ('auto (' .. auto .. ')') or 'auto') or curClass
+    ui.text(name)
+    comboFor('##cls' .. id, classPreview, curClass, CLASS_OPTS, function(opt) Overrides.setClass(id, opt) end)
+    ui.sameLine()
+    local lvl = Overrides.level(id)
+    comboFor('##lvl' .. id, lvl, lvl, LEVEL_OPTS, function(opt) Overrides.setLevel(id, opt) end)
+    ui.sameLine()
+    if ui.button('Reset##r' .. id) then Overrides.resetCar(id) end
+end
+
 local function carReviewList()
-    -- union of cars in the current session (with live auto-detect) and previously-saved cars
-    local rows, order = {}, {}
+    -- cars actually in this session (live auto-detect)
+    local inSession, session = {}, {}
     pcall(function()
         local sim = ac.getSim()
         if not sim then return end
         for i = 1, sim.carsCount - 1 do
             local id = nil
             pcall(function() id = ac.getCarID(i) end)
-            if id and not rows[id] then
+            if id and not inSession[id] then
+                inSession[id] = true
                 local nm = id
                 pcall(function() nm = ac.getCarName(i) or id end)
-                rows[id] = { name = nm, idx = i }
-                order[#order + 1] = id
+                session[#session + 1] = { id = id, idx = i, name = nm }
             end
         end
     end)
-    for _, id in ipairs(Overrides.ids()) do
-        if not rows[id] then rows[id] = { name = id, idx = nil }; order[#order + 1] = id end
+    table.sort(session, function(a, b) return a.name < b.name end)
+
+    if #session > 0 then
+        for _, r in ipairs(session) do renderCarRow(r.id, r.name, r.idx) end
+    else
+        ui.textWrapped('No cars in this session. Open Verve on the grid before the lights.')
     end
 
-    if #order == 0 then
-        ui.textWrapped('No cars yet. Open Verve on the grid before the lights, or set a car once in any session — it saves per car and carries into your races.')
-        return
-    end
-    table.sort(order)
-    for _, id in ipairs(order) do
-        local row = rows[id]
-        local auto = row.idx and Classes.autoKeyOf(row.idx) or nil
-        local curClass = Overrides.classOverride(id) or 'auto'
-        local classPreview = (curClass == 'auto') and (auto and ('auto (' .. auto .. ')') or 'auto') or curClass
-        ui.text(row.name)
-        comboFor('##cls' .. id, classPreview, curClass, CLASS_OPTS, function(opt) Overrides.setClass(id, opt) end)
-        ui.sameLine()
-        local lvl = Overrides.level(id)
-        comboFor('##lvl' .. id, lvl, lvl, LEVEL_OPTS, function(opt) Overrides.setLevel(id, opt) end)
-        ui.sameLine()
-        if ui.button('Reset##r' .. id) then Overrides.resetCar(id) end
+    -- saved overrides for cars NOT in this race (shown separately so the list isn't confusing)
+    local others = {}
+    for _, id in ipairs(Overrides.ids()) do if not inSession[id] then others[#others + 1] = id end end
+    if #others > 0 then
+        ui.newLine()
+        ui.textColored('Saved overrides for other cars (not in this race):', rgbm(0.55, 0.55, 0.55, 1))
+        table.sort(others)
+        for _, id in ipairs(others) do renderCarRow(id, id, nil) end
     end
 end
 
@@ -191,6 +211,7 @@ function script.windowMain()
     toggle('Class-aware physics', 'classPhys', 'Cold-tyre warm-up, wet caution, dirty-air grip loss following in corners. Scaled by car class.')
     toggle('Human errors', 'humanErrors', 'Occasional gentle bobbles on forgiving cars. Never on Formula/Prototype/Hypercar. Grip-slewed so it will not spin cars.')
     toggle('Racecraft (overtaking & defending)', 'racecraft', 'AI close up and pressure, pull off-line to pass on straights, and make one clean defensive move. Collision-awareness stays on.')
+    toggle('Formula DRS discipline', 'drsDiscipline', 'On Formula cars, close DRS when the game says it is not available (outside a DRS zone or not within range). In-zone DRS is left to the game.')
     toggle('Self-recovery', 'recovery', 'Un-sticks spun/beached AI that are not wrecked. Never touches the race start or pit exit.')
     toggle('Control AI grip', 'controlGrip', 'Verve sets each AI car grip = base + variability. Turn OFF to defer grip to another AI mod (recovery still works).')
 
