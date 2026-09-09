@@ -1,5 +1,13 @@
 Verve - changelog
 
+0.7.0
+- Simpler control: removed the per-car Chill/Clean/Intense levels. The Difficulty (pace) and
+  Aggression sliders cover how fast / how hard the field races, and the Variability slider now
+  also spreads per-driver aggression, so the grid isn't uniform -- no manual per-car setup.
+- Pounce: cars stay eager to fill a gap for a moment after following someone, taking advantage
+  when space opens instead of hanging back. Scales with racecraft intensity.
+- The per-car list is now just class detection/override (the physics knob).
+
 0.6.9
 - Fewer Formula/aero retirements: high-downforce cars keep more racing distance (they can't
   follow closely in dirty air anyway), reducing contact in big fragile fields.

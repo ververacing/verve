@@ -13,17 +13,22 @@
 -- Offset is slew-limited (anti-dart) and collision-awareness stays ON, so cars position not ram.
 --
 -- Per-CLASS tactics tune HOW each class races (an F1 slipstreams from far and passes precisely;
--- a touring car dive-bombs the inside). Per-car LEVEL (chill/clean/intense) and the global
--- racecraft INTENSITY scale the whole thing on top.
+-- a touring car dive-bombs the inside). The global racecraft INTENSITY slider scales it all; the
+-- Variability slider spreads per-driver aggression so the field isn't uniform. A short "pounce"
+-- keeps a car eager to fill a gap right after it opens.
 
 local Classes   = require('lib.classes')
-local Overrides = require('lib.overrides')
 
 local R = {}
-R.ENABLED   = true
-R.INTENSITY = 0.7
+R.ENABLED     = true
+R.INTENSITY   = 0.7        -- racecraft "how hard they race" slider
+R.VARIABILITY = 0.5        -- variability slider: spreads per-driver aggression across the field
 R.attacking = 0
 R.defending = 0
+
+local AGGR_SPREAD = 0.15   -- per-driver aggression spread (scaled by the Variability slider)
+local POUNCE_HOLD = 1.2    -- s a car stays eager to fill a gap after following someone
+local POUNCE_CAUT = -0.5   -- extra closing while pouncing (fill the opened space, don't hang back)
 
 local ATTACK_GAP   = 0.008
 local PASS_GAP     = 0.0035
@@ -63,21 +68,20 @@ local TACTICS = {
     vintage   = { gap = 1.1,  offset = 0.9, corner = 0.8, defend = 0.9, follow = 0.8 },  -- momentum, wider lines
     drift     = { gap = 1.0,  offset = 1.0, corner = 1.0, defend = 1.0, follow = 1.0 },
 }
-local LEVELMULT = { chill = 0.4, clean = 1.0, intense = 1.5 }
-
-local curOffset, idCache = {}, {}
+local curOffset = {}
 local holdSign, holdUntil = {}, {}
+local pounceT = {}
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
 local function sgn(x) if x > 0.1 then return 1 elseif x < -0.1 then return -1 else return 0 end end
+local function hash01(n)
+    local x = (n * 2654435761) % 2147483647
+    x = (x * 1103515245 + 12345) % 2147483647
+    return x / 2147483647
+end
 local function latOf(pos)
     local x = 0
     pcall(function() local tc = ac.worldCoordinateToTrack(pos); if tc then x = tc.x end end)
     return x
-end
-local function carId(i)
-    local id = idCache[i]
-    if id == nil then id = false; pcall(function() id = ac.getCarID(i) end); idCache[i] = id end
-    return id or nil
 end
 
 -- corner ahead: returns (isCorner, insideSign) using three racing-line samples + a lateral probe
@@ -138,6 +142,8 @@ function R.evaluate(i, dt)
         local baseA = me.aiAggression
         if not baseA or baseA < 0 then baseA = AGGR_CRUISE end
         baseA = clamp(baseA, 0.2, 1.0)
+        -- per-driver spread: some drivers naturally race a bit harder, scaled by the Variability slider
+        baseA = clamp(baseA + (hash01(i * 11 + 5) * 2 - 1) * AGGR_SPREAD * R.VARIABILITY, 0.15, 1.0)
         local myLat = latOf(me.position)          -- current lateral on track (-1 left .. +1 right)
         local target, aggr = 0, baseA
 
@@ -180,9 +186,16 @@ function R.evaluate(i, dt)
             end
         end
 
-        -- per-car level x global intensity
-        local lv = LEVELMULT[Overrides.level(carId(i))] or 1.0
-        local eff = R.INTENSITY * lv
+        local eff = R.INTENSITY
+
+        -- pounce: after following a car, stay eager to fill the space for a moment (fixes the
+        -- "slow to pounce when the gap opens" lag). Refreshes while attacking, decays after.
+        pounceT[i] = math.max((pounceT[i] or 0) - dt, 0)
+        if state == 1 then pounceT[i] = POUNCE_HOLD
+        elseif state == 0 and pounceT[i] > 0 then
+            caut = caut + POUNCE_CAUT * (pounceT[i] / POUNCE_HOLD)
+        end
+
         -- pack damping: in a crowd (race start, traffic) damp the LINE-CHANGING only, so the field
         -- doesn't all dart around at once. NOT applied to caution/closing -- cars must stay willing
         -- to tuck up and pass in traffic, or the pack over-gaps and concertinas to a crawl.
@@ -198,7 +211,6 @@ function R.evaluate(i, dt)
         if (target > 0 and myLat > EDGE_SOFT) or (target < 0 and myLat < -EDGE_SOFT) then
             target = target * clamp((EDGE_HARD - math.abs(myLat)) / (EDGE_HARD - EDGE_SOFT), 0, 1)
         end
-        aggr = baseA + (aggr - baseA) * lv
 
         -- deadzone + side-hold: ignore tiny offsets (stay on the line), and hold the chosen side
         -- briefly so the car doesn't dart back and forth when the other car moves around.
@@ -230,6 +242,6 @@ function R.evaluate(i, dt)
 end
 
 function R.beginFrame() R.attacking = 0; R.defending = 0 end
-function R.reset() curOffset = {}; idCache = {}; holdSign = {}; holdUntil = {} end
+function R.reset() curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {} end
 
 return R

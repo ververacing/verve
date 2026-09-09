@@ -57,9 +57,10 @@ function script.update(dt)
     Human.INTENSITY     = G.intensity
     Human.HUMAN_ERRORS  = G.humanErrors
     Human.CLASS_PHYSICS = G.classPhys
-    Racecraft.ENABLED   = G.racecraft
-    Racecraft.INTENSITY = G.rcIntensity
-    Overrides.autosave  = S.autosave
+    Racecraft.ENABLED     = G.racecraft
+    Racecraft.INTENSITY   = G.rcIntensity
+    Racecraft.VARIABILITY = G.intensity     -- spreads per-driver aggression across the field
+    Overrides.autosave    = S.autosave
     Racecraft.beginFrame()
 
     local behaviourOn = G.humanVar or G.classPhys or G.racecraft
@@ -103,7 +104,6 @@ end)
 
 -- ------------------------------- UI -------------------------------
 local CLASS_OPTS = { 'auto', 'formula', 'prototype', 'hypercar', 'gt', 'road', 'touring', 'vintage', 'drift' }
-local LEVEL_OPTS = { 'chill', 'clean', 'intense' }
 
 local function toggle(label, key, help)
     if ui.checkbox(label, G[key]) then setG(key, not G[key]) end
@@ -125,9 +125,6 @@ local function renderCarRow(id, name, idx)
     local classPreview = (curClass == 'auto') and (auto and ('auto (' .. auto .. ')') or 'auto') or curClass
     ui.text(name)
     comboFor('##cls' .. id, classPreview, curClass, CLASS_OPTS, function(opt) Overrides.setClass(id, opt) end)
-    ui.sameLine()
-    local lvl = Overrides.level(id)
-    comboFor('##lvl' .. id, lvl, lvl, LEVEL_OPTS, function(opt) Overrides.setLevel(id, opt) end)
     ui.sameLine()
     if ui.button('Reset##r' .. id) then Overrides.resetCar(id) end
 end
@@ -229,10 +226,10 @@ function script.windowMain()
     ui.text('Tuning')
     local iv = ui.slider('Variability intensity##iv', G.intensity, 0.0, 1.5, '%.2f')
     if iv ~= G.intensity then setG('intensity', iv) end
-    if ui.itemHovered() then ui.setTooltip('0 = robotic, 0.5 = subtle (default), 1.5 = dramatic') end
+    if ui.itemHovered() then ui.setTooltip('Per-driver spread: pace/consistency differences AND how much drivers vary in aggression, so the field isn\'t uniform. 0 = robotic/identical, 0.5 = subtle (default), 1.5 = dramatic.') end
     local rc = ui.slider('Racecraft intensity##rc', G.rcIntensity, 0.0, 1.5, '%.2f')
     if rc ~= G.rcIntensity then setG('rcIntensity', rc) end
-    if ui.itemHovered() then ui.setTooltip('How hard they attack/defend. 0 = passive, 0.7 = default, 1.5 = elbows out. Per-car level multiplies this.') end
+    if ui.itemHovered() then ui.setTooltip('How hard the field attacks/defends. 0 = passive, 0.7 = default, 1.5 = elbows out.') end
     local bg = ui.slider('Base AI grip##bg', G.baseGrip, 0.85, 1.50, '%.2f')
     if bg ~= G.baseGrip then setG('baseGrip', bg) end
     if ui.itemHovered() then ui.setTooltip('Grip the AI has for its own racing line. 1.20 = stock AC AI (default; line speeds are calibrated for this). Below that = more human/on-the-edge but they wash wide if too low. Above 1.20 = extra stick + speed (keeps them planted / competitive at lower difficulty). Pace also scales with the race difficulty %.') end
@@ -240,7 +237,7 @@ function script.windowMain()
     ui.newLine()
     ui.separator()
     ui.textColored('Per-car class & racecraft level', rgbm(0.6, 0.6, 0.6, 1))
-    ui.textWrapped('Auto-detected from tags/name. Override any car; per-car level scales its racecraft (chill/clean/intense). Available on the grid before the lights.')
+    ui.textWrapped('Class is auto-detected from tags/name and drives the physics (warm-up, wet, mistakes). Override any car if it guesses wrong. Available on the grid before the lights.')
     carReviewList()
     ui.newLine()
     if ui.button('Reset settings to defaults') then resetGlobals() end
