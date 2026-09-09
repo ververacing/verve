@@ -31,6 +31,6 @@ Everything toggles and tunes in the in-game app panel.
   human); 1.20 = stock AC AI feel.
 
 ## Status
-v0.4 — everything from v0.3 plus an auto-save / session-only model (edit live for one race, persist on Save), per-car and global Reset, and a review list that shows every car's detected class + override + level (editable on the grid before lights).
+v0.5 — corner-aware, defender-aware passing (dive the inside when it's open, pass where the defender isn't) and per-class racecraft tactics (an F1 slipstreams from far and passes precisely; a touring car dive-bombs the inside). Plus the v0.4 save/session model, resets, and pre-race review list.
 
 Original work. Not affiliated with, and contains no code from, other AI mods.

@@ -1,125 +1,182 @@
--- Verve / racecraft.lua  (v0.2)
--- Our own racecraft, built from CSP AI primitives. Per AI car, each frame we read the gap to
--- the nearest car ahead/behind and decide a state:
---   ATTACK  -- a car within striking range and we're keeping up -> tuck in (less caution), raise
---             aggression, and on a straight pull off-line to set up a pass (slipstream + move
---             alongside). Collision-awareness stays ON, so it positions, it doesn't ram.
---   DEFEND  -- a faster car right behind -> make ONE decisive move to cover a side and hold it
---             (no weaving), slightly higher aggression.
---   CRUISE  -- clear track -> return to the racing line, neutral aggression.
--- The line offset is slew-limited so cars glide across, never dart. Everything pcall-guarded.
+-- Verve / racecraft.lua  (v0.5)
+-- Our own racecraft from CSP AI primitives. Per AI car we read the gap to the nearest car
+-- ahead/behind (+ their lateral position on track) and the shape of the track just ahead, then:
+--   ATTACK  -- car in range & keeping up: tuck in (less caution), raise aggression, and pick a
+--             passing line -- dive up the INSIDE of the corner ahead if it's open, else pass on
+--             the side the defender isn't (slipstream out on straights).
+--   DEFEND  -- faster car behind: ONE move to cover the vulnerable side (inside of the corner
+--             ahead, or the side the attacker is on) and hold.
+--   CRUISE  -- clear track: back to the racing line.
 --
--- evaluate(i, dt) applies spline-offset + aggression itself and RETURNS a caution delta for the
--- app to fold into the single setAICaution call (so it doesn't fight the human layer's caution).
+-- Track frame (ac.worldCoordinateToTrack): X = -1 left .. +1 right, Z = progress. Same sign as
+-- setAISplineOffset, so lateral reads and offsets share one frame -- no handedness guessing.
+-- Offset is slew-limited (anti-dart) and collision-awareness stays ON, so cars position not ram.
+--
+-- Per-CLASS tactics tune HOW each class races (an F1 slipstreams from far and passes precisely;
+-- a touring car dive-bombs the inside). Per-car LEVEL (chill/clean/intense) and the global
+-- racecraft INTENSITY scale the whole thing on top.
 
+local Classes   = require('lib.classes')
 local Overrides = require('lib.overrides')
 
 local R = {}
 R.ENABLED   = true
-R.INTENSITY = 0.7        -- 0..1.5 scales the whole effect
+R.INTENSITY = 0.7
 R.attacking = 0
 R.defending = 0
 
--- per-car racecraft level (from the UI): how hard this driver races, on top of INTENSITY
-local LEVELMULT = { chill = 0.4, clean = 1.0, intense = 1.5 }
-local idCache = {}
-local function levelMult(i)
-    local id = idCache[i]
-    if id == nil then id = false; pcall(function() id = ac.getCarID(i) end); idCache[i] = id end
-    return LEVELMULT[Overrides.level(id or nil)] or 1.0
-end
-
-local ATTACK_GAP   = 0.008    -- spline-fraction gap to "start pressuring" the car ahead
-local PASS_GAP     = 0.0035   -- close enough (on a straight) to pull out for the pass
-local DEFEND_GAP   = 0.005    -- car behind this close (and faster) -> defend
-local FASTER_MARGIN= 3.0      -- km/h: only attack if we're not slower than this vs the car ahead
-local ATTACK_OFFSET= 0.5      -- how far off-line to pull when passing (fraction of half-width)
-local DEFEND_OFFSET= 0.4
-local CAUTION_ATTACK = -0.6   -- lower caution = close right up
+local ATTACK_GAP   = 0.008
+local PASS_GAP     = 0.0035
+local DEFEND_GAP   = 0.005
+local FASTER_MARGIN= 3.0
+local ATTACK_OFFSET= 0.5
+local DEFEND_OFFSET= 0.45
+local CAUTION_ATTACK = -0.6
 local CAUTION_DEFEND = -0.25
 local AGGR_ATTACK  = 0.95
 local AGGR_DEFEND  = 0.80
 local AGGR_CRUISE  = 0.55
-local OFFSET_SLEW  = 1.2      -- units/sec the line offset may move (anti-dart)
-local SPEED_MIN    = 30.0     -- below this = launch/slow, no racecraft
+local OFFSET_SLEW  = 1.2
+local SPEED_MIN    = 30.0
+local SAMPLE_D     = 0.004     -- spline fraction between racing-line samples (~20m on a 5km track)
+local CORNER_TURN  = 0.01      -- min (1 - dot) between tangents to count as "a corner ahead" (~8 deg)
 
-local curOffset = {}
+-- per-class racecraft tactics: gap = striking range, offset = how far off-line, corner = how hard
+-- it commits to an inside dive (vs a straight slipstream pass), defend = defensive firmness.
+local TACTICS = {
+    formula   = { gap = 1.3,  offset = 0.8, corner = 0.5, defend = 1.0 },  -- slipstream from far, precise, prefers straight passes
+    prototype = { gap = 1.3,  offset = 0.9, corner = 0.6, defend = 1.0 },
+    hypercar  = { gap = 1.2,  offset = 0.9, corner = 0.7, defend = 1.0 },
+    gt        = { gap = 1.0,  offset = 1.0, corner = 1.1, defend = 1.1 },  -- out-brakes, close racing
+    touring   = { gap = 0.85, offset = 1.2, corner = 1.4, defend = 1.2 },  -- dive-bomb, elbows out
+    road      = { gap = 1.0,  offset = 1.0, corner = 1.0, defend = 1.0 },
+    vintage   = { gap = 1.1,  offset = 0.9, corner = 0.8, defend = 0.9 },  -- momentum, wider lines
+    drift     = { gap = 1.0,  offset = 1.0, corner = 1.0, defend = 1.0 },
+}
+local LEVELMULT = { chill = 0.4, clean = 1.0, intense = 1.5 }
+
+local curOffset, idCache = {}, {}
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
-local function hash01(n)
-    local x = (n * 2654435761) % 2147483647
-    x = (x * 1103515245 + 12345) % 2147483647
-    return x / 2147483647
+local function sgn(x) if x > 0.1 then return 1 elseif x < -0.1 then return -1 else return 0 end end
+local function latOf(pos)
+    local x = 0
+    pcall(function() local tc = ac.worldCoordinateToTrack(pos); if tc then x = tc.x end end)
+    return x
 end
-local function side(i) return (hash01(i * 5 + 2) < 0.5) and 1 or -1 end   -- stable per-car pass side
+local function carId(i)
+    local id = idCache[i]
+    if id == nil then id = false; pcall(function() id = ac.getCarID(i) end); idCache[i] = id end
+    return id or nil
+end
+
+-- corner ahead: returns (isCorner, insideSign) using three racing-line samples + a lateral probe
+local function cornerAhead(prog)
+    local isCorner, insideSign = false, 0
+    pcall(function()
+        local p0 = ac.trackProgressToWorldCoordinate(prog % 1, false)
+        local p1 = ac.trackProgressToWorldCoordinate((prog + SAMPLE_D) % 1, false)
+        local p2 = ac.trackProgressToWorldCoordinate((prog + 2 * SAMPLE_D) % 1, false)
+        if not (p0 and p1 and p2) then return end
+        local v1 = (p1 - p0):normalize()
+        local v2 = (p2 - p1):normalize()
+        if (1 - v1:dot(v2)) < CORNER_TURN then return end             -- basically straight
+        isCorner = true
+        local centripetal = (v2 - v1)                                 -- points toward the inside (v1,v2 unchanged by dot)
+        if centripetal:length() < 1e-4 then return end
+        local latHere  = latOf(p1)
+        local latInside = latOf(p1 + centripetal:normalize() * 3.0)   -- 3 m toward the inside
+        insideSign = (latInside >= latHere) and 1 or -1               -- track frame: +1 = right
+    end)
+    return isCorner, insideSign
+end
 
 function R.evaluate(i, dt)
     if not R.ENABLED then return 0 end
-    local caut = 0
-    local state = 0    -- 0 cruise, 1 attack, 2 defend
+    local caut, state = 0, 0
     pcall(function()
         local me = ac.getCar(i)
         if not me or not me.isAIControlled then return end
         local spd = me.speedKmh or 0
-        if spd < SPEED_MIN then return end
-        if me.isInPitlane then return end
+        if spd < SPEED_MIN or me.isInPitlane then return end
         local mySpline = me.splinePosition
         if mySpline == nil then return end
 
-        -- nearest ahead / behind (by spline gap), with their speeds
-        local gapA, aheadSpd, gapB, behindSpd = 1e9, 0, 1e9, 0
+        local t = TACTICS[Classes.keyOf(i)] or TACTICS.road
+
+        -- nearest ahead / behind (gap, speed, index)
+        local gapA, aheadSpd, aheadIdx = 1e9, 0, -1
+        local gapB, behindSpd, behindIdx = 1e9, 0, -1
         local sim = ac.getSim()
         for j = 0, sim.carsCount - 1 do
             if j ~= i then
                 local oc = ac.getCar(j)
                 if oc and oc.splinePosition then
-                    local d = oc.splinePosition - mySpline
-                    if d < 0 then d = d + 1 end
-                    if d > 0 and d < gapA then gapA = d; aheadSpd = oc.speedKmh or 0 end
-                    local b = mySpline - oc.splinePosition
-                    if b < 0 then b = b + 1 end
-                    if b > 0 and b < gapB then gapB = b; behindSpd = oc.speedKmh or 0 end
+                    local d = oc.splinePosition - mySpline; if d < 0 then d = d + 1 end
+                    if d > 0 and d < gapA then gapA = d; aheadSpd = oc.speedKmh or 0; aheadIdx = j end
+                    local b = mySpline - oc.splinePosition; if b < 0 then b = b + 1 end
+                    if b > 0 and b < gapB then gapB = b; behindSpd = oc.speedKmh or 0; behindIdx = j end
                 end
             end
         end
 
-        -- straightness (only reposition off-line on straights/fast bits)
-        local straight = 1
-        local st = me.steer
-        if type(st) == "number" then straight = clamp(1 - math.abs(st) / 0.35, 0, 1) end
+        local attackGap = ATTACK_GAP * t.gap
+        local defendGap = DEFEND_GAP
+        local target, aggr = 0, AGGR_CRUISE
 
-        local targetOffset = 0
-        local aggr = AGGR_CRUISE
-
-        if gapA < ATTACK_GAP and spd >= aheadSpd - FASTER_MARGIN then
+        if gapA < attackGap and spd >= aheadSpd - FASTER_MARGIN then
             state = 1
             aggr = AGGR_ATTACK
-            caut = CAUTION_ATTACK * (1 - gapA / ATTACK_GAP)          -- closer = tuck in more
-            if gapA < PASS_GAP and straight > 0.5 then
-                targetOffset = ATTACK_OFFSET * side(i) * straight
+            caut = CAUTION_ATTACK * (1 - gapA / attackGap)
+            if gapA < PASS_GAP then
+                local myTc = ac.worldCoordinateToTrack(me.position)
+                local progZ = myTc and myTc.z or mySpline
+                local isCorner, inside = cornerAhead(progZ)
+                local dLat = aheadIdx >= 0 and latOf(ac.getCar(aheadIdx).position) or 0
+                local off = ATTACK_OFFSET * t.offset
+                if isCorner and inside ~= 0 then
+                    if dLat * inside < 0.3 then          -- defender not covering the inside -> dive in
+                        target = inside * off * (0.5 + 0.5 * t.corner)
+                    else                                 -- inside covered -> set up the switchback outside
+                        target = -inside * off * 0.6
+                    end
+                elseif math.abs(dLat) > 0.15 then        -- straight: pass where the defender isn't
+                    target = -sgn(dLat) * off
+                elseif inside ~= 0 then                  -- straight: pre-position for the next corner's inside
+                    target = inside * off * 0.5
+                end
             end
-        elseif gapB < DEFEND_GAP and behindSpd > spd - FASTER_MARGIN then
+        elseif gapB < defendGap and behindSpd > spd - FASTER_MARGIN then
             state = 2
             aggr = AGGR_DEFEND
             caut = CAUTION_DEFEND
-            if straight > 0.5 then targetOffset = DEFEND_OFFSET * side(i) * straight end
+            local myTc = ac.worldCoordinateToTrack(me.position)
+            local progZ = myTc and myTc.z or mySpline
+            local isCorner, inside = cornerAhead(progZ)
+            local aLat = behindIdx >= 0 and latOf(ac.getCar(behindIdx).position) or 0
+            local off = DEFEND_OFFSET * t.defend
+            if isCorner and inside ~= 0 then
+                target = inside * off                    -- protect the inside line
+            elseif math.abs(aLat) > 0.1 then
+                target = sgn(aLat) * off                 -- cover the side the attacker is on
+            end
         end
 
-        -- per-car level scales the whole effect (chill = passive, intense = elbows out)
-        local lv = levelMult(i)
+        -- per-car level x global intensity
+        local lv = LEVELMULT[Overrides.level(carId(i))] or 1.0
         local eff = R.INTENSITY * lv
         caut = caut * eff
-        targetOffset = targetOffset * eff
+        target = clamp(target * eff, -1, 1)
         aggr = AGGR_CRUISE + (aggr - AGGR_CRUISE) * lv
 
-        -- slew the line offset so the move is smooth, not a dart
+        -- slew the offset (anti-dart)
         local cur = curOffset[i] or 0
         local step = OFFSET_SLEW * (dt > 0 and dt < 0.5 and dt or 0.016)
-        if targetOffset > cur + step then cur = cur + step
-        elseif targetOffset < cur - step then cur = cur - step
-        else cur = targetOffset end
+        if target > cur + step then cur = cur + step
+        elseif target < cur - step then cur = cur - step
+        else cur = target end
         curOffset[i] = cur
 
-        physics.setAISplineOffset(i, clamp(cur, -1, 1), false)       -- awareness ON = won't ram
+        physics.setAISplineOffset(i, clamp(cur, -1, 1), false)
         physics.setAIAggression(i, clamp(aggr, 0, 1))
     end)
     if state == 1 then R.attacking = R.attacking + 1
