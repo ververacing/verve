@@ -33,10 +33,13 @@ local ATTACK_OFFSET= 0.5
 local DEFEND_OFFSET= 0.45
 local CAUTION_ATTACK = -0.6
 local CAUTION_DEFEND = -0.25
-local AGGR_ATTACK  = 0.95
-local AGGR_DEFEND  = 0.80
+local AGGR_ATTACK  = 0.82
+local AGGR_DEFEND  = 0.75
 local AGGR_CRUISE  = 0.55
-local OFFSET_SLEW  = 1.2
+local OFFSET_SLEW  = 0.8       -- units/sec offset may move (lower = smoother, less skittish)
+local DEADZONE     = 0.08      -- ignore tiny offsets (stay on the line)
+local SIDE_HOLD    = 0.8       -- s to hold a chosen side before allowing a flip (anti-dart)
+local OFFLINE_MAX  = 0.75      -- don't defend against a car this far off the racing line
 local SPEED_MIN    = 30.0
 local SAMPLE_D     = 0.004     -- spline fraction between racing-line samples (~20m on a 5km track)
 local CORNER_TURN  = 0.01      -- min (1 - dot) between tangents to count as "a corner ahead" (~8 deg)
@@ -56,6 +59,7 @@ local TACTICS = {
 local LEVELMULT = { chill = 0.4, clean = 1.0, intense = 1.5 }
 
 local curOffset, idCache = {}, {}
+local holdSign, holdUntil = {}, {}
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
 local function sgn(x) if x > 0.1 then return 1 elseif x < -0.1 then return -1 else return 0 end end
 local function latOf(pos)
@@ -146,18 +150,19 @@ function R.evaluate(i, dt)
                 end
             end
         elseif gapB < defendGap and behindSpd > spd - FASTER_MARGIN then
-            state = 2
-            aggr = AGGR_DEFEND
-            caut = CAUTION_DEFEND
-            local myTc = ac.worldCoordinateToTrack(me.position)
-            local progZ = myTc and myTc.z or mySpline
-            local isCorner, inside = cornerAhead(progZ)
+            -- only defend against a real threat that's on a plausible line (not a car miles off-line)
             local aLat = behindIdx >= 0 and latOf(ac.getCar(behindIdx).position) or 0
-            local off = DEFEND_OFFSET * t.defend
-            if isCorner and inside ~= 0 then
-                target = inside * off                    -- protect the inside line
-            elseif math.abs(aLat) > 0.1 then
-                target = sgn(aLat) * off                 -- cover the side the attacker is on
+            if math.abs(aLat) < OFFLINE_MAX then
+                state = 2
+                aggr = AGGR_DEFEND
+                caut = CAUTION_DEFEND
+                local myTc = ac.worldCoordinateToTrack(me.position)
+                local progZ = myTc and myTc.z or mySpline
+                local isCorner, inside = cornerAhead(progZ)
+                if isCorner and inside ~= 0 then
+                    target = inside * (DEFEND_OFFSET * t.defend)   -- hold the inside line (stable, corner-based)
+                end
+                -- on straights, keep the racing line -- don't weave to mirror the attacker
             end
         end
 
@@ -167,6 +172,19 @@ function R.evaluate(i, dt)
         caut = caut * eff
         target = clamp(target * eff, -1, 1)
         aggr = AGGR_CRUISE + (aggr - AGGR_CRUISE) * lv
+
+        -- deadzone + side-hold: ignore tiny offsets (stay on the line), and hold the chosen side
+        -- briefly so the car doesn't dart back and forth when the other car moves around.
+        if math.abs(target) < DEADZONE then
+            target = 0
+        else
+            local nowc = os.clock()
+            local want = target > 0 and 1 or -1
+            if holdSign[i] == nil or (want ~= holdSign[i] and nowc > (holdUntil[i] or 0)) then
+                holdSign[i] = want; holdUntil[i] = nowc + SIDE_HOLD
+            end
+            target = math.abs(target) * (holdSign[i] or want)
+        end
 
         -- slew the offset (anti-dart)
         local cur = curOffset[i] or 0
@@ -185,6 +203,6 @@ function R.evaluate(i, dt)
 end
 
 function R.beginFrame() R.attacking = 0; R.defending = 0 end
-function R.reset() curOffset = {}; idCache = {} end
+function R.reset() curOffset = {}; idCache = {}; holdSign = {}; holdUntil = {} end
 
 return R
