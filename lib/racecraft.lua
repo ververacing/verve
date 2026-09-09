@@ -43,6 +43,7 @@ local DEADZONE     = 0.12       -- ignore tiny offsets (stay on the line)
 local SIDE_HOLD    = 1.2        -- s to hold a chosen side before allowing a flip (anti-dart)
 local OFFLINE_MAX  = 0.75      -- don't defend against a car this far off the racing line
 local SPEED_MIN    = 30.0
+local CROWD_GAP    = 0.006     -- cars within this spline gap count as "in the pack"
 local SAMPLE_D     = 0.004     -- spline fraction between racing-line samples (~20m on a 5km track)
 local CORNER_TURN  = 0.01      -- min (1 - dot) between tangents to count as "a corner ahead" (~8 deg)
 
@@ -114,6 +115,7 @@ function R.evaluate(i, dt)
         -- nearest ahead / behind (gap, speed, index)
         local gapA, aheadSpd, aheadIdx = 1e9, 0, -1
         local gapB, behindSpd, behindIdx = 1e9, 0, -1
+        local crowd = 0
         local sim = ac.getSim()
         for j = 0, sim.carsCount - 1 do
             if j ~= i then
@@ -123,6 +125,7 @@ function R.evaluate(i, dt)
                     if d > 0 and d < gapA then gapA = d; aheadSpd = oc.speedKmh or 0; aheadIdx = j end
                     local b = mySpline - oc.splinePosition; if b < 0 then b = b + 1 end
                     if b > 0 and b < gapB then gapB = b; behindSpd = oc.speedKmh or 0; behindIdx = j end
+                    if d < CROWD_GAP or b < CROWD_GAP then crowd = crowd + 1 end
                 end
             end
         end
@@ -177,11 +180,14 @@ function R.evaluate(i, dt)
         -- per-car level x global intensity
         local lv = LEVELMULT[Overrides.level(carId(i))] or 1.0
         local eff = R.INTENSITY * lv
-        caut = caut * eff
+        -- pack damping: in a crowd (race start, traffic) hold formation instead of all trying to
+        -- pass/defend at once -> much calmer starts and packs, resumes as the field spreads.
+        local crowdDamp = clamp(1 - math.max(0, crowd - 1) * 0.30, 0.25, 1)
+        caut = caut * eff * crowdDamp
         -- high-speed damping: smaller line changes at speed (a big lateral move at 300 km/h is
         -- what unsettles fast cars). Full effect up to ~180 km/h, tapering to half by ~360.
         local speedDamp = clamp(1 - math.max(0, spd - 180) / 400, 0.5, 1)
-        target = clamp(target * eff * speedDamp, -1, 1)
+        target = clamp(target * eff * speedDamp * crowdDamp, -1, 1)
         aggr = baseA + (aggr - baseA) * lv
 
         -- deadzone + side-hold: ignore tiny offsets (stay on the line), and hold the chosen side

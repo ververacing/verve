@@ -11,7 +11,7 @@ local Overrides = require('lib.overrides')
 local DEFAULTS = {
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
-    intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.00,
+    intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.06,
 }
 
 -- S = persisted store; G = working copy the game actually reads (so "session-only" edits can
@@ -19,7 +19,7 @@ local DEFAULTS = {
 local S = ac.storage({
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
-    intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.00,
+    intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.06,
     autosave = true,
 })
 local drsCd = {}
@@ -225,7 +225,7 @@ function script.windowMain()
     if ui.itemHovered() then ui.setTooltip('How hard they attack/defend. 0 = passive, 0.7 = default, 1.5 = elbows out. Per-car level multiplies this.') end
     local bg = ui.slider('Base AI grip##bg', G.baseGrip, 0.85, 1.20, '%.2f')
     if bg ~= G.baseGrip then setG('baseGrip', bg) end
-    if ui.itemHovered() then ui.setTooltip('1.00 = no grip cheat (more human). 1.20 = stock AC AI. Pace still scales with the race difficulty %.') end
+    if ui.itemHovered() then ui.setTooltip('Grip the AI has for its own racing line. ~1.06 default. Too low (1.00) and cars run wide at hard corners; 1.20 = stock AC AI. Raise if they wash out, lower for a more human, on-the-edge feel. Pace still scales with the race difficulty %.') end
 
     ui.newLine()
     ui.separator()
