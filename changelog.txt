@@ -1,5 +1,10 @@
 Verve - changelog
 
+0.6.8
+- Packs no longer crawl/concertina to a halt before corners: the pack-density damping now only
+  calms the line-changing (so starts stay tidy) and no longer makes cars hang back in traffic,
+  so they stay opportunistic and keep the field flowing.
+
 0.6.7
 - Track-edge safety: Verve no longer pushes a car further toward an edge it's already near,
   so it won't shove a car onto a kerb at a corner exit (fixes a near-rollover).

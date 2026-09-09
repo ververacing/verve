@@ -183,10 +183,11 @@ function R.evaluate(i, dt)
         -- per-car level x global intensity
         local lv = LEVELMULT[Overrides.level(carId(i))] or 1.0
         local eff = R.INTENSITY * lv
-        -- pack damping: in a crowd (race start, traffic) hold formation instead of all trying to
-        -- pass/defend at once -> much calmer starts and packs, resumes as the field spreads.
-        local crowdDamp = clamp(1 - math.max(0, crowd - 1) * 0.40, 0.15, 1)
-        caut = caut * eff * crowdDamp
+        -- pack damping: in a crowd (race start, traffic) damp the LINE-CHANGING only, so the field
+        -- doesn't all dart around at once. NOT applied to caution/closing -- cars must stay willing
+        -- to tuck up and pass in traffic, or the pack over-gaps and concertinas to a crawl.
+        local crowdDamp = clamp(1 - math.max(0, crowd - 1) * 0.30, 0.25, 1)
+        caut = caut * eff
         -- high-speed damping: smaller line changes at speed (a big lateral move at 300 km/h is
         -- what unsettles fast cars). Full effect up to ~180 km/h, tapering to half by ~360.
         local speedDamp = clamp(1 - math.max(0, spd - 180) / 400, 0.5, 1)
