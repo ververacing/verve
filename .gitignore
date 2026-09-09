@@ -3,3 +3,5 @@
 *.tmp
 Thumbs.db
 .DS_Store
+dist/
+release notes*
