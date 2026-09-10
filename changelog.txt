@@ -1,5 +1,11 @@
 Verve - changelog
 
+0.7.1
+- Big cut to attrition in long races (esp. Formula): dirty air now makes a following car BACK
+  OFF (keep distance) instead of losing grip and sliding off through corners -- that grip loss
+  was crashing fragile cars over a long stint. And high-downforce cars no longer "pounce" into
+  gaps (they keep aero distance), reducing contact.
+
 0.7.0
 - Simpler control: removed the per-car Chill/Clean/Intense levels. The Difficulty (pace) and
   Aggression sliders cover how fast / how hard the field races, and the Variability slider now

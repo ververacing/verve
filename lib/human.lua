@@ -43,8 +43,8 @@ local TOW_GRIP        = 0.015
 local TOW_CAUT        = 0.05
 local DIRTY_GAP       = 0.0030
 local DIRTY_MIN_KMH   = 80
-local DIRTY_MAX_GRIP  = 0.035
-local DIRTY_MAX_CAUT  = 0.12
+local DIRTY_MAX_GRIP  = 0.015       -- dirty air is mostly a BACK-OFF (caution), only a little grip loss --
+local DIRTY_MAX_CAUT  = 0.20        -- a following car keeps distance instead of sliding off (fragile-car crashes)
 local GRIP_MIN, GRIP_MAX = -0.16, 0.03
 local GRIP_SLEW       = 0.04     -- max grip change per second (anti-snap)
 

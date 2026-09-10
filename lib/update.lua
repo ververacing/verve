@@ -4,7 +4,7 @@
 -- self-update can brick an app mid-session, and users distrust mods that write on their own).
 
 local U = {}
-U.LOCAL_VERSION = "0.7.0"
+U.LOCAL_VERSION = "0.7.1"
 -- Raw version.json in the GitHub repo (updated on every release by release.sh).
 U.VERSION_URL   = "https://raw.githubusercontent.com/tyleebs-hub/verve/main/version.json"
 
