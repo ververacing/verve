@@ -29,6 +29,13 @@ R.defending = 0
 local AGGR_SPREAD = 0.15   -- per-driver aggression spread (scaled by the Variability slider)
 local POUNCE_HOLD = 1.2    -- s a car stays eager to fill a gap after following someone
 local POUNCE_CAUT = -0.5   -- extra closing while pouncing (fill the opened space, don't hang back)
+-- Move commitment: once a car commits to attacking or defending it holds that INTENT for a
+-- short beat instead of re-deciding every frame. A genuine read (re)commits; when the read
+-- briefly drops (gap wobbles just past the line, speed dips in dirty air) the car coasts the
+-- committed decision until a wider release threshold clears it. Kills frame-to-frame dithering
+-- and makes passes / defences decisive instead of hesitant.
+local COMMIT_HOLD    = 0.7   -- s to hold a committed attack/defend decision
+local COMMIT_RELEASE = 1.5   -- gap must grow past threshold*this to drop the commitment early
 
 local ATTACK_GAP   = 0.008
 local PASS_GAP     = 0.0035
@@ -74,6 +81,7 @@ local TACTICS = {
 local curOffset = {}
 local holdSign, holdUntil = {}, {}
 local pounceT = {}
+local commitState, commitUntil = {}, {}
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
 local function sgn(x) if x > 0.1 then return 1 elseif x < -0.1 then return -1 else return 0 end end
 local function hash01(n)
@@ -150,10 +158,30 @@ function R.evaluate(i, dt)
         local myLat = latOf(me.position)          -- current lateral on track (-1 left .. +1 right)
         local target, aggr = 0, baseA
 
-        if gapA < attackGap and spd >= aheadSpd - FASTER_MARGIN then
-            state = 1
+        -- raw instantaneous reads: is there a fight on right now?
+        local rawAttack = (gapA < attackGap and spd >= aheadSpd - FASTER_MARGIN)
+        local behindLat = behindIdx >= 0 and latOf(ac.getCar(behindIdx).position) or 0
+        local rawDefend = (gapB < defendGap and behindSpd > spd - FASTER_MARGIN
+                           and math.abs(behindLat) < OFFLINE_MAX)   -- ignore a car miles off-line
+
+        -- resolve the COMMITTED state (see COMMIT_* notes): a genuine read (re)commits and refreshes
+        -- the hold; otherwise coast the last decision until a wider release threshold clears it.
+        local nowd = os.clock()
+        if rawAttack then
+            commitState[i], commitUntil[i], state = 1, nowd + COMMIT_HOLD, 1
+        elseif rawDefend then
+            commitState[i], commitUntil[i], state = 2, nowd + COMMIT_HOLD, 2
+        elseif commitState[i] and (commitUntil[i] or 0) > nowd then
+            if commitState[i] == 1 and gapA < attackGap * COMMIT_RELEASE then state = 1
+            elseif commitState[i] == 2 and gapB < defendGap * COMMIT_RELEASE then state = 2
+            else state = 0; commitState[i] = nil end
+        else
+            state = 0; commitState[i] = nil
+        end
+
+        if state == 1 then
             aggr = math.min(1, baseA + ATTACK_AGGR_ADD)
-            caut = CAUTION_ATTACK * (1 - gapA / attackGap) * (t.follow or 1.0)   -- aero cars keep more distance
+            caut = CAUTION_ATTACK * clamp(1 - gapA / attackGap, 0, 1) * (t.follow or 1.0)   -- aero cars keep more distance
             if gapA < PASS_GAP then
                 local myTc = ac.worldCoordinateToTrack(me.position)
                 local progZ = myTc and myTc.z or mySpline
@@ -172,21 +200,16 @@ function R.evaluate(i, dt)
                     target = inside * off * 0.5
                 end
             end
-        elseif gapB < defendGap and behindSpd > spd - FASTER_MARGIN then
-            -- only defend against a real threat that's on a plausible line (not a car miles off-line)
-            local aLat = behindIdx >= 0 and latOf(ac.getCar(behindIdx).position) or 0
-            if math.abs(aLat) < OFFLINE_MAX then
-                state = 2
-                aggr = math.min(1, baseA + DEFEND_AGGR_ADD)
-                caut = CAUTION_DEFEND
-                local myTc = ac.worldCoordinateToTrack(me.position)
-                local progZ = myTc and myTc.z or mySpline
-                local isCorner, inside = cornerAhead(progZ)
-                if isCorner and inside ~= 0 then
-                    target = inside * (DEFEND_OFFSET * t.defend)   -- hold the inside line (stable, corner-based)
-                end
-                -- on straights, keep the racing line -- don't weave to mirror the attacker
+        elseif state == 2 then
+            aggr = math.min(1, baseA + DEFEND_AGGR_ADD)
+            caut = CAUTION_DEFEND
+            local myTc = ac.worldCoordinateToTrack(me.position)
+            local progZ = myTc and myTc.z or mySpline
+            local isCorner, inside = cornerAhead(progZ)
+            if isCorner and inside ~= 0 then
+                target = inside * (DEFEND_OFFSET * t.defend)   -- hold the inside line (stable, corner-based)
             end
+            -- on straights, keep the racing line -- don't weave to mirror the attacker
         end
 
         local eff = R.INTENSITY
@@ -250,6 +273,6 @@ function R.evaluate(i, dt)
 end
 
 function R.beginFrame() R.attacking = 0; R.defending = 0 end
-function R.reset() curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {} end
+function R.reset() curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {} end
 
 return R

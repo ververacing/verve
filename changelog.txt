@@ -1,5 +1,12 @@
 Verve - changelog
 
+0.9.0
+- Human mistake variety: instead of one generic wobble, cars now make distinct, mostly
+  recoverable errors -- a missed apex, a wide exit, a caught twitch, or a brief brake lockup
+  under pressure. Most come with a small lift so a bobble self-corrects instead of sliding off.
+- Move commitment: once a car commits to a pass or a defence it holds that intent for a beat
+  instead of re-deciding every frame, so racecraft reads as decisive rather than hesitant.
+
 0.8.0
 - Three new car classes, all auto-detected and overridable per car:
   - Kart: no downforce, instant tyre warm-up, bumper-to-bumper slipstream racing.

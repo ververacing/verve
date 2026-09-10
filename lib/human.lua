@@ -30,8 +30,17 @@ local PRESSURE_GAP    = 0.0035
 local PRESSURE_NERVES = 0.02
 local MISTAKE_RATE    = 0.02
 local MISTAKE_BASE    = 0.003
-local MISTAKE_GRIP    = 0.035
-local MISTAKE_DUR     = 1.5
+-- Mistakes come in human FLAVOURS instead of one generic grip dip. Each is small and
+-- recoverable; most add a touch of caution too (the driver lifts to gather it), which makes
+-- them read as human AND keeps a bobble from turning into a crash. grip/caut are amplitudes,
+-- dur is seconds, w is the pick weight. Class only changes how OFTEN a car errs (the rate),
+-- not how big the error is.
+local MISTAKES = {
+    { kind = "missApex", grip = 0.025, caut = 0.00, dur = 1.2, w = 40 }, -- carried a bit much speed, ran wide
+    { kind = "wideExit", grip = 0.030, caut = 0.02, dur = 0.9, w = 25 }, -- on the power early, drifted out
+    { kind = "twitch",   grip = 0.035, caut = 0.05, dur = 0.6, w = 20 }, -- caught a wobble and gathered it
+    { kind = "lockup",   grip = 0.045, caut = 0.06, dur = 0.5, w = 15 }, -- brief brake lock, released
+}
 local WARMUP_LAPS     = 1.5
 local WARMUP_MAX_GRIP = 0.06     -- cold-tyre grip loss -> AI takes corners slower when cold (anti run-wide)
 local WARMUP_MAX_CAUT = 0.13
@@ -64,8 +73,27 @@ local function seed(i)
 end
 
 local stintStart, lastT = {}, {}
-local mistakeUntil, pressCache, pressCacheT = {}, {}, {}
+local mistakeUntil, mistakeGrip, mistakeCaut = {}, {}, {}
+local pressCache, pressCacheT = {}, {}
 local smoothedGrip, slewT = {}, {}
+
+-- Pick a mistake flavour, lightly biased by context: under pressure a driver is likelier to
+-- lock up under braking; mid-corner they're likelier to miss the apex or run wide on exit.
+local function pickMistake(p, cornering)
+    local total, adj = 0, {}
+    for idx, m in ipairs(MISTAKES) do
+        local w = m.w
+        if m.kind == "lockup" then w = w * (1 + 1.2 * (p or 0)) end
+        if m.kind == "missApex" or m.kind == "wideExit" then w = w * (0.6 + 0.8 * (cornering or 0)) end
+        adj[idx] = w; total = total + w
+    end
+    local r = math.random() * total
+    for idx, m in ipairs(MISTAKES) do
+        r = r - adj[idx]
+        if r <= 0 then return m end
+    end
+    return MISTAKES[1]
+end
 
 local function tyreWear01(car)
     local ok, w = pcall(function()
@@ -248,9 +276,19 @@ function H.getModifiers(i)
                 local dtp = lastT[i] and (now - lastT[i]) or 0
                 if dtp > 0 and dtp < 1 and (not mistakeUntil[i] or now > mistakeUntil[i]) then
                     local rate = (MISTAKE_BASE + MISTAKE_RATE * p) * cm.mistake
-                    if math.random() < rate * dtp then mistakeUntil[i] = now + MISTAKE_DUR end
+                    if math.random() < rate * dtp then
+                        local st = car.steer
+                        local cornering = (type(st) == "number") and clamp(math.abs(st) / 0.35, 0, 1) or 0
+                        local m = pickMistake(p, cornering)
+                        mistakeUntil[i] = now + m.dur
+                        mistakeGrip[i]  = m.grip
+                        mistakeCaut[i]  = m.caut
+                    end
                 end
-                if mistakeUntil[i] and now < mistakeUntil[i] then vGrip = vGrip - MISTAKE_GRIP end
+                if mistakeUntil[i] and now < mistakeUntil[i] then
+                    vGrip = vGrip - (mistakeGrip[i] or 0)
+                    vCaut = vCaut + (mistakeCaut[i] or 0)
+                end
             else
                 mistakeUntil[i] = nil
             end
