@@ -1,5 +1,9 @@
 Verve - changelog
 
+0.7.2
+- Less corner bunching: cars no longer 'pounce' to close a gap while braking into a corner
+  (only on straights/fast sections), so packs don't compress in the braking zones.
+
 0.7.1
 - Big cut to attrition in long races (esp. Formula): dirty air now makes a following car BACK
   OFF (keep distance) instead of losing grip and sliding off through corners -- that grip loss

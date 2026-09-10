@@ -193,7 +193,12 @@ function R.evaluate(i, dt)
         pounceT[i] = math.max((pounceT[i] or 0) - dt, 0)
         if state == 1 then pounceT[i] = POUNCE_HOLD
         elseif state == 0 and pounceT[i] > 0 and (t.follow or 1) >= 0.7 then
-            caut = caut + POUNCE_CAUT * (pounceT[i] / POUNCE_HOLD)   -- close-quarters classes only; aero cars keep their distance
+            -- only pounce on a straight/fast bit, never while braking into a corner (that just
+            -- bunches the pack up in the braking zone). Close-quarters classes only.
+            local st = me.steer
+            if type(st) ~= "number" or math.abs(st) < 0.2 then
+                caut = caut + POUNCE_CAUT * (pounceT[i] / POUNCE_HOLD)
+            end
         end
 
         -- pack damping: in a crowd (race start, traffic) damp the LINE-CHANGING only, so the field
