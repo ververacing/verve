@@ -1,5 +1,11 @@
 Verve - changelog
 
+0.7.3
+- Class-profile QA pass: moderated the Touring class (it was near-max on line-swings,
+  inside dives, and close-following all at once, which got chaotic) to aggressive-but-clean;
+  lowered Vintage's mistake rate (classic cars should be forgiving, not error-prone). All
+  other classes verified realistic and consistent.
+
 0.7.2
 - Less corner bunching: cars no longer 'pounce' to close a gap while braking into a corner
   (only on straights/fast sections), so packs don't compress in the braking zones.
