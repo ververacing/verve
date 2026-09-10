@@ -103,7 +103,7 @@ ac.onSessionStart(function()
 end)
 
 -- ------------------------------- UI -------------------------------
-local CLASS_OPTS = { 'auto', 'formula', 'prototype', 'hypercar', 'gt', 'road', 'touring', 'vintage', 'drift' }
+local CLASS_OPTS = { 'auto', 'formula', 'formula_jr', 'prototype', 'hypercar', 'gt', 'road', 'touring', 'vintage', 'drift', 'kart', 'rally' }
 
 local function toggle(label, key, help)
     if ui.checkbox(label, G[key]) then setG(key, not G[key]) end

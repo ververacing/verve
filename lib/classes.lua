@@ -18,6 +18,7 @@ local M = {}
 
 M.MULT = {
     formula   = { mistake = 0.0, warmup = 1.6, wet = 1.5, dirty = 1.0 },
+    formula_jr= { mistake = 0.4, warmup = 0.7, wet = 1.1, dirty = 0.2 },   -- low-downforce open-wheeler (Formula Ford/Vee): momentum, races close
     prototype = { mistake = 0.3, warmup = 1.3, wet = 1.4, dirty = 0.9 },
     hypercar  = { mistake = 0.3, warmup = 1.2, wet = 1.3, dirty = 0.9 },
     gt        = { mistake = 1.0, warmup = 1.0, wet = 1.0, dirty = 0.4 },
@@ -25,9 +26,11 @@ M.MULT = {
     touring   = { mistake = 1.1, warmup = 0.8, wet = 0.9, dirty = 0.2 },
     vintage   = { mistake = 1.0, warmup = 0.6, wet = 0.9, dirty = 0.1 },
     drift     = { mistake = 0.0, warmup = 0.5, wet = 1.0, dirty = 0.0 },
+    kart      = { mistake = 1.0, warmup = 0.3, wet = 1.0, dirty = 0.0 },   -- no downforce, tyres warm instantly, spin-prone but low-speed
+    rally     = { mistake = 1.0, warmup = 0.5, wet = 0.75, dirty = 0.15 }, -- AWD, good in the wet, slidey but catchable
 }
 M.DEFAULT = "road"
-M.LIST = { "formula", "prototype", "hypercar", "gt", "road", "touring", "vintage", "drift" }
+M.LIST = { "formula", "formula_jr", "prototype", "hypercar", "gt", "road", "touring", "vintage", "drift", "kart", "rally" }
 
 -- (2) tags: real category metadata. Low false-positive, so checked first.
 local function classifyTags(i)
@@ -38,6 +41,8 @@ local function classifyTags(i)
         local s = ""
         for _, v in ipairs(t) do s = s .. "#" .. tostring(v):lower() end
         if s:find("drift") then hit = "drift"
+        elseif s:find("kart") then hit = "kart"
+        elseif s:find("rally") or s:find("wrc") then hit = "rally"
         elseif s:find("formula") or s:find("open" ) then hit = "formula"
         elseif s:find("hypercar") or s:find("lmh") or s:find("lmdh") then hit = "hypercar"
         elseif s:find("prototype") or s:find("lmp") or s:find("groupc") or s:find("group c") then hit = "prototype"
@@ -54,6 +59,8 @@ local function classifyId(id)
     id = (id or ""):lower()
     local function has(p) return id:find(p) ~= nil end
     if has("drift") then return "drift" end
+    if has("kart") then return "kart" end                                   -- covers gokart, shifter kart
+    if has("rally") or has("wrc") then return "rally" end                   -- covers rallye, rallycross, WRC
     if has("499p") or has("valkyrie") or has("glickenhaus") or has("sc63")
        or has("p4%-5") or has("vision_gt") or has("lmdh") or has("_lmh") then return "hypercar" end
     if has("919") or has("_r18") or has("ts040") or has("787b") or has("_c9")
@@ -133,6 +140,18 @@ function M.autoKeyOf(i)
     local c = autoCache[i]
     if c ~= nil then return c end
     local key = classifyTags(i) or classifyId(carIdOf(i)) or classifyPhysics(i) or M.DEFAULT
+    -- low-downforce open-wheeler refinement: a "formula" car with little/no wing (Formula Ford,
+    -- Vee, junior single-seaters) is a momentum car that races in slipstream packs, not a fragile
+    -- F1. Route it to the close-racing formula_jr profile instead.
+    if key == "formula" then
+        local wings = 0
+        pcall(function()
+            for w = 0, 3 do
+                if tostring(ac.INIConfig.carData(i, 'aero.ini'):get('WING_' .. w, 'NAME', '')) ~= '' then wings = wings + 1 end
+            end
+        end)
+        if wings < 2 then key = "formula_jr" end
+    end
     autoCache[i] = key
     return key
 end

@@ -1,5 +1,12 @@
 Verve - changelog
 
+0.8.0
+- Three new car classes, all auto-detected and overridable per car:
+  - Kart: no downforce, instant tyre warm-up, bumper-to-bumper slipstream racing.
+  - Rally: AWD, strong in the wet, slidey but catchable (races like a grippy road car on tarmac).
+  - Formula Jr (low-downforce open-wheelers, e.g. Formula Ford/Vee): detected by wing count, so
+    they race in close slipstream packs instead of hanging back like a downforce F1.
+
 0.7.3
 - Class-profile QA pass: moderated the Touring class (it was near-max on line-swings,
   inside dives, and close-following all at once, which got chaotic) to aggressive-but-clean;
