@@ -28,9 +28,10 @@ M.MULT = {
     drift     = { mistake = 0.0, warmup = 0.5, wet = 1.0, dirty = 0.0 },
     kart      = { mistake = 1.0, warmup = 0.3, wet = 1.0, dirty = 0.0 },   -- no downforce, tyres warm instantly, spin-prone but low-speed
     rally     = { mistake = 1.0, warmup = 0.5, wet = 0.75, dirty = 0.15 }, -- AWD, good in the wet, slidey but catchable
+    nascar    = { mistake = 0.9, warmup = 0.7, wet = 0.9, dirty = 0.2, draft = 2.0 }, -- stock/oval: robust, packs up in dirty air, HUGE draft
 }
 M.DEFAULT = "road"
-M.LIST = { "formula", "formula_jr", "prototype", "hypercar", "gt", "road", "touring", "vintage", "drift", "kart", "rally" }
+M.LIST = { "formula", "formula_jr", "prototype", "hypercar", "gt", "road", "touring", "vintage", "drift", "kart", "rally", "nascar" }
 
 -- (2) tags: real category metadata. Low false-positive, so checked first.
 local function classifyTags(i)
@@ -42,6 +43,7 @@ local function classifyTags(i)
         for _, v in ipairs(t) do s = s .. "#" .. tostring(v):lower() end
         if s:find("drift") then hit = "drift"
         elseif s:find("kart") then hit = "kart"
+        elseif s:find("nascar") or s:find("stockcar") or s:find("oval") then hit = "nascar"
         elseif s:find("rally") or s:find("wrc") then hit = "rally"
         elseif s:find("formula") or s:find("open" ) then hit = "formula"
         elseif s:find("hypercar") or s:find("lmh") or s:find("lmdh") then hit = "hypercar"
@@ -60,6 +62,8 @@ local function classifyId(id)
     local function has(p) return id:find(p) ~= nil end
     if has("drift") then return "drift" end
     if has("kart") then return "kart" end                                   -- covers gokart, shifter kart
+    if has("nascar") or has("stockcar") or has("stock_car") or has("xfinity")
+       or has("gen7") or has("gen6") or has("_cot") or has("truck_series") then return "nascar" end
     if has("rally") or has("wrc") then return "rally" end                   -- covers rallye, rallycross, WRC
     if has("499p") or has("valkyrie") or has("glickenhaus") or has("sc63")
        or has("p4%-5") or has("vision_gt") or has("lmdh") or has("_lmh") then return "hypercar" end

@@ -8,12 +8,13 @@ local Racecraft = require('lib.racecraft')
 local Overrides = require('lib.overrides')
 local Update    = require('lib.update')
 local Drivers   = require('lib.drivers')
+local Troublespots = require('lib.troublespots')
 
 -- defaults for the global settings (also used for "reset to defaults")
 local DEFAULTS = {
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
-    crashRepair = false,
+    crashRepair = false, troubleSpots = false,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
 }
 
@@ -22,7 +23,7 @@ local DEFAULTS = {
 local S = ac.storage({
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
-    crashRepair = false,
+    crashRepair = false, troubleSpots = false,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     autosave = true,
 })
@@ -78,7 +79,14 @@ function script.update(dt)
             Drivers.applyPace(i)                        -- per-slot driver pace via AI level (self-restores when cleared)
             local gOff, cOff = Human.getModifiers(i)
             if G.controlGrip then
-                physics.setExtraAIGrip(i, clamp(G.baseGrip + gOff, 0.5, 1.5))
+                local grip = G.baseGrip + gOff
+                -- launch assist: a brief traction boost off a standing start (AC's AI bogs down off the
+                -- line), fading out as the car gets up to speed. Only at the very start of lap 1.
+                if (car.lapCount or 0) == 0 and (car.splinePosition or 1) < 0.012 then
+                    local s = car.speedKmh or 0
+                    if s < 90 then grip = grip + 0.07 * clamp(1 - s / 90, 0, 1) end
+                end
+                physics.setExtraAIGrip(i, clamp(grip, 0.5, 1.6))
             end
             local rcCaut = Racecraft.evaluate(i, dt)
             if behaviourOn then
@@ -103,6 +111,8 @@ function script.update(dt)
     Recovery.ENABLED = G.recovery
     Recovery.CRASH_REPAIR = G.crashRepair
     if G.recovery then Recovery.update(dt) end
+    Troublespots.ENABLED = G.troubleSpots
+    Troublespots.update(dt)
 end
 
 ac.onSessionStart(function()
@@ -110,10 +120,11 @@ ac.onSessionStart(function()
     pcall(Racecraft.reset)
     pcall(Drivers.reset)          -- driver profiles are session-only: wipe every race
     pcall(Recovery.reset)         -- clear per-car recovery + pit-rescue state
+    pcall(Troublespots.reset)     -- save the old track's learned hot spots, load the new track's
 end)
 
 -- ------------------------------- UI -------------------------------
-local CLASS_OPTS = { 'auto', 'formula', 'formula_jr', 'prototype', 'hypercar', 'gt', 'road', 'touring', 'vintage', 'drift', 'kart', 'rally' }
+local CLASS_OPTS = { 'auto', 'formula', 'formula_jr', 'prototype', 'hypercar', 'gt', 'road', 'touring', 'vintage', 'drift', 'kart', 'rally', 'nascar' }
 
 local function toggle(label, key, help)
     if ui.checkbox(label, G[key]) then setG(key, not G[key]) end
@@ -251,6 +262,7 @@ function script.windowMain()
     toggle('Racecraft (overtaking & defending)', 'racecraft', 'AI close up and pressure, pull off-line to pass on straights, and make one clean defensive move. Collision-awareness stays on.')
     toggle('Formula DRS discipline', 'drsDiscipline', 'On Formula cars, close DRS when the game says it is not available (outside a DRS zone or not within range). In-zone DRS is left to the game.')
     toggle('Self-recovery', 'recovery', 'Un-sticks spun/beached AI that are not wrecked. Never touches the race start or pit exit.')
+    toggle('Trouble-spot learning (experimental)', 'troubleSpots', 'Learns where cars repeatedly crash on a track and adds a little caution there, so the field stops piling into the same corner. Per track and per class, and REMEMBERED across sessions (the second race on a track already knows its hot spots). Self-corrects as corners calm down. Off by default.')
     toggle('Crash repair (experimental)', 'crashRepair', 'Needs Self-recovery ON. Hijacks AC\'s retirement: while recovery is working a stuck car, AC is told NOT to retire it, and after a short penalty it gets a fresh wing/body IN PLACE (no teleport, no pit) so recovery can drive it out. Only genuinely hopeless cars (broken suspension, or unrecoverable after ~15s) are allowed to retire. No teleporting -- cannot disrupt the pack or a race start. Off by default.')
     toggle('Control AI grip', 'controlGrip', 'Verve sets each AI car grip = base + variability. Turn OFF to defer grip to another AI mod (recovery still works).')
 
@@ -289,7 +301,9 @@ function script.windowMain()
         ui.text(string.format('AI cars managed: %d', managed))
         if G.racecraft then
             ui.text(string.format('Attacking: %d   Defending: %d', Racecraft.attacking or 0, Racecraft.defending or 0))
+            ui.text('Track read as: ' .. (Racecraft.isOval and 'Oval / speedway (groove racing on)' or 'Road course'))
         end
+        if G.troubleSpots then ui.text(string.format('Trouble spots learned on this track: %d', Troublespots.hotCount())) end
         ui.text(string.format('Recovering right now: %d', Recovery.count or 0))
         if G.crashRepair then ui.text(string.format('Cars repaired & rejoined: %d', Recovery.repairedCount or 0)) end
         pcall(function()

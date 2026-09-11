@@ -1,3 +1,5 @@
+local Classes = require('lib.classes')
+local Troublespots = require('lib.troublespots')
 -- Verve / recovery.lua
 -- Un-sticks AI cars that stopped but aren't wrecked: gentle throttle + self-correcting steer
 -- toward a point ahead on the racing line. Backwards cars turn around. If a car is recovering
@@ -38,6 +40,8 @@ R.count = 0    -- how many cars are being actively recovered right now (for UI)
 
 -- crash repair: repair a stuck car IN PLACE (recovery then drives it out). No teleport, no pit.
 local REPAIR_SLOW       = 15.0 -- km/h: below this counts as stuck/crippled
+local REPOSITION_DIST   = 9.0  -- metres off the racing line = genuinely OFF-track -> set it back on the line
+local REPOSITION_CLEAR  = 0.012-- don't set a car back on the line if another car is within this spline gap
 -- "genuinely wrecked" is judged by actual DAMAGE, not just closing speed: a very hard body impact OR
 -- broken suspension. A light touch (even at 150+ km/h) does neither, so it keeps racing.
 local TERMINAL_IMPACT   = 160.0-- km/h of collision severity that counts as a race-ending body hit
@@ -52,6 +56,7 @@ local hasMoved, stuckT, recT = {}, {}, {}
 local steerSign, lastErr, checkT = {}, {}, {}
 local stallRef, stallT, backupT, backupSign, backupN = {}, {}, {}, {}, {}
 local repaired, repairRecT = {}, {}
+local reported = {}        -- have we logged this incident to trouble-spots yet? (once per episode)
 R.repairedCount = 0    -- cars repaired + set back on track this session (for UI)
 
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
@@ -63,6 +68,7 @@ end
 local function endRec(i)
     recT[i] = nil; checkT[i] = nil; lastErr[i] = nil
     stallRef[i] = nil; stallT[i] = nil; backupT[i] = nil
+    reported[i] = nil
 end
 
 -- worst impact recorded across the car's damage zones (km/h). Index range read defensively.
@@ -91,6 +97,47 @@ local function terminalDamage(car)
         end
     end)
     return body >= TERMINAL_IMPACT or susp >= TERMINAL_SUSP
+end
+
+local function latOf(p)
+    local x = 0
+    pcall(function() local tc = ac.worldCoordinateToTrack(p); if tc then x = tc.x end end)
+    return x
+end
+
+-- is the spot at track progress `prog` clear of OTHER cars (any speed)? -> never drop into a pack
+local function spotClear(sim, i, prog)
+    for j = 0, sim.carsCount - 1 do
+        if j ~= i then
+            local oc = ac.getCar(j)
+            if oc and oc.splinePosition then
+                local g = math.abs(oc.splinePosition - prog)
+                if g > 0.5 then g = 1 - g end
+                if g < REPOSITION_CLEAR then return false end
+            end
+        end
+    end
+    return true
+end
+
+-- Put an OFF-TRACK (beached) car back on the racing line at its own progress, facing forward, just
+-- off to the roomier side -- ONLY if the spot is clear of traffic. A beached car can't drive itself
+-- across the gravel, so this is what actually gets it to REJOIN. On-track spins are left to recovery.
+local function putBackOnLine(sim, i, progress, center)
+    if not (center and spotClear(sim, i, progress)) then return false end
+    local p1 = ac.trackProgressToWorldCoordinate((progress + 0.0015) % 1, false)
+    if not p1 then return false end
+    local fx, fy, fz = p1.x - center.x, p1.y - center.y, p1.z - center.z
+    local flen = math.sqrt(fx * fx + fy * fy + fz * fz)
+    if flen < 1e-4 then return false end
+    fx, fy, fz = fx / flen, fy / flen, fz / flen
+    local dir = vec3(fx, fy, fz)
+    local sx, sz = -fz, fx                                   -- level perpendicular to forward
+    local a = vec3(center.x + sx * 2.5, center.y + 0.3, center.z + sz * 2.5)
+    local b = vec3(center.x - sx * 2.5, center.y + 0.3, center.z - sz * 2.5)
+    local pos = (math.abs(latOf(a)) <= math.abs(latOf(b))) and a or b   -- the roomier side (nearer track centre)
+    pcall(function() physics.setCarPosition(i, pos, dir) end)
+    return true
 end
 
 function R.update(dt)
@@ -128,6 +175,10 @@ function R.update(dt)
             if nearDist > ABORT_DIST then endRec(i); return end
 
             recT[i] = (recT[i] or 0) + dt
+            if not reported[i] then          -- log this incident's location for trouble-spot learning (once)
+                reported[i] = true
+                pcall(function() Troublespots.incident(car.splinePosition, Classes.keyOf(i)) end)
+            end
             -- Only hand a car back to AC's retirement once we've genuinely exhausted our options:
             -- either we already REPAIRED it and it STILL won't move after a good while (so it's wedged
             -- in geometry, not just damaged), or an absolute time backstop. Until then we keep blocking
@@ -158,6 +209,7 @@ function R.update(dt)
                 local penalty = clamp(REPAIR_BASE + maxImpact(car) * REPAIR_PER_IMPACT, REPAIR_MIN, REPAIR_MAX)
                 if recT[i] > penalty then
                     pcall(function() physics.setCarBodyDamage(i, vec4(0, 0, 0, 0)) end)   -- fresh wing/body, in place
+                    if nearDist > REPOSITION_DIST then putBackOnLine(sim, i, progress, center) end  -- off-track -> put it back on the line so it can rejoin
                     repaired[i] = true
                     repairRecT[i] = recT[i]                              -- mark when we repaired, for the give-up logic
                     R.repairedCount = (R.repairedCount or 0) + 1
@@ -262,6 +314,7 @@ function R.reset()
     steerSign, lastErr, checkT = {}, {}, {}
     stallRef, stallT, backupT, backupSign, backupN = {}, {}, {}, {}, {}
     repaired, repairRecT = {}, {}
+    reported = {}
     R.count = 0; R.repairedCount = 0
 end
 

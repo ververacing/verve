@@ -313,7 +313,11 @@ function H.getModifiers(i)
             lastT[i] = now
 
             local tow = slipstream01(i, car)
-            if tow > 0 then vGrip = vGrip + TOW_GRIP * tow; vCaut = vCaut - TOW_CAUT * tow end
+            if tow > 0 then
+                local draft = cm.draft or 1.0                 -- stock/oval cars gain a much bigger tow (pack draft)
+                vGrip = vGrip + TOW_GRIP * tow * draft
+                vCaut = vCaut - TOW_CAUT * tow * draft
+            end
         end
 
         if H.CLASS_PHYSICS then

@@ -8,9 +8,10 @@ OUT = sys.argv[2]
 ROSTER_BUCKET = {
     'F1-modern':'f1', 'F1-classic':'f1', 'Formula-Indy':'f1', 'Vintage':'vintage',
     'Prototype':'proto', 'GT':'gt', 'Touring':'touring', 'Rally':'rally', 'Drift':'drift',
+    'NASCAR-modern':'nascar', 'NASCAR-classic':'nascar', 'Oval-Indy':'f1', 'Oval-Dirt':'nascar',
 }
 # rosters where counts are comparable enough to compute rate-based pace/risk
-RATE_ROSTERS = {'F1-modern','F1-classic','Vintage','Rally'}
+RATE_ROSTERS = {'F1-modern','F1-classic','Vintage','Rally','NASCAR-modern','NASCAR-classic'}
 
 def num(x):
     x=(x or '').strip()
@@ -184,7 +185,7 @@ local PACE_SPREAD = 0.12   -- pace maps to +/- this much AI level around the car
 local CLASS_BUCKET = {
     formula = 'f1', formula_jr = 'f1', kart = 'kart',
     prototype = 'proto', hypercar = 'proto', gt = 'gt',
-    touring = 'touring', vintage = 'vintage', rally = 'rally', drift = 'drift',
+    touring = 'touring', vintage = 'vintage', rally = 'rally', drift = 'drift', nascar = 'nascar',
 }
 '''
 

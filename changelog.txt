@@ -1,5 +1,27 @@
 Verve - changelog
 
+0.10.1
+- Verve now controls RETIREMENTS, not AC. A car that crashes is held (AC's own retirement blocked),
+  given a fresh wing/body in place after a penalty, and put back on the racing line if it's beached
+  off-track -- so it rejoins and races on. Only genuinely wrecked cars (a big impact or broken
+  suspension) or truly unrecoverable ones retire, so retirement rates land near real-world instead
+  of losing half the grid. No teleporting into the pack, no pit-lane stranding. ("Crash repair",
+  needs Self-recovery; off by default.)
+- Trouble-spot learning: Verve learns where cars repeatedly crash on a track and adds a little
+  caution there, so the field stops piling into the same corner. Per track and per car class, and
+  REMEMBERED across sessions -- race #2 on a track already knows its hot spots. Self-corrects as a
+  corner calms. ("Trouble-spot learning"; off by default.)
+- Oval / NASCAR: a new stock-car class (huge draft, packs up in dirty air, uses the whole width),
+  automatic oval-vs-road-course detection, and groove racing -- on a speedway, stock cars commit to
+  a high or low lane and run side-by-side. Plus 80+ real NASCAR and oval drivers added to the driver
+  profiles (Petty, Earnhardt, Larson, Hamlin...) and Indy oval aces.
+- Cleaner racing: a grid funnel so the field merges onto the line gradually off the start instead of
+  all diving for it at once; a launch boost so cars don't bog off the line; opportunistic inside AND
+  outside passes that use more of the track when a car has a real speed run -- and scale with the
+  driver's aggression (Verstappen takes every opening, Prost picks his); and an anti-rear-end ease so
+  a fast-closing car doesn't pile into the back of a slower one in the braking zone, without killing
+  the overtake.
+
 0.10.0
 - Driver profiles (optional, big one): assign any grid slot a real driver -- 300+ across F1,
   Le Mans/prototypes, GT, touring, rally, vintage, karts, IndyCar and drift -- or a generic
