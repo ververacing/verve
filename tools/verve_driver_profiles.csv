@@ -1,0 +1,283 @@
+roster,driver,era,basis,starts,wins,poles,podiums,championships,avg_finish_est,dnf_total_est,dnf_crash_error_est,dnf_mechanical_est,style,notes,counts_conf,dnf_conf
+F1-modern,Max Verstappen,2015-,F1 World Championship career (as of 2026 Austrian GP),241,71,48,129,4,4.0,34,10,24,"relentless attacker, elite racecraft",Several crash DNFs as victim (2017 lap-1 incidents); 2021 Monza clash with Hamilton,H,L
+F1-modern,Lewis Hamilton,2007-,F1 World Championship career (as of 2026 Austrian GP),388,106,104,206,7,4.0,33,8,25,"smooth, adaptable, wet-weather master","Records for wins, poles, podiums",H,L
+F1-modern,Lando Norris,2019-,F1 World Championship career (as of 2026 Austrian GP),159,11,16,46,1,6.5,15,5,10,"precise and quick, occasional pressure slips",2025 champion; Canada 2025 collision with Piastri,H,L
+F1-modern,Charles Leclerc,2018-,F1 World Championship career (as of 2026 Austrian GP),179,8,27,52,0,6.5,30,11,19,"blinding one-lap pace, occasionally overdrives","Pole rate far above win rate; Germany 2019, France 2022 crashes from strong positions",H,L
+F1-modern,Oscar Piastri,2023-,F1 World Championship career (as of 2026 Austrian GP),76,9,6,28,0,5.5,7,3,4,"ice-cool, methodical, clean racer",Baku 2025 lap-1 crash,H,L
+F1-modern,George Russell,2019-,F1 World Championship career (as of 2026 Austrian GP),160,7,11,28,0,8.0,16,6,10,"analytical, sharp qualifier, forceful mover",Avg finish dragged down by Williams years; Imola 2021 and Singapore 2023 crashes,H,L
+F1-modern,Fernando Alonso,2001-,F1 World Championship career (as of 2026 Austrian GP),433,32,22,106,2,7.5,88,18,70,"cunning, tenacious, maximizes any car","Record 433 starts; heavy mechanical DNF load (Minardi, McLaren-Honda)",H,L
+F1-modern,Kimi Antonelli,2025-,F1 World Championship career (as of 2026 Austrian GP),32,5,4,10,0,7.0,6,4,2,"raw fearless speed, rookie errors fading","Small sample, rates will swing",H,L
+F1-modern,Carlos Sainz Jr.,2015-,F1 World Championship career (as of 2026 Austrian GP),237,4,6,29,0,8.5,40,11,29,"smooth operator, strategic, consistent",,H,L
+F1-modern,Isack Hadjar,2025-,F1 World Championship career (as of 2026 Austrian GP),31,0,0,1,0,11.0,4,2,2,"punchy, emotional, quick adapter","Small sample; Australia 2025 formation-lap crash (DNS, not a start)",H,L
+F1-modern,Alexander Albon,2019-,F1 World Championship career (as of 2026 Austrian GP),135,0,0,2,0,11.0,20,7,13,"tidy, calm, tyre-friendly",Several crash DNFs as victim,H,L
+F1-modern,Pierre Gasly,2017-,F1 World Championship career (as of 2026 Austrian GP),185,1,0,6,0,11.0,25,8,17,determined midfield fighter,Monza 2020 win,H,L
+F1-modern,Esteban Ocon,2016-,F1 World Championship career (as of 2026 Austrian GP),188,1,0,4,0,11.5,26,10,16,"stubborn hard defender, teammate clashes",Hungary 2021 win; repeated clashes with teammates,H,L
+F1-modern,Nico Hulkenberg,2010-,F1 World Championship career (as of 2026 Austrian GP),257,0,1,1,0,11.0,45,12,33,"strong qualifier, steady points-scorer",First podium came on his ~240th start (Silverstone 2025),H,L
+F1-modern,Lance Stroll,2017-,F1 World Championship career (as of 2026 Austrian GP),197,0,1,3,0,12.5,36,15,21,"strong starter, wet flashes, error-prone",Frequent lap-1 incidents,H,L
+F1-modern,Oliver Bearman,2024-,F1 World Championship career (as of 2026 Austrian GP),35,0,0,0,0,12.5,5,2,3,"confident, aggressive youngster",Small sample; high penalty-point tally in 2025,H,L
+F1-modern,Sergio Perez,"2011-2024, 2026-",F1 World Championship career (as of 2026 Austrian GP),289,6,3,39,0,9.0,42,16,26,"tyre-saving street specialist, streaky",Many lap-1 exits in 2023-24,H,L
+F1-modern,Valtteri Bottas,"2013-2024, 2026-",F1 World Championship career (as of 2026 Austrian GP),254,10,20,67,0,6.5,30,8,22,"fast qualifier, calm, dependable wingman",Pole-to-win conversion lower than pole count suggests,H,L
+F1-modern,Liam Lawson,2023-,F1 World Championship career (as of 2026 Austrian GP),43,0,0,0,0,13.0,7,3,4,"combative, gritty, won't yield",Small sample,H,L
+F1-modern,Gabriel Bortoleto,2025-,F1 World Championship career (as of 2026 Austrian GP),31,0,0,0,0,13.5,5,3,2,"measured, mature rookie",Small sample,H,L
+F1-modern,Franco Colapinto,2024-,F1 World Championship career (as of 2026 Austrian GP),34,0,0,0,0,15.0,7,5,2,"brave and flashy, crash-prone",Multiple heavy crashes in debut season,H,L
+F1-modern,Arvid Lindblad,2026-,F1 World Championship career (as of 2026 Austrian GP),7,0,0,0,0,,,,,"aggressive Red Bull junior, unproven",Tiny sample (7 starts); lean on archetype,H,
+F1-classic,Ayrton Senna,1984-1994,F1 World Championship career,161,41,65,80,3,3.5,58,20,38,"wild, supernatural qualifying pace, high-risk",Best pole rate of the modern era; Monaco 88 crash from lead; Suzuka 89/90 clashes,H,L
+F1-classic,Alain Prost,"1980-1991, 1993",F1 World Championship career,199,51,33,106,4,3.0,50,9,41,"clinical, metronomic, The Professor",Win rate exceeds pole rate: race-craft over one-lap speed,H,L
+F1-classic,Michael Schumacher,"1991-2006, 2010-2012",F1 World Championship career,306,91,68,155,7,4.0,68,18,50,"ruthless, relentless, win at any cost","Adelaide 94, Jerez 97 clashes; Mercedes comeback years inflate DNFs",H,L
+F1-classic,Niki Lauda,"1971-1979, 1982-1985",F1 World Championship career,171,25,24,54,3,4.5,80,10,70,"calculating, analytical, mechanically sympathetic",High DNF count is era reliability,H,M
+F1-classic,James Hunt,1973-1979,F1 World Championship career,92,10,14,23,1,4.5,47,20,27,"wild, flamboyant, Hunt the Shunt",,H,L
+F1-classic,Nigel Mansell,"1980-1992, 1994-1995",F1 World Championship career,187,31,32,59,1,4.5,93,22,71,"brave, hard-charging, never gives up",Lotus-era reliability dominates DNFs,H,M
+F1-classic,Nelson Piquet,1978-1991,F1 World Championship career,204,23,24,60,3,5.0,86,16,70,"shrewd, technical, fast when it counts",,H,M
+F1-classic,Mika Hakkinen,1991-2001,F1 World Championship career,161,20,26,51,2,5.0,60,12,48,"quiet, blinding one-lap speed",Imola and Monza 1999 crashes from the lead,H,L
+F1-classic,Kimi Raikkonen,"2001-2009, 2012-2021",F1 World Championship career,349,21,18,103,1,6.0,70,16,54,"cool Iceman, raw race pace",46 fastest laps: race pace > qualifying,H,L
+F1-classic,Sebastian Vettel,2007-2022,F1 World Championship career,299,53,57,122,4,5.0,40,12,28,"dominant from the front, wobbles wheel-to-wheel",Hockenheim 2018 crash from lead; many spins 2018-19,H,L
+F1-classic,Nico Rosberg,2006-2016,F1 World Championship career,206,23,30,57,1,6.0,25,6,19,"cerebral, meticulous, strong qualifier",,H,L
+F1-classic,Jenson Button,2000-2017,F1 World Championship career,306,15,8,50,1,8.5,75,14,61,"silky smooth, master of changing conditions",Low pole rate but big mixed-conditions wins,H,M
+F1-classic,Damon Hill,1992-1999,F1 World Championship career,115,22,20,42,1,4.5,36,11,25,"dogged, determined, underrated",Several clashes with Schumacher,H,L
+F1-classic,Gilles Villeneuve,1977-1982,F1 World Championship career,67,6,2,13,0,5.5,32,16,16,"spectacular, fearless, always on the limit",Archetype for high Aggression + high Risk,H,L
+F1-classic,Juan Pablo Montoya,2001-2006,F1 World Championship career,94,7,13,30,0,4.5,36,13,23,"audacious overtaker, hard-charging, streaky",,H,L
+F1-classic,Daniel Ricciardo,2011-2024,F1 World Championship career,257,8,3,32,0,8.5,36,9,27,"late-braking assassin, dives from nowhere",Baku 2018 clash with Verstappen,H,L
+F1-classic,Jean Alesi,1989-2001,F1 World Championship career,201,1,2,32,0,7.0,87,25,62,"passionate, heroic, emotional",Very high DNF count; only 1 win,H,M
+F1-classic,Gerhard Berger,1984-1997,F1 World Championship career,210,10,12,48,0,5.5,95,18,77,"fast, brave, easygoing",,H,M
+F1-classic,David Coulthard,1994-2008,F1 World Championship career,246,13,12,62,0,6.0,81,14,67,"smooth, steady, fast-circuit specialist",,H,M
+F1-classic,Mark Webber,2002-2013,F1 World Championship career,215,9,13,42,0,7.0,45,12,33,"gritty, brave in fast corners, poor starter",Valencia 2010 airborne crash,H,L
+F1-classic,Felipe Massa,"2002, 2004-2017",F1 World Championship career,269,11,16,41,0,7.5,50,14,36,"committed, fast on his day, inconsistent",,H,L
+F1-classic,Jacques Villeneuve,1996-2006,F1 World Championship career,163,11,13,23,1,6.0,60,13,47,"brash, fearless, bold overtaker",BAR years heavy on mechanical DNFs,H,L
+F1-classic,Robert Kubica,"2006-2010, 2019, 2021",F1 World Championship career,99,1,1,12,0,7.5,20,6,14,"precise, brave, technically astute",Canada 2007 huge crash; also 2025 Le Mans overall winner,H,L
+F1-classic,Ronnie Peterson,1970-1978,F1 World Championship career,123,10,14,26,0,5.0,55,15,40,"sideways car control, raw speed",,H,L
+F1-classic,Mario Andretti,"1968-1972, 1974-1982",F1 World Championship career,128,12,18,19,1,5.0,72,12,60,versatile hard-charger,Also Indy 500 and Daytona 500 winner,H,M
+F1-classic,Jody Scheckter,1972-1980,F1 World Championship career,112,10,3,33,1,5.0,38,12,26,"wild early, matured into calculating",Caused Silverstone 1973 multi-car crash,H,L
+Vintage,Juan Manuel Fangio,1950-1958,F1 World Championship career,51,24,29,35,5,2.5,10,2,8,"masterful, calm, reads races perfectly",Highest win rate in F1 history,H,L
+Vintage,Stirling Moss,1951-1961,F1 World Championship career,66,16,16,24,0,3.0,32,5,27,"fearless genius, wins in slower cars",Also 1955 Mille Miglia winner,H,L
+Vintage,Jim Clark,1960-1968,F1 World Championship career,72,25,33,32,2,2.5,30,3,27,"effortlessly smooth, dominant, kind to cars",Most DNFs were Lotus mechanical failures,H,L
+Vintage,Jackie Stewart,1965-1973,F1 World Championship career,99,27,17,43,3,3.0,30,4,26,"precise, calculated, safety-minded",,H,L
+Vintage,Graham Hill,1958-1975,F1 World Championship career,176,14,13,36,2,5.5,77,12,65,"determined grafter, persistent","Only Triple Crown winner (Monaco, Indy 500, Le Mans)",H,M
+Vintage,Jack Brabham,1955-1970,F1 World Championship career,126,14,13,31,3,5.0,55,6,49,"tough, mechanically savvy, hard racer",,H,L
+Vintage,Alberto Ascari,1950-1955,F1 World Championship career,32,13,14,17,2,2.5,10,2,8,"controlled, dominant from pole",Monaco 1955 crash into the harbour,H,L
+Vintage,Jochen Rindt,1964-1970,F1 World Championship career,60,6,10,13,1,4.0,36,6,30,"ferociously fast, spectacular car control",Posthumous 1970 champion,H,L
+Vintage,John Surtees,1960-1972,F1 World Championship career,111,6,8,24,1,5.0,50,6,44,"gritty, technical, bike-champion commitment",Only world champion on two and four wheels,H,L
+Vintage,Dan Gurney,"1959-1968, 1970",F1 World Championship career,86,4,3,19,0,5.0,45,5,40,"engineer-racer, gentlemanly speed",1967 Le Mans winner,H,L
+Vintage,Phil Hill,"1958-1964, 1966",F1 World Championship career,49,3,6,16,1,4.5,20,3,17,"sensitive, smooth, sports-car precise",3x Le Mans winner,H,L
+Vintage,Mike Hawthorn,1952-1958,F1 World Championship career,45,3,4,18,1,4.0,15,3,12,"brave, flamboyant, steady points",,H,L
+Vintage,Denny Hulme,1965-1974,F1 World Championship career,112,8,1,33,1,5.0,38,4,34,"gruff Bear, steady, reliable",,H,L
+Vintage,Bruce McLaren,1958-1970,F1 World Championship career,100,4,0,27,0,5.5,30,4,26,methodical engineer-driver,1966 Le Mans winner,H,L
+Vintage,Pedro Rodriguez,1963-1971,F1 World Championship career,55,2,0,7,0,6.0,25,5,20,"rain master, fearless sports-car ace",1968 Le Mans winner,H,L
+Vintage,Ken Miles,1950s-1966,Sports cars (no F1 starts),,,,,,,,,,"hard-charging, fearless, mechanically sympathetic",1966 Daytona 24h and Sebring 12h winner; 2nd at Le Mans 1966,M,
+Prototype,Tom Kristensen,1997-2014,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,18,9,,14,1,,3,1,2,"metronomic, flawless night stints, Mr Le Mans",Record 9 Le Mans wins; 2013 WEC champion,M,L
+Prototype,Jacky Ickx,1966-1985,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,15,6,,8,2,,6,1,5,"rain master, cool, versatile","World Endurance champion 1982-83; F1: 116 starts, 8 wins, 13 poles",M,L
+Prototype,Derek Bell,1970-1996,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,26,5,,9,2,,10,2,8,"smooth, mechanically sympathetic endurance ace",World Sportscar champion 1985 and 1986,M,L
+Prototype,Hans-Joachim Stuck,1972-1998,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,18,2,,5,1,,8,3,5,"tall showman, spectacular, aggressive",1985 WSC co-champion; 1990 DTM champion; 74 F1 starts,M,L
+Prototype,Henri Pescarolo,1966-1999,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,33,4,,6,0,,18,4,14,"tough, steady veteran",Record 33 Le Mans starts,M,L
+Prototype,Allan McNish,1997-2013,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,16,3,,8,4,,5,2,3,"feisty, attacking, pushes the edge",2013 WEC champion + 3 ALMS titles; big crashes 2011 and 2012,M,L
+Prototype,Rinaldo Capello,1997-2012,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,16,3,,7,2,,5,1,4,"unflappable, steady, low-drama",ALMS champion 2006-07,M,L
+Prototype,Andre Lotterer,2009-,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,15,3,,6,2,,5,1,4,"fast, clean, Super Formula-honed",WEC champion 2012 and 2024,M,L
+Prototype,Marcel Fassler,2010-2019,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,13,3,,4,1,,4,1,3,"calm, consistent, reliable",2012 WEC champion,M,L
+Prototype,Benoit Treluyer,2009-2017,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,14,3,,4,1,,5,1,4,"gritty, steady, tough in traffic",2012 WEC champion,M,L
+Prototype,Sebastien Buemi,2012-,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,14,4,,9,4,,2,1,1,"precise, fast, calculated",4x WEC champion; 2015-16 Formula E champion,M,L
+Prototype,Brendon Hartley,2014-,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,11,3,,7,4,,2,0,2,"unflustered, versatile, strong in traffic",4x WEC champion,M,L
+Prototype,Kazuki Nakajima,2012-2021,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,9,3,,6,1,,2,1,1,"steady, low-mistake, endurance-minded",2018-19 WEC champion,M,L
+Prototype,Kamui Kobayashi,2016-,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,11,2,,6,2,,2,0,2,"attacking, bold overtaker, often unlucky",Le Mans 2021 and 2026 winner; WEC champion 2019-20 and 2021,M,L
+Prototype,Mike Conway,2013-,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,12,2,,7,2,,2,0,2,"smooth, quick, dependable",Le Mans 2021 and 2026 winner; WEC champion 2019-20 and 2021,M,L
+Prototype,Timo Bernhard,2002-2018,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,15,2,,3,2,,5,1,4,methodical endurance pro,WEC champion 2015 and 2017,M,L
+Prototype,Romain Dumas,2002-,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,18,2,,3,1,,6,2,4,"versatile, brave, hillclimb record-setter",2016 WEC champion; Pikes Peak outright record 2018,M,L
+Prototype,Neel Jani,2009-,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,14,1,,3,1,,5,1,4,"fast qualifier, technical",2016 WEC champion,M,L
+Prototype,Alessandro Pier Guidi,2013-,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,11,1,,2,4,,2,1,1,"combative, bold, relentless defender",2023 Le Mans winner; 2025 WEC Hypercar champion + 3 GTE-Pro titles,M,L
+Prototype,James Calado,2014-,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,11,1,,2,4,,2,1,1,"consistent, fast, composed",2023 Le Mans winner; 2025 WEC Hypercar champion + 3 GTE-Pro titles,M,L
+Prototype,Antonio Giovinazzi,2023-,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,4,1,,1,1,,1,1,0,"quick, maturing consistency","2023 Le Mans winner; 2025 WEC champion; 62 F1 starts, 0 podiums",M,L
+Prototype,Antonio Fuoco,2019-,Le Mans starts/overall wins/overall podiums; champs = world endurance titles,7,1,,3,0,,1,0,1,"qualifying ace, hyperpole specialist",2024 Le Mans winner,M,L
+GT,Kevin Estre,2012-,Porsche GT / WEC,,,,,2,,,,,"ultra-committed, fearless, huge one-lap speed",WEC GTE title 2019-20; 2024 WEC Hypercar champion; Le Mans GTE-Pro class wins,M,
+GT,Laurens Vanthoor,2012-,Porsche/Audi GT / WEC,,,,,1,,,,,"aggressive, bold, big-moment prone",2024 WEC Hypercar champion; 2016 Macau GT World Cup win despite flipping,M,
+GT,Raffaele Marciello,2016-,GT World Challenge Europe,,,,,,,,,,"raw qualifying speed, GT3 benchmark",Multiple GTWC Europe titles (verify counts); ex-Ferrari F1 junior,L,
+GT,Maro Engel,2008-,GT3 / Macau GT World Cup,,,,,,,,,,"consistent, street-circuit specialist",Multiple Macau GT World Cup wins (verify counts),L,
+GT,Edoardo Mortara,2009-,GT / DTM / Formula E,,,,,,,,,,"precise, street-circuit specialist, Mr Macau",2x Macau F3 GP winner,M,
+GT,Nicki Thiim,2010-,Porsche Supercup / WEC GTE,,,,,2,,,,,"flamboyant, committed, sim-racer mindset",2013 Porsche Supercup champion; 2016 WEC GT champion,M,
+GT,Marco Sorensen,2014-,WEC GTE,,,,,1,,,,,"quick, tidy, low-drama",2016 WEC GT champion; 2022 Le Mans GTE-Am class win,M,
+GT,Richard Lietz,2005-,Porsche GT / WEC,,,,,,,,,,"precise veteran, endurance-steady",Multiple Le Mans GT class wins,L,
+GT,Jan Magnussen,1999-,Corvette GT / IMSA,,,,,,,,,,"raw pace, hard racer",Multiple Le Mans GT class wins; 24 F1 starts,L,
+GT,Oliver Gavin,2002-2021,Corvette GT / IMSA,,,,,,,,,,"steady, precise, low-error",Multiple Le Mans GT class wins with Corvette,L,
+GT,Antonio Garcia,2003-,Corvette GT / IMSA,,,,,,,,,,"consistent, strategic, calm",Multiple Le Mans GT class wins and IMSA titles,L,
+GT,Nicky Catsburg,2012-,GT3 / IMSA / Nordschleife,,,,,,,,,,"fast, adaptable, strong at night",2026 Le Mans LMGT3 class winner; 2026 IMSA GTD PRO points leader,H,
+GT,Valentino Rossi,2022-,GT World Challenge / WEC LMGT3,,,,,,,,,,"tactical, ultra-competitive, still learning cars",9x motorcycle world champion; full-time GT since 2022; moderate Pace,M,
+GT,Sheldon van der Linde,2018-,DTM (GT3),,,,,1,,,,,"consistent, clean, tactically sharp",2022 DTM champion,M,
+GT,Kelvin van der Linde,2014-,ADAC GT Masters / DTM,,,,,,,,,,"aggressive, quick, occasionally clumsy",2017 Nurburgring 24h winner,L,
+GT,Jules Gounon,2016-,GT3 endurance,,,,,,,,,,"fast, brave, endurance-sharp",Multiple Bathurst 12 Hour wins (verify counts),L,
+GT,Mirko Bortolotti,2014-,Lamborghini GT3,,,,,,,,,,"smooth, relentless, sprint-race sharp",Lamborghini's lead GT3 factory driver,L,
+GT,Maxime Martin,2011-,GT3 / WEC GTE,,,,,,,,,,"smooth, versatile",2016 Spa 24 Hours winner,L,
+GT,Dries Vanthoor,2017-,GT3 endurance,,,,,,,,,,"aggressive young gun, quick",2019 Nurburgring 24h winner,L,
+Touring,Bernd Schneider,1986-2008,DTM/ITC,,43,,,5,,,,,"calculating, relentless, Mr DTM",DTM wins record-holder at retirement,M,
+Touring,Klaus Ludwig,1985-1998,DTM,,36,,,3,,,,,"smooth tactician, King Ludwig",3x Le Mans winner,M,
+Touring,Mattias Ekstrom,2001-2016,DTM,,23,,,2,,,,,"aggressive all-rounder, tough defender",2016 World RX champion,M,
+Touring,Rene Rast,2016-,DTM,,,,,3,,,,,"clinical qualifier, cool under pressure","DTM champion 2017, 2019, 2020",M,
+Touring,Peter Brock,1967-2004,Australian Touring / Bathurst,,9,,,3,,,,,"precise, smooth, King of the Mountain",wins = Bathurst wins (record 9),M,
+Touring,Craig Lowndes,1994-,Supercars,,106,,,3,,,,,"flamboyant, sideways, never quits",7x Bathurst 1000 winner,L,
+Touring,Jamie Whincup,2002-2022,Supercars,,124,,,7,,,,,"ruthlessly efficient, metronomic",Record 7 titles and 124 wins; 4x Bathurst 1000,M,
+Touring,Shane van Gisbergen,2007-,Supercars / NASCAR,,,,,3,,,,,"sublime car control, attacking, adaptable",3x Bathurst 1000; now NASCAR Cup road-course winner,M,
+Touring,Colin Turkington,2002-,BTCC,,,,,4,,,,,"calculated, strategic title-closer","BTCC champion 2009, 2014, 2018, 2019",M,
+Touring,Jason Plato,1997-2021,BTCC,,97,,,2,,,,,"aggressive, confrontational, relentless",BTCC wins record,M,
+Touring,Matt Neal,1991-2023,BTCC,,,,,3,,,,,"tough veteran, elbows-out","BTCC champion 2005, 2006, 2011",M,
+Touring,Ash Sutton,2016-,BTCC,,,,,4,,,,,"bold overtaker, dominant on form","BTCC champion 2017, 2020, 2021, 2023",M,
+Touring,Andy Priaulx,2001-,ETCC/WTCC,,,,,4,,,,,"clinical, calm tactician",ETCC 2004; WTCC 2005-2007,M,
+Touring,Yvan Muller,1996-2020,WTCC/BTCC,,,,,5,,,,,"smooth, technical, relentless",4x WTCC champion + 2003 BTCC,M,
+Touring,Gabriele Tarquini,1987-2020,BTCC/WTCC/WTCR,,,,,3,,,,,"wily veteran, elbows-out","BTCC 1994, WTCC 2009, WTCR 2018; 38 F1 starts",M,
+Touring,Jose Maria Lopez,2014-,WTCC / WEC,,,,,5,,,,,"dominant, clean, fast",3x WTCC (2014-16) + 2 WEC titles; 2021 Le Mans winner,M,
+Touring,Alain Menu,1992-2012,BTCC/WTCC,,,,,2,,,,,"smooth, precise",BTCC champion 1997 and 2000,M,
+Rally,Sebastien Loeb,1999-2022,WRC career (wins as of 2026 Rally Finland); no poles in rally,184,80,,120,9,,38,12,26,"clinical, precise on any surface, rarely errs",Counts sourced,H,L
+Rally,Sebastien Ogier,2008-,WRC career (wins as of 2026 Rally Finland); no poles in rally,210,68,,118,9,,28,10,18,"tactical, adaptable, cool under pressure",Wins and titles sourced; starts/podiums approximate,M,L
+Rally,Tommi Makinen,1987-2003,WRC career (wins as of 2026 Rally Finland); no poles in rally,139,24,,45,4,,50,20,30,"aggressive, committed, flat-out",,M,L
+Rally,Colin McRae,1987-2006,WRC career (wins as of 2026 Rally Finland); no poles in rally,146,25,,42,1,,60,32,28,"flat-out, spectacular, crash-prone",High-Aggression + high-Risk archetype,M,L
+Rally,Richard Burns,1990-2003,WRC career (wins as of 2026 Rally Finland); no poles in rally,91,10,,37,1,,30,8,22,"smooth, calculated, consistent",,M,L
+Rally,Carlos Sainz Sr.,1987-2005,WRC career (wins as of 2026 Rally Finland); no poles in rally,196,26,,97,2,,55,15,40,"meticulous, relentless, gravel ace",Counts sourced,H,L
+Rally,Juha Kankkunen,1979-2010,WRC career (wins as of 2026 Rally Finland); no poles in rally,162,23,,75,4,,50,10,40,"calm, consistent, ice-cool",,M,L
+Rally,Marcus Gronholm,1989-2019,WRC career (wins as of 2026 Rally Finland); no poles in rally,152,30,,61,2,,45,15,30,"big, fast, fearless on fast gravel",,M,L
+Rally,Petter Solberg,1998-2019,WRC career (wins as of 2026 Rally Finland); no poles in rally,190,13,,51,1,,60,25,35,"spectacular Hollywood, committed",,M,L
+Rally,Walter Rohrl,1973-1987,WRC career (wins as of 2026 Rally Finland); no poles in rally,75,14,,31,2,,30,8,22,"precise, disciplined, mountain master",,M,L
+Rally,Hannu Mikkola,1973-1993,WRC career (wins as of 2026 Rally Finland); no poles in rally,123,18,,44,1,,55,12,43,"strong, steady Flying Finn",,M,L
+Rally,Michele Mouton,1974-1986,WRC career (wins as of 2026 Rally Finland); no poles in rally,50,4,,9,0,,20,6,14,"fearless, fast, Group B pioneer",1982 runner-up,M,L
+Rally,Ari Vatanen,1974-2003,WRC career (wins as of 2026 Rally Finland); no poles in rally,101,10,,23,1,,45,20,25,"flamboyant, flat-out, high-risk",,M,L
+Rally,Henri Toivonen,1975-1986,WRC career (wins as of 2026 Rally Finland); no poles in rally,40,3,,9,0,,25,10,15,"prodigiously fast, on the edge",,M,L
+Rally,Kalle Rovanpera,2017-2025,WRC career (wins as of 2026 Rally Finland); no poles in rally,90,18,,40,2,,15,8,7,"prodigious, fearless, record-young",Youngest WRC winner and champion,M,L
+Rally,Ott Tanak,2009-2025,WRC career (wins as of 2026 Rally Finland); no poles in rally,190,22,,65,1,,45,20,25,"blisteringly fast, all-or-nothing",,M,L
+Rally,Thierry Neuville,2009-,WRC career (wins as of 2026 Rally Finland); no poles in rally,190,23,,80,1,,40,18,22,"fast, emotional, sometimes overdrives",2024 champion,M,L
+Rally,Elfyn Evans,2007-,WRC career (wins as of 2026 Rally Finland); no poles in rally,170,13,,65,0,,25,12,13,"consistent, methodical, tidy",Multiple-time championship runner-up,M,L
+Drift,James Deane,2008-,Formula Drift / Drift Masters,,,,,5,,,,,"dominant, precise, relentless consistency","5x FD champion (2017-19, 2024, 2025); record 13 straight podiums",H,
+Drift,Fredric Aasbo,2008-,Formula Drift,,20,,,3,,,,,"fast, technical, clinical in tandem","FD champion 2015, 2021, 2022",H,
+Drift,Chris Forsberg,2004-,Formula Drift,,,,,3,,,,,"precise, consistent, tactical","FD champion 2009, 2014, 2016; most FD battle wins and podiums",M,
+Drift,Vaughn Gittin Jr.,2004-,Formula Drift,,,,,2,,,,,"aggressive, big angle, crowd-pleaser",2010 FD champion,M,
+Drift,Daigo Saito,2003-,D1GP / Formula Drift,,,,,4,,,,,"high-speed, aggressive showman",2012 FD champion,M,
+Drift,Keiichi Tsuchiya,1977-2003,Drift pioneer / JGTC / Le Mans,,,,,,,,,,"pioneering, flamboyant car control",The original Drift King; 2nd overall at Le Mans 1999,M,
+Drift,Masato Kawabata,2001-,D1GP,,,,,,,,,,high-speed drift specialist,D1GP champion; high-speed drift record holder,L,
+Drift,Adam LZ,2017-,Formula Drift,,,,,,,,,,"aggressive, entertaining, big commitment",2025 FD round winner (Englishtown),M,
+Drift,Conor Shanahan,2019-,Drift Masters / Formula Drift,,,,,1,,,,,"fearless, extreme proximity",2025 Drift Masters champion,H,
+Drift,Hiroya Minowa,2024-,Formula Drift,,,,,,,,,,"teenage prodigy, fearless",Youngest FD podium finisher; 2025 FD round win,M,
+F1-classic,Rubens Barrichello,1993-2011,F1 World Championship career,322,11,14,68,0,,97,20,77,"smooth, loyal team player, strong in the wet",DNF total sourced (Jalopnik; includes DSQs),H,M
+F1-classic,Ralf Schumacher,1997-2007,F1 World Championship career,180,6,6,27,0,,60,18,42,"fast on his day, inconsistent",,H,L
+F1-classic,Giancarlo Fisichella,1996-2009,F1 World Championship career,229,3,4,19,0,,74,15,59,"naturally quick, underachiever",DNF total sourced (Jalopnik; includes DSQs),H,M
+F1-classic,Jarno Trulli,1997-2011,F1 World Championship career,252,1,4,11,0,,90,15,75,"qualifying specialist, defensive train-leader",Monaco 2004 win from pole; DNF total sourced (Jalopnik; includes DSQs),H,M
+F1-classic,Eddie Irvine,1993-2002,F1 World Championship career,145,4,0,26,0,,55,15,40,"combative, confident, opportunistic",1999 title runner-up,H,L
+F1-classic,Heinz-Harald Frentzen,1994-2003,F1 World Championship career,156,3,2,18,0,,60,12,48,"gifted, smooth, inconsistent",1999 title contender with Jordan,H,L
+F1-classic,Johnny Herbert,1989-2000,F1 World Championship career,160,3,0,7,0,,78,16,62,"cheerful opportunist, wins in chaos",DNF total sourced (Jalopnik; includes DSQs),H,M
+F1-classic,Nick Heidfeld,2000-2011,F1 World Championship career,183,0,1,13,0,,45,10,35,"tidy, consistent, never flashy",Record 13 podiums without a win,H,L
+F1-classic,Heikki Kovalainen,2007-2013,F1 World Championship career,111,1,1,4,0,,25,8,17,"steady, unspectacular",Hungary 2008 win,H,L
+F1-classic,Romain Grosjean,"2009, 2012-2020",F1 World Championship career,179,0,0,10,0,,55,25,30,"fast but crash-prone, matured later",Race ban after Spa 2012 start crash,H,L
+F1-classic,Pastor Maldonado,2011-2015,F1 World Championship career,95,1,1,1,0,,45,28,17,fast but wildly crash-prone,Spain 2012 win from pole; textbook high-Risk archetype,H,L
+F1-classic,Kevin Magnussen,"2014-2020, 2022-2024",F1 World Championship career,185,0,1,1,0,,40,12,28,"uncompromising, ultra-hard defender",Race ban on penalty points in 2024; podium on debut,H,L
+F1-classic,Daniil Kvyat,"2014-2017, 2019-2020",F1 World Championship career,110,0,0,3,0,,25,10,15,"fast but erratic, the Torpedo",Hit Vettel twice on lap 1 at Russia 2016,H,L
+F1-classic,Yuki Tsunoda,2021-2025,F1 World Championship career,111,0,0,0,0,,20,9,11,"fiery, quick, error-prone early",,H,L
+F1-classic,Takuma Sato,2002-2008,F1 World Championship career,90,0,0,1,0,,40,18,22,"all-out attacker, no attack no chance","Later 2x Indy 500 winner, 6 IndyCar wins",H,L
+F1-classic,Mick Schumacher,2021-2022,F1 World Championship career,43,0,0,0,0,,8,5,3,"steady improver, costly crashes",Heavy crashes Jeddah and Monaco 2022; 2026 IndyCar rookie,H,L
+F1-classic,Logan Sargeant,2023-2024,F1 World Championship career,36,0,0,0,0,,8,5,3,"struggled for pace, frequent crashes",Small sample,H,L
+F1-classic,Jos Verstappen,1994-2003,F1 World Championship career,106,0,0,2,0,,50,15,35,quick but erratic,,H,L
+F1-classic,Riccardo Patrese,1977-1993,F1 World Championship career,256,6,8,37,0,,145,30,115,"experienced, quick, dependable wingman",1992 runner-up; DNF total sourced (Jalopnik; includes DSQs),H,M
+F1-classic,Michele Alboreto,1981-1994,F1 World Championship career,194,5,2,23,0,,102,18,84,"smooth, stylish, gentleman racer",1985 runner-up; DNF total sourced (Jalopnik; includes DSQs),H,M
+F1-classic,Andrea de Cesaris,1980-1994,F1 World Championship career,208,0,1,5,0,,149,45,104,fast but wildly crash-prone,~72% DNF rate over 208 starts; DNF total sourced (Jalopnik; includes DSQs),H,M
+F1-classic,Derek Warwick,1981-1993,F1 World Championship career,147,0,0,4,0,,84,15,69,"brave, gritty hard-trier",1992 Le Mans winner; DNF total sourced (Jalopnik; includes DSQs),H,M
+F1-classic,Martin Brundle,1984-1996,F1 World Championship career,158,0,0,9,0,,72,15,57,"solid, brave all-rounder","1988 World Sportscar champion, 1990 Le Mans winner; DNF total sourced (Jalopnik; includes DSQs)",H,M
+F1-classic,Eddie Cheever,1978-1989,F1 World Championship career,132,0,0,9,0,,84,14,70,"hard-driving, determined",1998 Indy 500 winner; DNF total sourced (Jalopnik; includes DSQs),H,M
+F1-classic,Thierry Boutsen,1983-1993,F1 World Championship career,163,3,1,15,0,,60,10,50,"smooth, calm, strong in the wet",Two wet-weather wins for Williams in 1989,H,L
+F1-classic,Keke Rosberg,1978-1986,F1 World Championship career,114,5,5,17,1,,55,12,43,"flamboyant, sideways, aggressive",1982 champion with a single win that year,H,L
+F1-classic,Alan Jones,1975-1986,F1 World Championship career,116,12,6,24,1,,50,8,42,"tough, uncompromising hard racer",,H,L
+F1-classic,Carlos Reutemann,1972-1982,F1 World Championship career,146,12,6,45,0,,45,8,37,"brilliant on his day, moody",High podium rate for a non-champion,H,L
+F1-classic,Clay Regazzoni,1970-1980,F1 World Championship career,132,5,5,28,0,,50,15,35,"tough, aggressive hard man",,H,L
+F1-classic,Emerson Fittipaldi,1970-1980,F1 World Championship career,144,14,6,35,2,,45,8,37,"smooth, calculating tactician","Later 22 IndyCar wins, 1989 CART title, 2x Indy 500",H,L
+F1-classic,Jacques Laffite,1974-1986,F1 World Championship career,176,6,7,32,0,,86,16,70,"cheerful, quick, steady points",DNF total sourced (Jalopnik; includes DSQs),H,M
+F1-classic,Rene Arnoux,1978-1989,F1 World Championship career,149,7,18,22,0,,65,15,50,"fast, aggressive wheel-banger",Dijon 1979 duel with Villeneuve; poles far exceed wins,H,L
+F1-classic,Didier Pironi,1978-1982,F1 World Championship career,70,3,4,13,0,,30,8,22,"fast, ambitious, ruthless",Career ended by Hockenheim 1982 practice crash,H,L
+F1-classic,John Watson,1973-1985,F1 World Championship career,152,5,2,20,0,,65,12,53,charger from the back,Won Long Beach 1983 from 22nd on the grid,H,L
+F1-classic,Patrick Tambay,1977-1986,F1 World Championship career,114,2,5,11,0,,55,12,43,"smooth, composed",,H,L
+F1-classic,Elio de Angelis,1979-1986,F1 World Championship career,108,2,3,9,0,,45,10,35,"smooth, stylish",,H,L
+F1-classic,Jean-Pierre Jabouille,1974-1981,F1 World Championship career,49,2,6,2,0,,35,6,29,"turbo pioneer, strong qualifier",Renault turbo failures dominate DNFs,H,L
+F1-classic,Francois Cevert,1970-1973,F1 World Championship career,47,1,0,13,0,,18,5,13,"smooth, gifted, Stewart protege",,H,L
+F1-classic,Patrick Depailler,1972-1980,F1 World Championship career,95,2,1,19,0,,45,12,33,"fearless, flamboyant",,H,L
+Vintage,Nino Farina,1950-1955,F1 World Championship career,33,5,5,20,1,,12,5,7,"straight-arm, aggressive, crash-prone",First F1 world champion,H,L
+Vintage,Jose Froilan Gonzalez,1950-1960,F1 World Championship career,26,2,3,15,0,,8,2,6,"burly, ferocious Pampas Bull","Ferrari's first F1 win, Silverstone 1951",H,L
+Vintage,Tony Brooks,1956-1961,F1 World Championship career,38,6,3,10,0,,15,3,12,"smooth, gentle, mechanically sympathetic",The racing dentist,H,L
+Vintage,Peter Collins,1952-1958,F1 World Championship career,32,3,0,9,0,,15,3,12,"sporting, brave team player",Handed his car to Fangio at Monza 1956,H,L
+Vintage,Maurice Trintignant,1950-1964,F1 World Championship career,81,2,0,10,0,,35,5,30,"steady, durable, reliable",2x Monaco winner,H,L
+Vintage,Richie Ginther,1960-1967,F1 World Championship career,52,1,0,14,0,,25,3,22,"technical, steady development driver","Honda's first F1 win, Mexico 1965",H,L
+Vintage,Wolfgang von Trips,1956-1961,F1 World Championship career,27,2,1,6,0,,12,4,8,"fast, aggressive",,H,L
+Vintage,Jean Behra,1952-1959,F1 World Championship career,52,0,0,9,0,,30,6,24,"fiery, combative",,H,L
+Vintage,Jo Siffert,1962-1971,F1 World Championship career,96,2,2,6,0,,45,8,37,"fearless, hard-charging sports-car ace",,H,L
+Vintage,Chris Amon,1963-1976,F1 World Championship career,96,0,5,11,0,,50,8,42,"fast, famously unlucky",Never won a championship GP despite 5 poles; 1966 Le Mans winner,H,L
+Formula-Indy,A.J. Foyt,1957-1993,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,67,,,7,,,,,"tough, versatile, relentless",4x Indy 500; also Le Mans 1967 and Daytona 500 winner,H,
+Formula-Indy,Scott Dixon,2001-,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,59,,,6,,,,,"fuel-saving genius, metronomic",Wins at a record 28 different tracks,H,
+Formula-Indy,Will Power,2005-,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,45,,,2,,,,,"ferocious qualifier, occasional errors",All-time IndyCar pole record holder,H,
+Formula-Indy,Michael Andretti,1983-2003,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,42,,,1,,,,,"aggressive, dominant on road and street courses",Most CART wins; 13 F1 starts in 1993,H,
+Formula-Indy,Al Unser,1965-1994,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,39,,,3,,,,,"smooth, patient, calculating",4x Indy 500,H,
+Formula-Indy,Sebastien Bourdais,2003-2021,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,37,,,4,,,,,precise street-course master,4 straight Champ Car titles; 27 F1 starts,H,
+Formula-Indy,Bobby Unser,1963-1981,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,35,,,2,,,,,"aggressive, outspoken, fearless",3x Indy 500; Pikes Peak legend,H,
+Formula-Indy,Al Unser Jr.,1982-2007,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,34,,,2,,,,,smooth street-circuit specialist,2x Indy 500,H,
+Formula-Indy,Josef Newgarden,2012-,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,34,,,2,,,,,"aggressive, bold late-race passer","2x Indy 500 (2023, 2024)",H,
+Formula-Indy,Paul Tracy,1991-2011,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,31,,,1,,,,,"aggressive, polarizing, crash-prone",2003 Champ Car champion,H,
+Formula-Indy,Dario Franchitti,1997-2013,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,31,,,4,,,,,"smooth, calculated",3x Indy 500,H,
+Formula-Indy,Helio Castroneves,1998-,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,31,,,0,,,,,passionate oval master,4x Indy 500,H,
+Formula-Indy,Rick Mears,1976-1992,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,29,,,3,,,,,"calm, patient oval master",4x Indy 500,H,
+Formula-Indy,Johnny Rutherford,1963-1994,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,27,,,1,,,,,smooth oval specialist,3x Indy 500,H,
+Formula-Indy,Alex Palou,2020-,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,25,,,5,,,,,"metronomic, relentless consistency","5 titles in 6 seasons (2021, 2023-2026)",H,
+Formula-Indy,Bobby Rahal,1982-1998,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,24,,,3,,,,,"calculating, consistent",1986 Indy 500,H,
+Formula-Indy,Sam Hornish Jr.,2000-2007,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,19,,,3,,,,,aggressive oval drafter,2006 Indy 500,H,
+Formula-Indy,Ryan Hunter-Reay,2007-,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,18,,,1,,,,,"gritty, aggressive",2014 Indy 500,H,
+Formula-Indy,Tony Kanaan,1998-2023,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,17,,,1,,,,,"aggressive, oval-strong fan favourite",2013 Indy 500,H,
+Formula-Indy,Alex Zanardi,1996-2001,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,15,,,2,,,,,"fearless, audacious passer",Last-lap Corkscrew pass at Laguna Seca 1996; 41 F1 starts,H,
+Formula-Indy,Simon Pagenaud,2008-2024,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,15,,,1,,,,,"precise, versatile",2019 Indy 500,H,
+Formula-Indy,Gil de Ferran,1995-2003,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,12,,,2,,,,,"cerebral, consistent",2003 Indy 500,H,
+Formula-Indy,Pato O'Ward,2018-,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,12,,,0,,,,,"aggressive, hard-charging",,H,
+Formula-Indy,Colton Herta,2018-2025,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,9,,,0,,,,,"fast, bold, occasionally overdrives",Youngest-ever IndyCar race winner,H,
+Formula-Indy,Alexander Rossi,2015-,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,8,,,0,,,,,"aggressive, tactical",2016 Indy 500 as a rookie; 5 F1 starts,H,
+Formula-Indy,Scott McLaughlin,2021-,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,7,,,0,,,,,"fast, driven qualifier",3x Supercars champion (2018-2020),H,
+Formula-Indy,Parnelli Jones,1960-1967,American Championship Car career (wins through race 17 of 2026; titles incl. 2026),,6,,,0,,,,,fearless hard-charger,1963 Indy 500,H,
+Rally,Didier Auriol,1984-2005,WRC career (wins as of 2026 Rally Finland); no poles in rally,152,20,,53,1,,55,15,40,precise tarmac master,1994 champion; Tour de Corse specialist,M,L
+Rally,Markku Alen,1973-2001,WRC career (wins as of 2026 Rally Finland); no poles in rally,129,19,,56,0,,55,15,40,"flamboyant, flat-out Mr Finland",1978 FIA Cup predates official drivers' title,M,L
+Rally,Jari-Matti Latvala,2002-2020,WRC career (wins as of 2026 Rally Finland); no poles in rally,209,18,,66,0,,50,28,22,"blindingly fast, crash-prone early, emotional",Record 18 wins without a title,M,L
+Rally,Miki Biasion,1980-1994,WRC career (wins as of 2026 Rally Finland); no poles in rally,78,17,,40,2,,25,5,20,"smooth, calculated, consistent",1987-88 champion with Lancia,M,L
+Rally,Bjorn Waldegard,1973-1992,WRC career (wins as of 2026 Rally Finland); no poles in rally,95,16,,35,1,,40,8,32,"calm, patient Safari master",First official drivers' champion (1979),M,L
+Rally,Mikko Hirvonen,2002-2014,WRC career (wins as of 2026 Rally Finland); no poles in rally,163,15,,67,0,,30,12,18,"consistent, steady points-collector",4x title runner-up,M,L
+Rally,Stig Blomqvist,1973-2006,WRC career (wins as of 2026 Rally Finland); no poles in rally,122,11,,28,1,,55,10,45,"quattro ace, left-foot braking pioneer",1984 champion,M,L
+Rally,Timo Salonen,1974-2002,WRC career (wins as of 2026 Rally Finland); no poles in rally,98,11,,26,1,,45,10,35,"laid-back, deceptively quick",1985 champion in Peugeot 205 T16,M,L
+Rally,Sandro Munari,1973-1984,WRC career (wins as of 2026 Rally Finland); no poles in rally,,7,,,0,,,,,"Il Drago, tarmac hero",Lancia Stratos icon; starts/podiums not sourced,M,
+Rally,Gilles Panizzi,1990-2006,WRC career (wins as of 2026 Rally Finland); no poles in rally,,7,,,0,,,,,ultra-committed tarmac specialist,Wins all on tarmac,M,
+Rally,Markko Martin,1997-2005,WRC career (wins as of 2026 Rally Finland); no poles in rally,,5,,,0,,,,,"fast, precise",,M,
+Rally,Kris Meeke,2002-2019,WRC career (wins as of 2026 Rally Finland); no poles in rally,100,5,,16,0,,30,18,12,"blinding speed, big crashes",Dropped by Citroen in 2018 over crash rate,L,L
+Rally,Dani Sordo,2003-2024,WRC career (wins as of 2026 Rally Finland); no poles in rally,190,3,,57,0,,30,10,20,"tarmac specialist, dependable",,L,L
+Rally,Andreas Mikkelsen,2006-2024,WRC career (wins as of 2026 Rally Finland); no poles in rally,120,3,,20,0,,25,10,15,"fast, streaky",,L,L
+Rally,Esapekka Lappi,2011-2024,WRC career (wins as of 2026 Rally Finland); no poles in rally,110,2,,16,0,,25,12,13,"fast on fast gravel, hit-or-miss",,L,L
+Rally,Oliver Solberg,2019-,WRC career (wins as of 2026 Rally Finland); no poles in rally,,2,,,0,,,,,"aggressive, spectacular, rising",Wins at Estonia 2025 and Monte Carlo 2026; son of Petter,H,
+Rally,Takamoto Katsuta,2016-,WRC career (wins as of 2026 Rally Finland); no poles in rally,,2,,,0,,,,,"fast, historically error-prone, now winning","First wins in 2026 (Safari, Croatia)",H,
+Prototype,Frank Biela,1998-2008,Le Mans starts/overall wins/overall podiums; champs = endurance or series titles,10,5,,7,2,,,,,"steady, reliable Audi banker",5 Le Mans wins; also 1991 DTM and 1996 BTCC champion,L,
+Prototype,Emanuele Pirro,1990s-2008,Le Mans starts/overall wins/overall podiums; champs = endurance or series titles,13,5,,8,0,,,,,"smooth, versatile veteran",5 Le Mans wins; 37 F1 starts,L,
+Prototype,Olivier Gendebien,1955-1962,Le Mans starts/overall wins/overall podiums; champs = endurance or series titles,12,4,,6,0,,,,,"precise, disciplined endurance master",4 Le Mans wins,L,
+Prototype,Yannick Dalmas,1990s,Le Mans starts/overall wins/overall podiums; champs = endurance or series titles,14,4,,5,0,,,,,"steady, adaptable",4 Le Mans wins with 4 different manufacturers,L,
+Prototype,Al Holbert,1970s-1987,Le Mans starts/overall wins/overall podiums; champs = endurance or series titles,9,3,,4,0,,,,,"engineer-racer, fast and consistent",3 Le Mans wins,L,
+Prototype,Hurley Haywood,1970s-2000s,Le Mans starts/overall wins/overall podiums; champs = endurance or series titles,18,3,,6,0,,,,,smooth endurance specialist,3 Le Mans wins; 5x Daytona 24h winner,L,
+Prototype,Bob Wollek,1968-2000,Le Mans starts/overall wins/overall podiums; champs = endurance or series titles,30,0,,4,0,,,,,"fast, famously unlucky",Most Le Mans starts without an overall win,L,
+Prototype,Loic Duval,2008-,Le Mans starts/overall wins/overall podiums; champs = endurance or series titles,12,1,,3,1,,,,,"fast, bold",2013 Le Mans winner and WEC champion; big 2014 practice crash,L,
+Prototype,Anthony Davidson,2009-2021,Le Mans starts/overall wins/overall podiums; champs = endurance or series titles,10,0,,4,1,,,,,"fast, precise, technical",2014 WEC champion; airborne crash at Le Mans 2012; 24 F1 starts,L,
+Prototype,Mike Rockenfeller,2005-,Le Mans starts/overall wins/overall podiums; champs = endurance or series titles,9,1,,3,1,,,,,"consistent, composed",2010 Le Mans winner; 2013 DTM champion; big crash at Le Mans 2011,L,
+Prototype,Earl Bamber,2014-,Le Mans starts/overall wins/overall podiums; champs = endurance or series titles,9,2,,2,1,,,,,"aggressive, quick",Le Mans 2015 and 2017 winner; 2017 WEC champion,L,
+Prototype,Nick Tandy,2011-,Le Mans starts/overall wins/overall podiums; champs = endurance or series titles,12,1,,1,0,,,,,"attacking, bold overtaker",2015 Le Mans winner,L,
+Prototype,Alexander Wurz,1994-2015,Le Mans starts/overall wins/overall podiums; champs = endurance or series titles,9,2,,5,0,,,,,"technical, smooth, safety-minded","Le Mans 1996 and 2009; F1: 69 starts, 3 podiums",L,
+Prototype,Stephane Sarrazin,1999-2019,Le Mans starts/overall wins/overall podiums; champs = endurance or series titles,18,0,,7,0,,,,,"fast, perennial runner-up",Multiple Le Mans 2nd places,L,
+Touring,Mark Skaife,1987-2011,ATCC/Supercars,,,,,5,,,,,"precise, analytical, ruthless",Multiple Bathurst 1000 wins,M,
+Touring,Dick Johnson,1970s-2008,ATCC,,,,,5,,,,,"hard-charging, determined crowd hero",3x Bathurst winner,M,
+Touring,Allan Moffat,1960s-1990s,ATCC,,,,,4,,,,,"calculating, disciplined",4x Bathurst winner,M,
+Touring,Garth Tander,1998-,Supercars,,,,,1,,,,,"hard racer, endurance-strong",2007 champion; multiple Bathurst 1000 wins,M,
+Touring,Andy Rouse,1970s-1990s,BTCC,,,,,4,,,,,"engineer-racer, calculating",,M,
+Touring,Fabrizio Giovanardi,1990s-2010s,BTCC,,,,,2,,,,,"aggressive, relentless",BTCC 2007-08,M,
+Touring,Gordon Shedden,2006-,BTCC,,,,,2,,,,,"hard racer, consistent",BTCC 2015-16,M,
+Touring,Rickard Rydell,1990s-2010s,BTCC,,,,,1,,,,,smooth qualifying specialist,1998 champion with Volvo,M,
+Touring,Laurent Aiello,1990s-2005,BTCC/DTM,,,,,2,,,,,"fast, aggressive","BTCC 1999, DTM 2002, 1998 Le Mans winner",M,
+Touring,John Cleland,1980s-1990s,BTCC,,,,,1,,,,,"combative, outspoken",1995 champion,M,
+Touring,James Thompson,1990s-2010s,BTCC/WTCC,,,,,2,,,,,"fast, precise, versatile",BTCC 2002 and 2004,M,
+Touring,Gary Paffett,2003-2018,DTM,,,,,2,,,,,"tenacious, consistent",DTM 2005 and 2018,M,
+Touring,Marco Wittmann,2011-,DTM,,,,,2,,,,,"consistent, quick",DTM 2014 and 2016,M,
+Touring,Timo Scheider,2000s-2015,DTM,,,,,2,,,,,hard racer,DTM 2008-09,M,
+Touring,Roberto Ravaglia,1980s-1990s,WTC/ETCC/DTM,,,,,4,,,,,precise BMW M3 master,"WTC 1987, ETCC 1986 and 1988, DTM 1989",M,
+Drift,Samuel Hubinette,2004-2010s,Formula Drift titles (sourced champions table),,,,,2,,,,,"aggressive, high-speed Mad Swede",FD champion 2004 and 2006 (Dodge Viper),H,
+Drift,Rhys Millen,2004-2010s,Formula Drift titles (sourced champions table),,,,,1,,,,,"fearless, versatile",2005 FD champion; also Pikes Peak racer,H,
+Drift,Tanner Foust,2004-2010s,Formula Drift titles (sourced champions table),,,,,2,,,,,"precise, versatile stunt and rallycross ace",FD champion 2007 and 2008,H,
+Drift,Daijiro Yoshihara,2004-,Formula Drift titles (sourced champions table),,,,,1,,,,,"technical, smooth",2011 FD champion,H,
+Drift,Michael Essa,2008-,Formula Drift titles (sourced champions table),,,,,1,,,,,"consistent, calculated",2013 FD champion (BMW M3),H,
+Drift,Chelsea DeNofa,2010s-,Formula Drift titles (sourced champions table),,,,,1,,,,,"smooth, stylish",2023 FD champion (RTR Mustang),H,
+Drift,Ryan Tuerck,2000s-,Formula Drift titles (sourced champions table),,,,,0,,,,,"stylish, high-angle crowd-pleaser",FD Best Style award 2012,M,
+Drift,Aurimas Bakchis,2011-,Formula Drift titles (sourced champions table),,,,,0,,,,,"clean, precise, consistent",FD title runner-up 2024,M,
+Drift,Matt Field,2010s-,Formula Drift titles (sourced champions table),,,,,0,,,,,high-speed V8 aggression,2025 FD round winner (Evergreen),M,
+Drift,Mad Mike Whiddett,2000s-,Formula Drift titles (sourced champions table),,,,,2,,,,,"rotary showman, huge commitment",FD Japan and FD Asia champion 2018,H,

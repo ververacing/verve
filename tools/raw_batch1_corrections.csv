@@ -1,0 +1,30 @@
+roster,driver,field,old_value,new_value,source
+Drift,Vaughn Gittin Jr.,championships,1,2,Formula D Wikipedia champions table (2010 and 2020)
+Drift,Daigo Saito,championships,1,4,Formula D Wikipedia champions table (FD 2012 + FD Asia 2011-2013); update notes
+F1-classic,Mario Andretti,dnf_total_est,62,72,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,Mario Andretti,dnf_mechanical_est,50,60,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,Mario Andretti,dnf_conf,L,M,DNF total now sourced
+F1-classic,Jenson Button,dnf_total_est,70,75,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,Jenson Button,dnf_mechanical_est,56,61,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,Jenson Button,dnf_conf,L,M,DNF total now sourced
+Vintage,Graham Hill,dnf_total_est,75,77,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+Vintage,Graham Hill,dnf_mechanical_est,63,65,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+Vintage,Graham Hill,dnf_conf,L,M,DNF total now sourced
+F1-classic,Niki Lauda,dnf_total_est,75,80,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,Niki Lauda,dnf_mechanical_est,65,70,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,Niki Lauda,dnf_conf,L,M,DNF total now sourced
+F1-classic,David Coulthard,dnf_total_est,55,81,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,David Coulthard,dnf_mechanical_est,41,67,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,David Coulthard,dnf_conf,L,M,DNF total now sourced
+F1-classic,Nelson Piquet,dnf_total_est,80,86,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,Nelson Piquet,dnf_mechanical_est,64,70,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,Nelson Piquet,dnf_conf,L,M,DNF total now sourced
+F1-classic,Jean Alesi,dnf_total_est,100,87,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,Jean Alesi,dnf_mechanical_est,75,62,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,Jean Alesi,dnf_conf,L,M,DNF total now sourced
+F1-classic,Nigel Mansell,dnf_total_est,95,93,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,Nigel Mansell,dnf_mechanical_est,73,71,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,Nigel Mansell,dnf_conf,L,M,DNF total now sourced
+F1-classic,Gerhard Berger,dnf_total_est,90,95,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,Gerhard Berger,dnf_mechanical_est,72,77,"Jalopnik career retirement counts (includes DSQs); keep crash est, recompute mechanical"
+F1-classic,Gerhard Berger,dnf_conf,L,M,DNF total now sourced

@@ -10,6 +10,7 @@
 -- the car's class. Everything pcall-guarded; player and slow/recovering cars are skipped.
 
 local Classes = require('lib.classes')
+local Drivers = require('lib.drivers')
 local H = {}
 
 -- driven by the app each frame:
@@ -79,11 +80,11 @@ local smoothedGrip, slewT = {}, {}
 
 -- Pick a mistake flavour, lightly biased by context: under pressure a driver is likelier to
 -- lock up under braking; mid-corner they're likelier to miss the apex or run wide on exit.
-local function pickMistake(p, cornering)
+local function pickMistake(p, cornering, avoidSharp)
     local total, adj = 0, {}
     for idx, m in ipairs(MISTAKES) do
         local w = m.w
-        if m.kind == "lockup" then w = w * (1 + 1.2 * (p or 0)) end
+        if m.kind == "lockup" then w = avoidSharp and 0 or (w * (1 + 1.2 * (p or 0))) end
         if m.kind == "missApex" or m.kind == "wideExit" then w = w * (0.6 + 0.8 * (cornering or 0)) end
         adj[idx] = w; total = total + w
     end
@@ -250,12 +251,16 @@ function H.getModifiers(i)
     end
     seed(i)
     local now = os.clock()
+    local prof = Drivers.statsOf(i)     -- optional per-slot driver profile (nil = normal system)
 
     local vGrip, vCaut = 0, 0
     if H.HUMAN_VAR then
+        -- a driver profile pins consistency (metronomic vs streaky) and cancels the random pace
+        -- bias (pace is handled deterministically via the car's AI level in the director).
+        local consDiv = prof and (0.4 + 1.2 * prof.cons) or cons[i]
         local dwv = 0.6 * math.sin(now * 0.050 + phase[i]) + 0.4 * math.sin(now * 0.017 + phase[i] * 1.7)
-        dwv = dwv / cons[i]
-        vGrip = pers[i] + dwv * DRIFT_AMP
+        dwv = dwv / consDiv
+        vGrip = (prof and 0 or pers[i]) + dwv * DRIFT_AMP
         vCaut = -dwv * CAUTION_AMP
     end
     local pGrip, pCaut = 0, 0
@@ -272,16 +277,29 @@ function H.getModifiers(i)
 
             local p = pressure01(i, car, now)
             if p > 0 then vGrip = vGrip - PRESSURE_NERVES * p end
-            if H.HUMAN_ERRORS and cm.mistake > 0 then
+            if H.HUMAN_ERRORS then
+                local classGate = cm.mistake
+                local rate, sevScale, avoidSharp = 0, 1.0, false
+                if prof then
+                    -- driver RISK drives errors, and works even on classes that never bobble by
+                    -- default (e.g. formula). Fragile aero classes (low classGate) get errors far
+                    -- LESS often and gentler, so a driver's risk shows as the odd lost place, not a
+                    -- spin/DNF -- while the relative order between drivers (Lance > Lewis) is kept.
+                    local frag = math.min(classGate, 1)          -- 0 = fragile aero .. 1 = robust
+                    rate = (MISTAKE_BASE + MISTAKE_RATE * p) * (0.15 + 1.15 * prof.risk) * (0.30 + 0.70 * frag)
+                    sevScale = 0.45 + 0.55 * frag
+                    avoidSharp = frag < 0.7                       -- no sharp lockup on fragile cars
+                elseif classGate > 0 then
+                    rate = (MISTAKE_BASE + MISTAKE_RATE * p) * classGate
+                end
                 local dtp = lastT[i] and (now - lastT[i]) or 0
-                if dtp > 0 and dtp < 1 and (not mistakeUntil[i] or now > mistakeUntil[i]) then
-                    local rate = (MISTAKE_BASE + MISTAKE_RATE * p) * cm.mistake
+                if rate > 0 and dtp > 0 and dtp < 1 and (not mistakeUntil[i] or now > mistakeUntil[i]) then
                     if math.random() < rate * dtp then
                         local st = car.steer
                         local cornering = (type(st) == "number") and clamp(math.abs(st) / 0.35, 0, 1) or 0
-                        local m = pickMistake(p, cornering)
+                        local m = pickMistake(p, cornering, avoidSharp)
                         mistakeUntil[i] = now + m.dur
-                        mistakeGrip[i]  = m.grip
+                        mistakeGrip[i]  = m.grip * sevScale
                         mistakeCaut[i]  = m.caut
                     end
                 end

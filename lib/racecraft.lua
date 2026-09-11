@@ -18,6 +18,7 @@
 -- keeps a car eager to fill a gap right after it opens.
 
 local Classes   = require('lib.classes')
+local Drivers   = require('lib.drivers')
 
 local R = {}
 R.ENABLED     = true
@@ -36,6 +37,32 @@ local POUNCE_CAUT = -0.5   -- extra closing while pouncing (fill the opened spac
 -- and makes passes / defences decisive instead of hesitant.
 local COMMIT_HOLD    = 0.7   -- s to hold a committed attack/defend decision
 local COMMIT_RELEASE = 1.5   -- gap must grow past threshold*this to drop the commitment early
+
+-- Race awareness: competent drivers manage risk by CONTEXT, not just the car in front.
+--   Opening-lap caution -- cold tyres + a packed grid: calmer, more spacing, less line-swapping
+--     off the line, fading across the first lap. Kills first-corner pile-ups.
+--   Stakes / bring-it-home -- with clear track both ways there's nothing to win by pushing, so a
+--     lone car circulates a touch calmer instead of binning it for no reason.
+--   Blue-flag yield -- a car on a higher lap coming through gets let past (move off-line, lift),
+--     instead of being fought like a rival.
+--   Leave room -- when genuinely alongside (overlapping) and NOT the car with the corner, don't
+--     pinch into them; ease off and lift. Pure contact-reducer.
+-- All are applied AFTER the racecraft-intensity scale, so the safety holds even at low intensity.
+local OPENLAP_CAUT   = 0.45  -- extra caution at the very start of a race
+local OPENLAP_AGGR   = 0.40  -- aggression trimmed by up to this fraction at the start
+local OPENLAP_OFFSET = 0.55  -- line-changes trimmed by up to this fraction at the start
+local OPENLAP_FADE   = 0.60  -- opening-lap effect gone by this fraction into lap 1
+local ISOLATED_GAP   = 0.030 -- clear track BOTH ways -> nothing to race
+local ISOLATED_AGGR  = 0.20  -- aggression trim when isolated
+local ISOLATED_CAUT  = 0.10  -- small lift when isolated (no pointless risk)
+local YIELD_GAP      = 0.010 -- a lapping car this close behind -> start moving aside
+local YIELD_OFFSET   = 0.45  -- move this far off-line to let the lapper through
+local YIELD_AGGR     = 0.45  -- ease off only slightly while being lapped -- you're still racing
+local YIELD_LIFT_GAP = 0.004 -- only actually lift once the lapper is THIS close (else keep racing pace)
+local YIELD_CAUT     = 0.18  -- small lift as the faster car draws right up (was a big early slowdown)
+local ALONGSIDE_GAP  = 0.0025-- on-track gap counting as "alongside" (overlap)
+local ALONGSIDE_LAT  = 0.45  -- lateral separation under which two cars overlap
+local LEAVEROOM_CAUT = 0.20  -- lift when overlapping and not the car with the corner
 
 local ATTACK_GAP   = 0.008
 local PASS_GAP     = 0.0035
@@ -129,9 +156,13 @@ function R.evaluate(i, dt)
 
         local t = TACTICS[Classes.keyOf(i)] or TACTICS.road
 
+        local myLap = me.lapCount or 0
+
         -- nearest ahead / behind (gap, speed, index)
         local gapA, aheadSpd, aheadIdx = 1e9, 0, -1
         local gapB, behindSpd, behindIdx = 1e9, 0, -1
+        local nearGap, nearIdx, nearAhead = 1e9, -1, true   -- closest car by on-track gap (either side)
+        local lapperIdx, lapperGap = -1, 1e9                -- nearest car on a higher lap coming through
         local crowd = 0
         local sim = ac.getSim()
         for j = 0, sim.carsCount - 1 do
@@ -143,18 +174,27 @@ function R.evaluate(i, dt)
                     local b = mySpline - oc.splinePosition; if b < 0 then b = b + 1 end
                     if b > 0 and b < gapB then gapB = b; behindSpd = oc.speedKmh or 0; behindIdx = j end
                     if d < CROWD_GAP or b < CROWD_GAP then crowd = crowd + 1 end
+                    local nd = d < b and d or b                       -- true nearest on track
+                    if nd < nearGap then nearGap = nd; nearIdx = j; nearAhead = (d <= b) end
+                    if b < YIELD_GAP and (oc.lapCount or 0) > myLap and b < lapperGap then lapperIdx = j; lapperGap = b end
                 end
             end
         end
 
         local attackGap = ATTACK_GAP * t.gap
         local defendGap = DEFEND_GAP
-        -- baseline aggression = the car's own (slider) value; Verve adds a bit when fighting
-        local baseA = me.aiAggression
-        if not baseA or baseA < 0 then baseA = AGGR_CRUISE end
-        baseA = clamp(baseA, 0.2, 1.0)
-        -- per-driver spread: some drivers naturally race a bit harder, scaled by the Variability slider
-        baseA = clamp(baseA + (hash01(i * 11 + 5) * 2 - 1) * AGGR_SPREAD * R.VARIABILITY, 0.15, 1.0)
+        -- baseline aggression: a driver profile sets it directly; otherwise the car's own (slider)
+        -- value plus a per-driver spread (scaled by Variability) so the field isn't uniform.
+        local prof = Drivers.statsOf(i)
+        local baseA
+        if prof then
+            baseA = clamp(prof.aggr, 0.15, 1.0)
+        else
+            baseA = me.aiAggression
+            if not baseA or baseA < 0 then baseA = AGGR_CRUISE end
+            baseA = clamp(baseA, 0.2, 1.0)
+            baseA = clamp(baseA + (hash01(i * 11 + 5) * 2 - 1) * AGGR_SPREAD * R.VARIABILITY, 0.15, 1.0)
+        end
         local myLat = latOf(me.position)          -- current lateral on track (-1 left .. +1 right)
         local target, aggr = 0, baseA
 
@@ -232,10 +272,49 @@ function R.evaluate(i, dt)
         -- to tuck up and pass in traffic, or the pack over-gaps and concertinas to a crawl.
         local crowdDamp = clamp(1 - math.max(0, crowd - 1) * 0.30, 0.25, 1)
         caut = caut * eff
+
+        -- RACE AWARENESS (added after the intensity scale, so safety terms hold at any intensity):
+        -- opening-lap caution -- calmer + more spacing off the line, fading across the first lap.
+        local openingLap = (myLap == 0 and crowd >= 1) and clamp(1 - mySpline / OPENLAP_FADE, 0, 1) or 0
+        if openingLap > 0 then
+            caut = caut + OPENLAP_CAUT * openingLap
+            aggr = aggr * (1 - OPENLAP_AGGR * openingLap)
+        end
+        -- bring-it-home -- clear track both ways: nothing to race, so ease off a touch.
+        if gapA > ISOLATED_GAP and gapB > ISOLATED_GAP then
+            aggr = aggr * (1 - ISOLATED_AGGR)
+            caut = caut + ISOLATED_CAUT
+        end
+
         -- high-speed damping: smaller line changes at speed (a big lateral move at 300 km/h is
         -- what unsettles fast cars). Full effect up to ~180 km/h, tapering to half by ~360.
         local speedDamp = clamp(1 - math.max(0, spd - 180) / 400, 0.5, 1)
-        target = clamp(target * eff * speedDamp * crowdDamp, -1, 1)
+        local phaseOff  = 1 - OPENLAP_OFFSET * openingLap        -- less line-swapping at the start
+        target = clamp(target * eff * speedDamp * crowdDamp * phaseOff, -1, 1)
+
+        -- leave room -- genuinely alongside (overlapping) and NOT the car with the corner: don't
+        -- pinch into them and lift a touch. Can only reduce contact; never forces a move.
+        if nearIdx >= 0 and nearGap < ALONGSIDE_GAP and nearAhead then
+            local nearLat = latOf(ac.getCar(nearIdx).position)
+            if math.abs(nearLat - myLat) < ALONGSIDE_LAT then
+                local towardSign = (nearLat >= myLat) and 1 or -1
+                if target * towardSign > 0 then target = target * 0.2 end   -- stop leaning into them
+                caut = caut + LEAVEROOM_CAUT
+            end
+        end
+
+        -- blue-flag yield -- a car on a higher lap is coming through: concede the line and lift,
+        -- rather than racing the leader. Overrides attack/defend; edge-safety below keeps it honest.
+        if lapperIdx >= 0 then
+            local lapLat = latOf(ac.getCar(lapperIdx).position)
+            target = ((lapLat >= myLat) and -1 or 1) * YIELD_OFFSET   -- move off the racing line, side the lapper isn't
+            aggr   = math.min(aggr, YIELD_AGGR)                       -- ease off only a little -- keep racing
+            -- keep racing pace until the faster car is right there, then lift just a touch to wave it by
+            if lapperGap < YIELD_LIFT_GAP then
+                caut = caut + YIELD_CAUT * clamp(1 - lapperGap / YIELD_LIFT_GAP, 0, 1)
+            end
+            state  = 0
+        end
 
         -- track-edge safety: never push a car further toward an edge it's already near. Stops
         -- Verve from shoving a car onto a kerb at a corner exit (the near-rollover cause).

@@ -7,11 +7,13 @@ local Classes   = require('lib.classes')
 local Racecraft = require('lib.racecraft')
 local Overrides = require('lib.overrides')
 local Update    = require('lib.update')
+local Drivers   = require('lib.drivers')
 
 -- defaults for the global settings (also used for "reset to defaults")
 local DEFAULTS = {
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
+    crashRepair = false,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
 }
 
@@ -20,6 +22,7 @@ local DEFAULTS = {
 local S = ac.storage({
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
+    crashRepair = false,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     autosave = true,
 })
@@ -65,10 +68,14 @@ function script.update(dt)
 
     local behaviourOn = G.humanVar or G.classPhys or G.racecraft
     local n = 0
-    for i = 1, sim.carsCount - 1 do
+    -- start at 0 so the player's own car is managed WHEN (and only when) it's under AI control
+    -- (Ctrl+C takeover): the isAIControlled gate below means we never touch it while you drive.
+    for i = 0, sim.carsCount - 1 do
         pcall(function()
             local car = ac.getCar(i)
             if not car or not car.isAIControlled then return end
+            if car.isInPitlane then return end          -- never touch a car doing a pit stop (player or AI)
+            Drivers.applyPace(i)                        -- per-slot driver pace via AI level (self-restores when cleared)
             local gOff, cOff = Human.getModifiers(i)
             if G.controlGrip then
                 physics.setExtraAIGrip(i, clamp(G.baseGrip + gOff, 0.5, 1.5))
@@ -94,12 +101,15 @@ function script.update(dt)
     managed = n
 
     Recovery.ENABLED = G.recovery
+    Recovery.CRASH_REPAIR = G.crashRepair
     if G.recovery then Recovery.update(dt) end
 end
 
 ac.onSessionStart(function()
     pcall(Classes.reset)
     pcall(Racecraft.reset)
+    pcall(Drivers.reset)          -- driver profiles are session-only: wipe every race
+    pcall(Recovery.reset)         -- clear per-car recovery + pit-rescue state
 end)
 
 -- ------------------------------- UI -------------------------------
@@ -119,6 +129,26 @@ local function comboFor(tag, previewText, currentKey, opts, onPick)
     end)
 end
 
+-- searchable, class-filtered driver dropdown for one grid slot (index). Type to narrow the list.
+local driverFilter = {}
+local function driverComboFor(idx)
+    local cls = Classes.keyOf(idx)
+    local curKey = Drivers.profileOf(idx)
+    local preview = curKey and Drivers.nameOf(curKey) or '- driver -'
+    ui.setNextItemWidth(150)
+    ui.combo('##drv' .. idx, preview, nil, function()
+        local typed = ui.inputText('search##ds' .. idx, driverFilter[idx] or '')
+        if type(typed) == 'string' then driverFilter[idx] = typed end
+        local fl = (driverFilter[idx] or ''):lower()
+        if ui.selectable('- none -', curKey == nil) then Drivers.setProfile(idx, nil) end
+        for _, d in ipairs(Drivers.rosterFor(cls)) do
+            if fl == '' or d.name:lower():find(fl, 1, true) then
+                if ui.selectable(d.name, d.key == curKey) then Drivers.setProfile(idx, d.key) end
+            end
+        end
+    end)
+end
+
 local function renderCarRow(id, name, idx)
     local auto = idx and Classes.autoKeyOf(idx) or nil
     local curClass = Overrides.classOverride(id) or 'auto'
@@ -127,6 +157,7 @@ local function renderCarRow(id, name, idx)
     comboFor('##cls' .. id, classPreview, curClass, CLASS_OPTS, function(opt) Overrides.setClass(id, opt) end)
     ui.sameLine()
     if ui.button('Reset##r' .. id) then Overrides.resetCar(id) end
+    if idx then ui.sameLine(); driverComboFor(idx) end   -- driver only for cars on the grid this session
 end
 
 local function carReviewList()
@@ -135,7 +166,7 @@ local function carReviewList()
     pcall(function()
         local sim = ac.getSim()
         if not sim then return end
-        for i = 1, sim.carsCount - 1 do
+        for i = 0, sim.carsCount - 1 do          -- include the player's car so you can pre-assign a driver for Ctrl+C takeover
             local id = nil
             pcall(function() id = ac.getCarID(i) end)
             if id and not inSession[id] then
@@ -220,6 +251,7 @@ function script.windowMain()
     toggle('Racecraft (overtaking & defending)', 'racecraft', 'AI close up and pressure, pull off-line to pass on straights, and make one clean defensive move. Collision-awareness stays on.')
     toggle('Formula DRS discipline', 'drsDiscipline', 'On Formula cars, close DRS when the game says it is not available (outside a DRS zone or not within range). In-zone DRS is left to the game.')
     toggle('Self-recovery', 'recovery', 'Un-sticks spun/beached AI that are not wrecked. Never touches the race start or pit exit.')
+    toggle('Crash repair (experimental)', 'crashRepair', 'Needs Self-recovery ON. Hijacks AC\'s retirement: while recovery is working a stuck car, AC is told NOT to retire it, and after a short penalty it gets a fresh wing/body IN PLACE (no teleport, no pit) so recovery can drive it out. Only genuinely hopeless cars (broken suspension, or unrecoverable after ~15s) are allowed to retire. No teleporting -- cannot disrupt the pack or a race start. Off by default.')
     toggle('Control AI grip', 'controlGrip', 'Verve sets each AI car grip = base + variability. Turn OFF to defer grip to another AI mod (recovery still works).')
 
     ui.newLine()
@@ -236,8 +268,12 @@ function script.windowMain()
 
     ui.newLine()
     ui.separator()
-    ui.textColored('Per-car class & racecraft level', rgbm(0.6, 0.6, 0.6, 1))
-    ui.textWrapped('Class is auto-detected from tags/name and drives the physics (warm-up, wet, mistakes). Override any car if it guesses wrong. Available on the grid before the lights.')
+    ui.textColored('Per-car class & driver', rgbm(0.6, 0.6, 0.6, 1))
+    ui.textWrapped('Class (left) is auto-detected and drives the physics (warm-up, wet, mistakes) -- override if it guesses wrong. Driver (right, optional) gives that grid slot its own pace, aggression and risk, from a real racer or a generic archetype. Session-only, so five identical cars can be five different drivers. Tip: pause on the grid with ESC to set up, or just hit Randomize.')
+    if ui.button('Randomize driver grid') then Drivers.randomizeGrid() end
+    if ui.itemHovered() then ui.setTooltip('Assign every AI car a unique driver from its class (overflow uses generic archetypes). Session-only, resets each race.') end
+    ui.sameLine()
+    if ui.button('Clear drivers') then Drivers.clearAll() end
     carReviewList()
     ui.newLine()
     if ui.button('Reset settings to defaults') then resetGlobals() end
@@ -255,9 +291,13 @@ function script.windowMain()
             ui.text(string.format('Attacking: %d   Defending: %d', Racecraft.attacking or 0, Racecraft.defending or 0))
         end
         ui.text(string.format('Recovering right now: %d', Recovery.count or 0))
+        if G.crashRepair then ui.text(string.format('Cars repaired & rejoined: %d', Recovery.repairedCount or 0)) end
         pcall(function()
             local fc = ac.getSim().focusedCar
-            if fc and fc >= 0 then ui.text('Focused car class: ' .. tostring(Classes.keyOf(fc))) end
+            if fc and fc >= 0 then
+                local dk = Drivers.profileOf(fc)
+                ui.text('Focused car: ' .. tostring(Classes.keyOf(fc)) .. (dk and ('  -  ' .. Drivers.nameOf(dk)) or ''))
+            end
         end)
     end
 end

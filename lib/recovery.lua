@@ -7,13 +7,15 @@
 
 local R = {}
 R.ENABLED = true
+R.CRASH_REPAIR = false    -- experimental: repair a stuck car ON TRACK (no pit) and set it back on the racing line
 
 local MOVE_SPEED  = 30.0
 local STOP_SPEED  = 5.0
-local STUCK_TIME  = 2.5
-local GIVEUP_TIME = 15.0
-local NEAR_MAX    = 22.0
-local ABORT_DIST  = 45.0
+local STUCK_TIME  = 2.0       -- engage a touch sooner, so AC can't retire a car in the gap
+local GIVEUP_TIME = 45.0      -- absolute backstop: only after this long total do we ever hand a car back to AC
+local POST_REPAIR_HOLD = 15.0 -- once we've REPAIRED a car, if it STILL won't move in this long it's wedged -> let it go
+local NEAR_MAX    = 45.0      -- start recovering cars this far off the line (wide first-corner shunts)
+local ABORT_DIST  = 85.0      -- and keep working them from this far out
 local GAS         = 0.28
 local STEER_GAIN  = 2.0
 local TARGET_AHEAD= 0.002
@@ -34,9 +36,23 @@ local BACKUP_RANGE  = 1.0
 
 R.count = 0    -- how many cars are being actively recovered right now (for UI)
 
+-- crash repair: repair a stuck car IN PLACE (recovery then drives it out). No teleport, no pit.
+local REPAIR_SLOW       = 15.0 -- km/h: below this counts as stuck/crippled
+-- "genuinely wrecked" is judged by actual DAMAGE, not just closing speed: a very hard body impact OR
+-- broken suspension. A light touch (even at 150+ km/h) does neither, so it keeps racing.
+local TERMINAL_IMPACT   = 160.0-- km/h of collision severity that counts as a race-ending body hit
+local TERMINAL_SUSP     = 0.5  -- suspension damage (0..1) that counts as genuinely broken
+-- repair "penalty" time scales with how bad the crash was (bigger hit = longer)
+local REPAIR_BASE       = 2.0  -- base repair seconds (on top of the ~2.5s recovery already waited)
+local REPAIR_PER_IMPACT = 0.05 -- extra seconds per km/h of impact (bigger shunt = longer penalty)
+local REPAIR_MIN        = 2.0  -- clamp low = catch cars sooner, before AC's own retirement fires
+local REPAIR_MAX        = 9.0
+
 local hasMoved, stuckT, recT = {}, {}, {}
 local steerSign, lastErr, checkT = {}, {}, {}
 local stallRef, stallT, backupT, backupSign, backupN = {}, {}, {}, {}, {}
+local repaired, repairRecT = {}, {}
+R.repairedCount = 0    -- cars repaired + set back on track this session (for UI)
 
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
 local function hash01(n)
@@ -49,17 +65,48 @@ local function endRec(i)
     stallRef[i] = nil; stallT[i] = nil; backupT[i] = nil
 end
 
+-- worst impact recorded across the car's damage zones (km/h). Index range read defensively.
+local function maxImpact(car)
+    local m = 0
+    pcall(function()
+        local d = car.damage
+        if d then
+            for k = 0, 4 do local v = d[k]; if type(v) == 'number' and v > m then m = v end end
+            for k = 1, 5 do local v = d[k]; if type(v) == 'number' and v > m then m = v end end
+        end
+    end)
+    return m
+end
+
+-- Is the car GENUINELY wrecked (race-ending in real life)? By actual damage, not just closing speed:
+-- a very hard body impact OR broken suspension. A light touch does neither.
+local function terminalDamage(car)
+    local body, susp = maxImpact(car), 0
+    pcall(function()
+        if car.wheels then
+            for k = 0, 3 do
+                local w = car.wheels[k]
+                if w and type(w.suspensionDamage) == 'number' and w.suspensionDamage > susp then susp = w.suspensionDamage end
+            end
+        end
+    end)
+    return body >= TERMINAL_IMPACT or susp >= TERMINAL_SUSP
+end
+
 function R.update(dt)
     if not R.ENABLED then R.count = 0; return end
     local ok, sim = pcall(ac.getSim)
     if not ok or not sim then return end
     local active = 0
-    for i = 1, sim.carsCount - 1 do
+    for i = 0, sim.carsCount - 1 do          -- includes the player's car WHEN it's under AI control (Ctrl+C)
         pcall(function()
             local car = ac.getCar(i)
             if not car or not car.isAIControlled then return end
+            local retired = false
+            pcall(function() retired = (car.isRetired == true) end)
+            if retired then endRec(i); return end               -- AC has already killed it; can't help, don't cycle on it
             local spd = car.speedKmh or 0
-            if spd > MOVE_SPEED then hasMoved[i] = true end
+            if spd > MOVE_SPEED then hasMoved[i] = true; repaired[i] = nil; repairRecT[i] = nil end   -- back racing: reset
             if car.isInPitlane then stuckT[i] = 0; endRec(i); return end
             if not hasMoved[i] then return end
 
@@ -81,8 +128,42 @@ function R.update(dt)
             if nearDist > ABORT_DIST then endRec(i); return end
 
             recT[i] = (recT[i] or 0) + dt
-            if recT[i] > GIVEUP_TIME then endRec(i); return end
+            -- Only hand a car back to AC's retirement once we've genuinely exhausted our options:
+            -- either we already REPAIRED it and it STILL won't move after a good while (so it's wedged
+            -- in geometry, not just damaged), or an absolute time backstop. Until then we keep blocking
+            -- AC's retirement and working the car (backups, repair, driving it out).
+            local exhausted = repaired[i] and repairRecT[i] and (recT[i] - repairRecT[i]) > POST_REPAIR_HOLD
+            if exhausted or recT[i] > GIVEUP_TIME then endRec(i); return end
             active = active + 1
+
+            -- TERMINAL DAMAGE: a genuinely massive shunt ends the car, just like real life. Don't fight
+            -- to save it -- stop here so we quit blocking AC and it retires, and we don't waste a wing on
+            -- it. (Body damage clears when we repair, so this only ever catches the ORIGINAL big hit,
+            -- never a car we've already fixed and sent back out.)
+            if R.CRASH_REPAIR and terminalDamage(car) then endRec(i); return end
+
+            -- HIJACK AC's retirement: while we're working this car, stop AC retiring it and release
+            -- its post-incident "brake and wait" so it (and our recovery) can move. We keep calling
+            -- these every frame it's in recovery; the moment recovery gives up (GIVEUP_TIME) we stop,
+            -- and only THEN does AC retire it -- so retirements become the few genuinely hopeless cars.
+            if R.CRASH_REPAIR then
+                pcall(function() physics.preventAIFromRetiring(i); physics.setAIStopCounter(i, 0) end)
+            end
+
+            -- CRASH REPAIR (opt-in): after a severity-scaled penalty, give the car a fresh wing/body
+            -- IN PLACE (setCarBodyDamage 0 -- no teleport, no pit, no fuel reset), so recovery's
+            -- driving below can get it going. A car whose SUSPENSION is broken (genuinely too damaged)
+            -- isn't fixed by this, stays crippled, and retires -- exactly "repair light, retire heavy".
+            if R.CRASH_REPAIR and not repaired[i] and spd < REPAIR_SLOW then
+                local penalty = clamp(REPAIR_BASE + maxImpact(car) * REPAIR_PER_IMPACT, REPAIR_MIN, REPAIR_MAX)
+                if recT[i] > penalty then
+                    pcall(function() physics.setCarBodyDamage(i, vec4(0, 0, 0, 0)) end)   -- fresh wing/body, in place
+                    repaired[i] = true
+                    repairRecT[i] = recT[i]                              -- mark when we repaired, for the give-up logic
+                    R.repairedCount = (R.repairedCount or 0) + 1
+                    stallRef[i] = nil; stallT[i] = nil; backupT[i] = nil  -- fresh start for recovery driving
+                end
+            end
 
             if backupT[i] and backupT[i] > 0 then
                 backupT[i] = backupT[i] - dt
@@ -174,6 +255,14 @@ function R.update(dt)
         end)
     end
     R.count = active
+end
+
+function R.reset()
+    hasMoved, stuckT, recT = {}, {}, {}
+    steerSign, lastErr, checkT = {}, {}, {}
+    stallRef, stallT, backupT, backupSign, backupN = {}, {}, {}, {}, {}
+    repaired, repairRecT = {}, {}
+    R.count = 0; R.repairedCount = 0
 end
 
 return R

@@ -1,5 +1,27 @@
 Verve - changelog
 
+0.10.0
+- Driver profiles (optional, big one): assign any grid slot a real driver -- 300+ across F1,
+  Le Mans/prototypes, GT, touring, rally, vintage, karts, IndyCar and drift -- or a generic
+  archetype. Each has its own pace, aggression, risk and consistency drawn from public racing
+  record, so the field feels like individuals. Class-filtered, type-to-search dropdown next to
+  each car; one-click "Randomize driver grid"; session-only, so five identical cars can be five
+  different drivers. Cross-discipline: drivers show up in every category they genuinely raced
+  (e.g. Verstappen in a kart). Pace sets each car's AI level. Leave a slot blank for the normal
+  slider-driven behaviour.
+- Crash & retirement control: Verve now decides retirements, not AC. A car that spins or crashes
+  is held (AC's own retirement blocked), given a quick wing/body repair in place after a penalty,
+  and driven back out by self-recovery. Only genuinely wrecked cars (a big impact or broken
+  suspension) or truly unrecoverable ones retire -- so an off costs time, not your race, and
+  retirement rates land near real-world instead of losing half the grid. No teleporting, no
+  pit-lane stranding. Toggle "Crash repair" (needs Self-recovery on); off by default.
+- Race awareness: calmer, more spaced opening lap (far fewer first-corner pile-ups); cars ease
+  off when there's nothing to race for; clean blue-flag behaviour (move aside and lift only as
+  the faster car arrives -- otherwise keep racing); and "leave room" so an overlapping car isn't
+  pinched into the wall.
+- Ctrl+C takeover: when the AI drives your car, it now gets the full Verve treatment -- pace,
+  racecraft and self-recovery -- and stays hands-off the instant you take back control.
+
 0.9.0
 - Human mistake variety: instead of one generic wobble, cars now make distinct, mostly
   recoverable errors -- a missed apex, a wide exit, a caught twitch, or a brief brake lockup
