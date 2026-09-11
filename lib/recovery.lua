@@ -27,6 +27,8 @@ local REJOIN_DIST = 9.0       -- hand back sooner (the AI returns to the line + 
 local REJOIN_FACE = 0.7
 local REJOIN_SPEED= 12.0
 local ACCEL_GAS   = 0.7       -- once pointed forward and clear, accelerate back up to speed
+local DIRT_GAS    = 0.9       -- off-track (gravel/dirt): power through instead of bogging to a stop
+local OFFLINE_POWER = 4.0     -- metres off the line past which we use the dirt/gravel power-out throttle
 local DANGER_GAP  = 0.006     -- fast car within this spline gap behind -> hold, don't rejoin into it
 local DANGER_SPEED= 45.0      -- km/h: a car above this counts as "traffic" to watch for
 local STALL_MOVE    = 1.0
@@ -41,7 +43,10 @@ R.count = 0    -- how many cars are being actively recovered right now (for UI)
 -- crash repair: repair a stuck car IN PLACE (recovery then drives it out). No teleport, no pit.
 local REPAIR_SLOW       = 15.0 -- km/h: below this counts as stuck/crippled
 local REPOSITION_DIST   = 9.0  -- metres off the racing line = genuinely OFF-track -> set it back on the line
-local REPOSITION_CLEAR  = 0.012-- don't set a car back on the line if another car is within this spline gap
+-- limping repair: a DAMAGED car still crawling ON-track (not stuck) drags the whole field
+local LIMP_SPEED    = 100.0    -- km/h: below this while damaged = limping
+local LIMP_IMPACT   = 55.0     -- km/h body impact that counts as performance-hurting damage
+local LIMP_GRACE    = 8.0      -- seconds limping before we give it a fresh body
 -- "genuinely wrecked" is judged by actual DAMAGE, not just closing speed: a very hard body impact OR
 -- broken suspension. A light touch (even at 150+ km/h) does neither, so it keeps racing.
 local TERMINAL_IMPACT   = 160.0-- km/h of collision severity that counts as a race-ending body hit
@@ -56,6 +61,7 @@ local hasMoved, stuckT, recT = {}, {}, {}
 local steerSign, lastErr, checkT = {}, {}, {}
 local stallRef, stallT, backupT, backupSign, backupN = {}, {}, {}, {}, {}
 local repaired, repairRecT = {}, {}
+local limpT = {}           -- how long a DAMAGED car has been crawling on-track (blocking traffic)
 local reported = {}        -- have we logged this incident to trouble-spots yet? (once per episode)
 R.repairedCount = 0    -- cars repaired + set back on track this session (for UI)
 
@@ -105,15 +111,20 @@ local function latOf(p)
     return x
 end
 
--- is the spot at track progress `prog` clear of OTHER cars (any speed)? -> never drop into a pack
-local function spotClear(sim, i, prog)
+-- Is it SAFE to drop a car back onto the line at track progress `prog`? Only blocked by a car that's
+-- basically on the spot, or a FAST car closing on it from just behind (would collect it). A car ahead,
+-- or a slow/distant one, doesn't block -- so this succeeds far more often than a blanket "spot clear",
+-- which is why beached cars used to never actually get repositioned.
+local function dropSafe(sim, i, prog)
     for j = 0, sim.carsCount - 1 do
         if j ~= i then
             local oc = ac.getCar(j)
             if oc and oc.splinePosition then
-                local g = math.abs(oc.splinePosition - prog)
-                if g > 0.5 then g = 1 - g end
-                if g < REPOSITION_CLEAR then return false end
+                local g = oc.splinePosition - prog
+                if g > 0.5 then g = g - 1 elseif g < -0.5 then g = g + 1 end   -- signed: >0 ahead, <0 behind
+                local ag = math.abs(g)
+                if ag < 0.004 then return false end                             -- someone right on the spot
+                if g < 0 and ag < 0.02 and (oc.speedKmh or 0) > DANGER_SPEED then return false end  -- fast car closing from behind
             end
         end
     end
@@ -121,10 +132,11 @@ local function spotClear(sim, i, prog)
 end
 
 -- Put an OFF-TRACK (beached) car back on the racing line at its own progress, facing forward, just
--- off to the roomier side -- ONLY if the spot is clear of traffic. A beached car can't drive itself
--- across the gravel, so this is what actually gets it to REJOIN. On-track spins are left to recovery.
-local function putBackOnLine(sim, i, progress, center)
-    if not (center and spotClear(sim, i, progress)) then return false end
+-- off to the roomier side. A beached car can't drive itself across the gravel, so this is what actually
+-- gets it to REJOIN. Gated by dropSafe unless `force` (a last-resort so a car is never abandoned).
+local function putBackOnLine(sim, i, progress, center, force)
+    if not center then return false end
+    if not force and not dropSafe(sim, i, progress) then return false end
     local p1 = ac.trackProgressToWorldCoordinate((progress + 0.0015) % 1, false)
     if not p1 then return false end
     local fx, fy, fz = p1.x - center.x, p1.y - center.y, p1.z - center.z
@@ -157,6 +169,23 @@ function R.update(dt)
             if car.isInPitlane then stuckT[i] = 0; endRec(i); return end
             if not hasMoved[i] then return end
 
+            -- LIMPING: a DAMAGED car that's still moving but crawling on-track drags the whole field down
+            -- behind it. It never trips the stuck/recovery logic (it IS moving), so handle it here: after a
+            -- short grace, give it a fresh body IN PLACE so it rejoins racing pace. Requires real damage
+            -- (a big body impact), so it never fires on a healthy car just going slow through a corner; and
+            -- not for a genuinely-wrecked (terminal) car, which should retire rather than be patched.
+            if R.CRASH_REPAIR and spd > STOP_SPEED and spd < LIMP_SPEED
+               and maxImpact(car) >= LIMP_IMPACT and not terminalDamage(car) then
+                limpT[i] = (limpT[i] or 0) + dt
+                if limpT[i] > LIMP_GRACE then
+                    pcall(function() physics.setCarBodyDamage(i, vec4(0, 0, 0, 0)) end)
+                    limpT[i] = 0
+                    R.repairedCount = (R.repairedCount or 0) + 1
+                end
+            else
+                limpT[i] = 0
+            end
+
             local isActive = (recT[i] or 0) > 0
             if not isActive then
                 if spd > STOP_SPEED then stuckT[i] = 0; return end
@@ -184,7 +213,17 @@ function R.update(dt)
             -- in geometry, not just damaged), or an absolute time backstop. Until then we keep blocking
             -- AC's retirement and working the car (backups, repair, driving it out).
             local exhausted = repaired[i] and repairRecT[i] and (recT[i] - repairRecT[i]) > POST_REPAIR_HOLD
-            if exhausted or recT[i] > GIVEUP_TIME then endRec(i); return end
+            if exhausted or recT[i] > GIVEUP_TIME then
+                -- Last resort so a car is NEVER left beached off-track for the whole race: if it's still
+                -- off the surface, force it back onto the line (ignoring traffic clearance) with a fresh
+                -- body, then hand control back -- a car that rejoins and races always beats one stuck in
+                -- the gravel. If it's on-track-but-wedged, or genuinely wrecked, we stop here and it's AC's.
+                if R.CRASH_REPAIR and nearDist > OFFLINE_POWER and not terminalDamage(car) then
+                    pcall(function() physics.setCarBodyDamage(i, vec4(0, 0, 0, 0)) end)
+                    putBackOnLine(sim, i, progress, center, true)
+                end
+                endRec(i); return
+            end
             active = active + 1
 
             -- TERMINAL DAMAGE: a genuinely massive shunt ends the car, just like real life. Don't fight
@@ -208,12 +247,19 @@ function R.update(dt)
             if R.CRASH_REPAIR and not repaired[i] and spd < REPAIR_SLOW then
                 local penalty = clamp(REPAIR_BASE + maxImpact(car) * REPAIR_PER_IMPACT, REPAIR_MIN, REPAIR_MAX)
                 if recT[i] > penalty then
-                    pcall(function() physics.setCarBodyDamage(i, vec4(0, 0, 0, 0)) end)   -- fresh wing/body, in place
-                    if nearDist > REPOSITION_DIST then putBackOnLine(sim, i, progress, center) end  -- off-track -> put it back on the line so it can rejoin
-                    repaired[i] = true
-                    repairRecT[i] = recT[i]                              -- mark when we repaired, for the give-up logic
-                    R.repairedCount = (R.repairedCount or 0) + 1
-                    stallRef[i] = nil; stallT[i] = nil; backupT[i] = nil  -- fresh start for recovery driving
+                    -- If it's OFF-track, it must actually be put back on the line to count as repaired --
+                    -- a beached car can't drive out on gravel. If traffic blocks the drop this frame, we
+                    -- DON'T mark it repaired (no false "rejoined"): we keep retrying next frames until the
+                    -- spot is safe, and the give-up backstop forces it if a gap never comes.
+                    local offTrack = nearDist > REPOSITION_DIST
+                    local placed = (not offTrack) or putBackOnLine(sim, i, progress, center, false)
+                    if placed then
+                        pcall(function() physics.setCarBodyDamage(i, vec4(0, 0, 0, 0)) end)   -- fresh wing/body, in place
+                        repaired[i] = true
+                        repairRecT[i] = recT[i]                              -- mark when we repaired, for the give-up logic
+                        R.repairedCount = (R.repairedCount or 0) + 1
+                        stallRef[i] = nil; stallT[i] = nil; backupT[i] = nil  -- fresh start for recovery driving
+                    end
                 end
             end
 
@@ -300,7 +346,13 @@ function R.update(dt)
                 if danger then
                     c.gas = 0; c.brake = 0.25                     -- wait for traffic to pass
                 else
-                    c.gas = (fdot > 0.5) and ACCEL_GAS or GAS     -- accelerate once pointed forward
+                    local g = (fdot > 0.5) and ACCEL_GAS or GAS   -- accelerate once pointed forward
+                    -- OFF-TRACK: power out of gravel/dirt. The gentle throttle bogs in soft ground and
+                    -- stops the car mid-recovery (it "turns into the dirt and stalls"); when it's off the
+                    -- surface and pointed anywhere but backwards, give it near-full throttle to carry
+                    -- through and reach the tarmac, and don't lift while steering back toward the line.
+                    if nearDist > OFFLINE_POWER and fdot > -0.1 then g = math.max(g, DIRT_GAS) end
+                    c.gas = g
                     c.brake = 0
                 end
             end
@@ -314,6 +366,7 @@ function R.reset()
     steerSign, lastErr, checkT = {}, {}, {}
     stallRef, stallT, backupT, backupSign, backupN = {}, {}, {}, {}, {}
     repaired, repairRecT = {}, {}
+    limpT = {}
     reported = {}
     R.count = 0; R.repairedCount = 0
 end

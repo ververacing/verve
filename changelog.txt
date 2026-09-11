@@ -1,5 +1,37 @@
 Verve - changelog
 
+0.10.2
+- Crash recovery no longer strands cars off-track. A beached car is only counted "repaired & rejoined"
+  once it's actually been put back on the racing line -- and the reposition now only waits for a
+  genuinely-close or fast-approaching car (not any car within ~40 m), so it succeeds instead of
+  stalling forever. As an absolute backstop, a car that still can't be freed is force-placed back on
+  the line rather than abandoned in the gravel for the whole race. (Fixes "Recovering right now" and
+  the repaired count sticking, with cars sat off-track.)
+- Limping cars cleared: a damaged car crawling on-track and holding up the field now gets a fresh
+  body after a short grace, so it rejoins racing pace instead of dragging a train behind it for laps.
+- Take the open road: if a stopped or crawling car is sitting on the track just ahead, cars now sweep
+  around it on the OPEN side (a car stopped on the right sends the field left) instead of queuing up
+  behind it. Cars already crawling in a queue behind the obstacle peel off and filter past too, and
+  they key off the genuinely-stalled car rather than whoever's merely nearest -- so a crash clears
+  instead of stacking the field nose-to-tail.
+- Quicker to pounce on open space: a fast car behind a slower one now starts moving for the pass as
+  soon as it has a real speed run, rather than waiting until it's almost touching -- and a genuine run
+  resists the pack damping, so it can still pull into clear track in a crowd (most visible off the start).
+- Less pack bunching: a car with clear road ahead now drives away on the racing line instead of running
+  a slow defensive line every corner just because someone's on its tail -- so the front of a bunch
+  stops anchoring the field. Leading a pack also earns a small pace stretch to string it out.
+- Recovery powers out of gravel: a car driving itself back from an off now uses near-full throttle on
+  soft ground instead of bogging down and stopping halfway (with the same firm reposition as a backstop
+  if it still can't make it), so it reaches the tarmac and rejoins.
+- Driver pace now genuinely strings the field out. The fastest driver ACTUALLY on the grid runs at the
+  difficulty slider, and everyone else is spaced below by how far their pace rating trails his -- and
+  that spread was widened, because the old amount barely separated cars (a mid-pack driver sat only a
+  few hundredths of an AI level off the ace, so a varied grid still bunched). A randomized grid now
+  spreads out properly instead of circulating nose-to-tail. (Aggression slider is still ignored for
+  profiled cars; each drives to their own known aggression.)
+- Starts eased slightly: the opening-lap caution was a touch too strong, so the field was over-cautious
+  off the line. Trimmed and released a bit sooner (the grid funnel still spaces the merge to turn 1).
+
 0.10.1
 - Verve now controls RETIREMENTS, not AC. A car that crashes is held (AC's own retirement blocked),
   given a fresh wing/body in place after a penalty, and put back on the racing line if it's beached

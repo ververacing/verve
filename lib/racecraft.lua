@@ -56,10 +56,10 @@ local COMMIT_RELEASE = 1.5   -- gap must grow past threshold*this to drop the co
 --   Leave room -- when genuinely alongside (overlapping) and NOT the car with the corner, don't
 --     pinch into them; ease off and lift. Pure contact-reducer.
 -- All are applied AFTER the racecraft-intensity scale, so the safety holds even at low intensity.
-local OPENLAP_CAUT   = 0.45  -- extra caution at the very start of a race
-local OPENLAP_AGGR   = 0.40  -- aggression trimmed by up to this fraction at the start
+local OPENLAP_CAUT   = 0.38  -- extra caution at the very start of a race (eased a touch: starts felt over-cautious)
+local OPENLAP_AGGR   = 0.35  -- aggression trimmed by up to this fraction at the start
 local OPENLAP_OFFSET = 0.55  -- line-changes trimmed by up to this fraction at the start
-local OPENLAP_FADE   = 0.60  -- opening-lap effect gone by this fraction into lap 1
+local OPENLAP_FADE   = 0.50  -- opening-lap effect gone by this fraction into lap 1 (releases sooner)
 -- grid funnel: off the line, hold each car near its own starting lane and let it merge onto the
 -- racing line GRADUALLY over the run to turn 1, instead of all 22 diving for the line at once.
 local GRID_FADE_END  = 0.05  -- lane-hold fades to the racing line over this fraction of lap 1
@@ -68,6 +68,12 @@ local GRID_HOLD      = 1.0   -- how strongly to hold the captured lane (1 = full
 local ISOLATED_GAP   = 0.030 -- clear track BOTH ways -> nothing to race
 local ISOLATED_AGGR  = 0.20  -- aggression trim when isolated
 local ISOLATED_CAUT  = 0.10  -- small lift when isolated (no pointless risk)
+-- pack leader / clear-ahead: a car with open road ahead can't be passed if it just DRIVES AWAY, so it
+-- shouldn't sit in a slow defensive line every corner (that's what stalls the front of a bunch and
+-- concertinas everyone behind). It keeps the racing line and gets a small pace stretch to string the
+-- field out, instead of the whole crowd circulating nose-to-tail at one pace.
+local PACK_LEAD_GAP  = 0.012 -- this much clear track ahead = "drive away" rather than defend a line
+local PACK_STRETCH   = 0.14  -- small pace stretch (less caution) for a car leading a pack, to open it up
 -- anti rear-end: closing fast while sat DIRECTLY behind the car ahead (not moving alongside to pass)
 -- -> ease the final approach so we don't pile into its gearbox in the braking zone. AC's own AI does
 -- this badly; this is the biggest cause of the pack "wrecking crew". Even aggressive drivers keep a
@@ -77,6 +83,14 @@ local REAREND_LAT    = 0.28  -- and only when roughly on the same line (directly
 local REAREND_CLOSE  = 8.0   -- km/h of closing speed before we start easing
 local REAREND_RANGE  = 26.0  -- full ease by this much closing (close + range)
 local REAREND_CAUT   = 1.2   -- how firmly to back off (kept high because a rear-end is a race-ruiner)
+-- blockage: a car crawling far below pace just ahead and on my line (a crash / spun / limping car) is
+-- an OBSTACLE, not a rival. Don't queue up behind it (anti-rear-end would just brake to a crawl) --
+-- sweep around it on the OPEN side of the track. This is "if the line's blocked, take the open road".
+local BLOCK_SPEED    = 24.0  -- a car ahead crawling below this is a blockage (stalled/crashed, not a slow corner)
+local BLOCK_GAP      = 0.006 -- look this far ahead for the obstacle (start peeling off a bit earlier)
+local BLOCK_MARGIN   = 6.0   -- I only need to be a little faster than it (so cars queued behind it still peel off)
+local BLOCK_OFFSET   = 0.48  -- swing this far to the open side -- just enough to sneak past, not a huge berth
+local BLOCK_HOLD     = 1.5   -- commit to the avoidance side briefly (don't dart back into it)
 local YIELD_GAP      = 0.010 -- a lapping car this close behind -> start moving aside
 local YIELD_OFFSET   = 0.45  -- move this far off-line to let the lapper through
 local YIELD_AGGR     = 0.45  -- ease off only slightly while being lapped -- you're still racing
@@ -259,6 +273,34 @@ function R.evaluate(i, dt)
         local myLat = latOf(me.position)          -- current lateral on track (-1 left .. +1 right)
         local target, aggr, wide = 0, baseA, 0    -- wide = 0..1 extra track width earned by an exit-speed run
 
+        -- BLOCKAGE detect: scan a short window ahead for the SLOWEST car -- a stalled/crashed/crawling car
+        -- is an obstacle, not a rival. Crucially we key off the genuinely-slow car (usually the crash),
+        -- not just whoever's nearest (which, once a queue forms, is another queued car), and we only need
+        -- to be a little faster than it -- so cars ALREADY crawling in the queue behind it still peel off
+        -- and filter past, instead of everyone sitting nose-to-tail. Route to the OPEN side (away from
+        -- where the obstacle sits), so a car stopped on the right sends the field around it on the left.
+        local blockSide = 0
+        do
+            local slowIdx, slowSpd = -1, 1e9
+            for j = 0, sim.carsCount - 1 do
+                if j ~= i then
+                    local oc = ac.getCar(j)
+                    if oc and oc.splinePosition then
+                        local d = oc.splinePosition - mySpline; if d < 0 then d = d + 1 end
+                        if d > 0 and d < BLOCK_GAP and (oc.speedKmh or 1e9) < slowSpd then
+                            slowSpd = oc.speedKmh or 1e9; slowIdx = j
+                        end
+                    end
+                end
+            end
+            if slowIdx >= 0 and slowSpd < BLOCK_SPEED and spd > slowSpd + BLOCK_MARGIN then
+                local aLat = latOf(ac.getCar(slowIdx).position)
+                if math.abs(aLat) > 0.1 then blockSide = -sgn(aLat)                 -- obstacle off to a side -> go the other way (the open track)
+                elseif sgn(myLat) ~= 0 then blockSide = -sgn(myLat)                 -- obstacle mid-track -> head toward the roomier half
+                else blockSide = (hash01(i * 5 + 2) < 0.5) and -1 or 1 end          -- dead-centre -> pick a side and commit
+            end
+        end
+
         -- raw instantaneous reads: is there a fight on right now?
         local rawAttack = (gapA < attackGap and spd >= aheadSpd - FASTER_MARGIN)
         local behindLat = behindIdx >= 0 and latOf(ac.getCar(behindIdx).position) or 0
@@ -283,7 +325,13 @@ function R.evaluate(i, dt)
         if state == 1 then
             aggr = math.min(1, baseA + ATTACK_AGGR_ADD)
             caut = CAUTION_ATTACK * clamp(1 - gapA / attackGap, 0, 1) * (t.follow or 1.0)   -- aero cars keep more distance
-            if gapA < PASS_GAP then
+            -- Start MOVING for the pass earlier when there's a genuine speed run on the car ahead -- not
+            -- only when almost touching. Fixes a fast car sitting in the slipstream too long before it
+            -- commits to the open space beside a slower car (most visible off the start, but present
+            -- everywhere). Still needs a real closing-speed advantage, so it isn't a constant weave.
+            local runAdv = spd - aheadSpd
+            local passActive = (gapA < PASS_GAP) or (gapA < attackGap and runAdv > OUTSIDE_MIN_ADV * 0.6)
+            if passActive then
                 local myTc = ac.worldCoordinateToTrack(me.position)
                 local progZ = myTc and myTc.z or mySpline
                 local isCorner, inside = cornerAhead(progZ)
@@ -310,13 +358,18 @@ function R.evaluate(i, dt)
         elseif state == 2 then
             aggr = math.min(1, baseA + DEFEND_AGGR_ADD)
             caut = CAUTION_DEFEND
-            local myTc = ac.worldCoordinateToTrack(me.position)
-            local progZ = myTc and myTc.z or mySpline
-            local isCorner, inside = cornerAhead(progZ)
-            if isCorner and inside ~= 0 then
-                target = inside * (DEFEND_OFFSET * t.defend)   -- hold the inside line (stable, corner-based)
+            if gapA >= PACK_LEAD_GAP then
+                -- clear road ahead: don't defend a slow line -- just drive away on the racing line.
+                target = 0
+            else
+                local myTc = ac.worldCoordinateToTrack(me.position)
+                local progZ = myTc and myTc.z or mySpline
+                local isCorner, inside = cornerAhead(progZ)
+                if isCorner and inside ~= 0 then
+                    target = inside * (DEFEND_OFFSET * t.defend)   -- hold the inside line (stable, corner-based)
+                end
+                -- on straights, keep the racing line -- don't weave to mirror the attacker
             end
-            -- on straights, keep the racing line -- don't weave to mirror the attacker
         end
 
         local eff = R.INTENSITY
@@ -337,7 +390,11 @@ function R.evaluate(i, dt)
         -- pack damping: in a crowd (race start, traffic) damp the LINE-CHANGING only, so the field
         -- doesn't all dart around at once. NOT applied to caution/closing -- cars must stay willing
         -- to tuck up and pass in traffic, or the pack over-gaps and concertinas to a crawl.
-        local crowdDamp = clamp(1 - math.max(0, crowd - 1) * 0.30, 0.25, 1)
+        local crowdDamp = clamp(1 - math.max(0, crowd - 1) * 0.25, 0.35, 1)   -- eased: was over-damping pull-outs in packs
+        -- a car with a genuine speed run (wide > 0) resists the crowd damping, so a fast car CAN still
+        -- pull out into open space in a pack instead of being pinned on the line behind a slower car.
+        local passResist = clamp(wide, 0, 1)
+        crowdDamp = crowdDamp + (1 - crowdDamp) * passResist
         caut = caut * eff
 
         -- RACE AWARENESS (added after the intensity scale, so safety terms hold at any intensity):
@@ -351,12 +408,16 @@ function R.evaluate(i, dt)
         if gapA > ISOLATED_GAP and gapB > ISOLATED_GAP then
             aggr = aggr * (1 - ISOLATED_AGGR)
             caut = caut + ISOLATED_CAUT
+        -- pack leader -- clear road ahead but a pack right behind: a small pace stretch so the leader
+        -- noses away and strings the field out, instead of the front artificially anchoring the bunch.
+        elseif gapA > PACK_LEAD_GAP and crowd >= 2 then
+            caut = caut - PACK_STRETCH
         end
         -- trouble-spot learning: a bit more caution approaching a corner this class keeps crashing at.
         caut = caut + Troublespots.cautionAt(mySpline, classKey)
         -- anti rear-end: closing fast, right behind, and still ON the same line (not pulling out to
         -- pass) -> ease the approach. Risk lowers how much a driver backs off, but never to nothing.
-        if gapA < REAREND_GAP and aheadIdx >= 0 then
+        if gapA < REAREND_GAP and aheadIdx >= 0 and blockSide == 0 then    -- (going around a blockage? don't also brake to a crawl behind it)
             local closing = spd - aheadSpd
             if closing > REAREND_CLOSE and math.abs(myLat - latOf(ac.getCar(aheadIdx).position)) < REAREND_LAT then
                 local urgency = clamp((closing - REAREND_CLOSE) / REAREND_RANGE, 0, 1) * clamp(1 - gapA / REAREND_GAP, 0, 1)
@@ -436,6 +497,17 @@ function R.evaluate(i, dt)
             if gridLat[i] then
                 target = clamp(gridLat[i] * GRID_HOLD * clamp(1 - mySpline / GRID_FADE_END, 0, 1), -1, 1)
             end
+        end
+
+        -- BLOCKAGE sweep (final word): a stopped/crawling car is on my line just ahead -> commit to the
+        -- open side and go around, overriding the normal line, groove and funnel. Kept off the wall by
+        -- flipping to the roomier side if the chosen one is already near an edge.
+        if blockSide ~= 0 then
+            if (blockSide > 0 and myLat > EDGE_SOFT) or (blockSide < 0 and myLat < -EDGE_SOFT) then
+                blockSide = -blockSide                                   -- that side's against the edge -> take the other
+            end
+            target = blockSide * BLOCK_OFFSET
+            holdSign[i] = blockSide; holdUntil[i] = os.clock() + BLOCK_HOLD
         end
 
         -- slew the offset (anti-dart)

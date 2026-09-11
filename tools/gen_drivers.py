@@ -179,7 +179,11 @@ HEADER = '''-- Verve / drivers.lua
 local Classes = require('lib.classes')
 local D = {}
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
-local PACE_SPREAD = 0.12   -- pace maps to +/- this much AI level around the car's original level
+-- pace spreads AI level DOWN from the difficulty. The FASTEST driver actually on the grid runs at the
+-- slider level, and everyone else is spaced below by how far their pace rating trails his -- so the
+-- field genuinely strings out instead of bunching. Widened (0.16 -> 0.32) because the old value barely
+-- separated the field: a mid-pack driver ended up only a few hundredths of an AI level off the ace.
+local PACE_SPREAD = 0.32
 
 -- Detected class -> roster bucket. Classes not listed (road) offer only the archetypes.
 local CLASS_BUCKET = {
@@ -223,9 +227,22 @@ end
 
 local assigned = {}
 local baseLevel = {}
+-- the fastest pace rating among drivers currently on the grid -- the anchor everyone is spread below.
+-- Recomputed lazily whenever the grid changes, so difficulty always tracks the best driver present.
+local fieldMaxPace, paceDirty = 1.0, true
+local function recomputeFieldMaxPace()
+    local m = 0
+    for _, k in pairs(assigned) do
+        local d = BY_KEY[k]
+        if d and d.pace and d.pace > m then m = d.pace end
+    end
+    fieldMaxPace = (m > 0) and m or 1.0
+    paceDirty = false
+end
 
 function D.setProfile(i, key)
     if key == nil or key == '' then assigned[i] = nil else assigned[i] = key end
+    paceDirty = true
 end
 function D.profileOf(i) return assigned[i] end
 function D.statsOf(i)
@@ -234,8 +251,8 @@ function D.statsOf(i)
     return BY_KEY[k]
 end
 function D.anyAssigned() for _ in pairs(assigned) do return true end return false end
-function D.clearAll() assigned = {} end
-function D.reset() assigned = {}; baseLevel = {} end
+function D.clearAll() assigned = {}; paceDirty = true end
+function D.reset() assigned = {}; baseLevel = {}; fieldMaxPace = 1.0; paceDirty = true end
 
 function D.randomizeGrid()
     pcall(function()
@@ -262,6 +279,7 @@ function D.randomizeGrid()
                 if pick then assigned[i] = pick.key end
             end
         end
+        paceDirty = true
     end)
 end
 
@@ -274,7 +292,10 @@ function D.applyPace(i)
                 local lvl = car.aiLevel
                 baseLevel[i] = (type(lvl) == 'number' and lvl > 0) and lvl or 1.0
             end
-            physics.setAILevel(i, clamp(baseLevel[i] + (st.pace - 0.5) * PACE_SPREAD, 0.70, 1.0))
+            if paceDirty then recomputeFieldMaxPace() end
+            -- anchor to the fastest driver on the grid: he runs at the slider (baseLevel), everyone else
+            -- is spaced below by how far their pace trails his. Never above the slider.
+            physics.setAILevel(i, clamp(baseLevel[i] - (fieldMaxPace - st.pace) * PACE_SPREAD, 0.70, baseLevel[i]))
         elseif baseLevel[i] ~= nil then
             physics.setAILevel(i, baseLevel[i])
             baseLevel[i] = nil
