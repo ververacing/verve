@@ -43,10 +43,13 @@ R.count = 0    -- how many cars are being actively recovered right now (for UI)
 -- crash repair: repair a stuck car IN PLACE (recovery then drives it out). No teleport, no pit.
 local REPAIR_SLOW       = 15.0 -- km/h: below this counts as stuck/crippled
 local REPOSITION_DIST   = 9.0  -- metres off the racing line = genuinely OFF-track -> set it back on the line
--- limping repair: a DAMAGED car still crawling ON-track (not stuck) drags the whole field
+-- limping repair: a BODY-DAMAGED car still crawling ON-track (not stuck) drags the whole field. Only
+-- BODY damage -- re-bodying clears body damage but NOT suspension, so triggering on suspension just
+-- re-fires forever (a kerb-riding car never stops qualifying). Suspension limpers are left to the
+-- blockage go-around (traffic routes around them) rather than pointlessly re-bodied.
 local LIMP_SPEED    = 100.0    -- km/h: below this while damaged = limping
-local LIMP_IMPACT   = 55.0     -- km/h body impact that counts as performance-hurting damage
-local LIMP_GRACE    = 8.0      -- seconds limping before we give it a fresh body
+local LIMP_IMPACT   = 45.0     -- km/h body impact that counts as performance-hurting damage (catches a knocked wing, but not a light kerb tap)
+local LIMP_GRACE    = 6.0      -- seconds limping before we give it a fresh body
 -- "genuinely wrecked" is judged by actual DAMAGE, not just closing speed: a very hard body impact OR
 -- broken suspension. A light touch (even at 150+ km/h) does neither, so it keeps racing.
 local TERMINAL_IMPACT   = 160.0-- km/h of collision severity that counts as a race-ending body hit
@@ -62,8 +65,11 @@ local steerSign, lastErr, checkT = {}, {}, {}
 local stallRef, stallT, backupT, backupSign, backupN = {}, {}, {}, {}, {}
 local repaired, repairRecT = {}, {}
 local limpT = {}           -- how long a DAMAGED car has been crawling on-track (blocking traffic)
+local retiredMark = {}     -- cars we've already counted as a terminal retirement (count once)
 local reported = {}        -- have we logged this incident to trouble-spots yet? (once per episode)
-R.repairedCount = 0    -- cars repaired + set back on track this session (for UI)
+R.repairedCount = 0    -- CRASH repairs: stuck/beached cars fixed + put back on track this session (for UI)
+R.limpCount = 0        -- LIMP repairs: damaged movers given a fresh body so they stop blocking (for UI)
+R.retiredCount = 0     -- cars we handed to AC as genuinely wrecked (terminal) this session (for UI)
 
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
 local function hash01(n)
@@ -90,10 +96,9 @@ local function maxImpact(car)
     return m
 end
 
--- Is the car GENUINELY wrecked (race-ending in real life)? By actual damage, not just closing speed:
--- a very hard body impact OR broken suspension. A light touch does neither.
-local function terminalDamage(car)
-    local body, susp = maxImpact(car), 0
+-- worst suspension damage (0..1) across the car's wheels
+local function maxSusp(car)
+    local susp = 0
     pcall(function()
         if car.wheels then
             for k = 0, 3 do
@@ -102,7 +107,13 @@ local function terminalDamage(car)
             end
         end
     end)
-    return body >= TERMINAL_IMPACT or susp >= TERMINAL_SUSP
+    return susp
+end
+
+-- Is the car GENUINELY wrecked (race-ending in real life)? By actual damage, not just closing speed:
+-- a very hard body impact OR broken suspension. A light touch does neither.
+local function terminalDamage(car)
+    return maxImpact(car) >= TERMINAL_IMPACT or maxSusp(car) >= TERMINAL_SUSP
 end
 
 local function latOf(p)
@@ -180,7 +191,7 @@ function R.update(dt)
                 if limpT[i] > LIMP_GRACE then
                     pcall(function() physics.setCarBodyDamage(i, vec4(0, 0, 0, 0)) end)
                     limpT[i] = 0
-                    R.repairedCount = (R.repairedCount or 0) + 1
+                    R.limpCount = (R.limpCount or 0) + 1
                 end
             else
                 limpT[i] = 0
@@ -230,7 +241,10 @@ function R.update(dt)
             -- to save it -- stop here so we quit blocking AC and it retires, and we don't waste a wing on
             -- it. (Body damage clears when we repair, so this only ever catches the ORIGINAL big hit,
             -- never a car we've already fixed and sent back out.)
-            if R.CRASH_REPAIR and terminalDamage(car) then endRec(i); return end
+            if R.CRASH_REPAIR and terminalDamage(car) then
+                if not retiredMark[i] then retiredMark[i] = true; R.retiredCount = (R.retiredCount or 0) + 1 end
+                endRec(i); return
+            end
 
             -- HIJACK AC's retirement: while we're working this car, stop AC retiring it and release
             -- its post-incident "brake and wait" so it (and our recovery) can move. We keep calling
@@ -367,8 +381,9 @@ function R.reset()
     stallRef, stallT, backupT, backupSign, backupN = {}, {}, {}, {}, {}
     repaired, repairRecT = {}, {}
     limpT = {}
+    retiredMark = {}
     reported = {}
-    R.count = 0; R.repairedCount = 0
+    R.count = 0; R.repairedCount = 0; R.limpCount = 0; R.retiredCount = 0
 end
 
 return R

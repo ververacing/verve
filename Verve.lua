@@ -9,6 +9,7 @@ local Overrides = require('lib.overrides')
 local Update    = require('lib.update')
 local Drivers   = require('lib.drivers')
 local Troublespots = require('lib.troublespots')
+local Diag = nil; pcall(function() Diag = require('diag') end)   -- LOCAL dev diagnostics; absent in the shipped build
 
 -- defaults for the global settings (also used for "reset to defaults")
 local DEFAULTS = {
@@ -113,6 +114,15 @@ function script.update(dt)
     if G.recovery then Recovery.update(dt) end
     Troublespots.ENABLED = G.troubleSpots
     Troublespots.update(dt)
+
+    if Diag then pcall(function()
+        Diag.update(dt, {
+            managed = managed, attacking = Racecraft.attacking, defending = Racecraft.defending,
+            recovering = Recovery.count, crashRepairs = Recovery.repairedCount,
+            limpRepairs = Recovery.limpCount, retired = Recovery.retiredCount,
+            hotSpots = Troublespots.hotCount(), crashRisk = Troublespots.crashiness(), isOval = Racecraft.isOval,
+        })
+    end) end
 end
 
 ac.onSessionStart(function()
@@ -121,6 +131,7 @@ ac.onSessionStart(function()
     pcall(Drivers.reset)          -- driver profiles are session-only: wipe every race
     pcall(Recovery.reset)         -- clear per-car recovery + pit-rescue state
     pcall(Troublespots.reset)     -- save the old track's learned hot spots, load the new track's
+    if Diag then pcall(Diag.reset) end
 end)
 
 -- ------------------------------- UI -------------------------------
@@ -160,50 +171,73 @@ local function driverComboFor(idx)
     end)
 end
 
-local function renderCarRow(id, name, idx)
-    local auto = idx and Classes.autoKeyOf(idx) or nil
-    local curClass = Overrides.classOverride(id) or 'auto'
-    local classPreview = (curClass == 'auto') and (auto and ('auto (' .. auto .. ')') or 'auto') or curClass
-    ui.text(name)
-    comboFor('##cls' .. id, classPreview, curClass, CLASS_OPTS, function(opt) Overrides.setClass(id, opt) end)
-    ui.sameLine()
-    if ui.button('Reset##r' .. id) then Overrides.resetCar(id) end
-    if idx then ui.sameLine(); driverComboFor(idx) end   -- driver only for cars on the grid this session
+-- DRIVER is per grid SLOT (every individual racer), so identical cars can each get a different
+-- driver. One row per car on the grid, labelled by number + its in-game driver name.
+local function driverGridList()
+    local sim = ac.getSim()
+    if not sim then ui.textWrapped('No session yet. Open Verve on the grid before the lights.'); return end
+    if sim.carsCount <= 0 then ui.textWrapped('No cars in this session.'); return end
+    for i = 0, sim.carsCount - 1 do          -- slot 0 is the player's car (for Ctrl+C takeover)
+        local drv = 'Car ' .. (i + 1)
+        pcall(function() local d = ac.getDriverName(i); if type(d) == 'string' and #d > 0 then drv = d end end)
+        ui.text(string.format('%2d.', i + 1))
+        ui.sameLine()
+        driverComboFor(i)
+        ui.sameLine()
+        ui.textColored(drv .. (i == 0 and '  (you)' or ''), rgbm(0.6, 0.6, 0.6, 1))
+    end
 end
 
-local function carReviewList()
-    -- cars actually in this session (live auto-detect)
-    local inSession, session = {}, {}
+-- CLASS is a per-MODEL physics setting (all cars of a model share it) -- one compact row per model.
+local function classOverrideList()
+    local seen, models = {}, {}
     pcall(function()
         local sim = ac.getSim()
         if not sim then return end
-        for i = 0, sim.carsCount - 1 do          -- include the player's car so you can pre-assign a driver for Ctrl+C takeover
+        for i = 0, sim.carsCount - 1 do
             local id = nil
             pcall(function() id = ac.getCarID(i) end)
-            if id and not inSession[id] then
-                inSession[id] = true
+            if id and not seen[id] then
+                seen[id] = true
                 local nm = id
                 pcall(function() nm = ac.getCarName(i) or id end)
-                session[#session + 1] = { id = id, idx = i, name = nm }
+                models[#models + 1] = { id = id, idx = i, name = nm }
             end
         end
     end)
-    table.sort(session, function(a, b) return a.name < b.name end)
+    table.sort(models, function(a, b) return a.name < b.name end)
 
-    if #session > 0 then
-        for _, r in ipairs(session) do renderCarRow(r.id, r.name, r.idx) end
+    if #models == 0 then
+        ui.textWrapped('No cars in this session.')
     else
-        ui.textWrapped('No cars in this session. Open Verve on the grid before the lights.')
+        for _, m in ipairs(models) do
+            local auto = Classes.autoKeyOf(m.idx)
+            local curClass = Overrides.classOverride(m.id) or 'auto'
+            local classPreview = (curClass == 'auto') and (auto and ('auto (' .. auto .. ')') or 'auto') or curClass
+            ui.text(m.name)
+            ui.sameLine()
+            comboFor('##cls' .. m.id, classPreview, curClass, CLASS_OPTS, function(opt) Overrides.setClass(m.id, opt) end)
+            ui.sameLine()
+            if ui.button('Reset##r' .. m.id) then Overrides.resetCar(m.id) end
+        end
     end
 
-    -- saved overrides for cars NOT in this race (shown separately so the list isn't confusing)
+    -- saved overrides for models NOT in this race (shown separately so the list isn't confusing)
     local others = {}
-    for _, id in ipairs(Overrides.ids()) do if not inSession[id] then others[#others + 1] = id end end
+    for _, id in ipairs(Overrides.ids()) do if not seen[id] then others[#others + 1] = id end end
     if #others > 0 then
         ui.newLine()
         ui.textColored('Saved overrides for other cars (not in this race):', rgbm(0.55, 0.55, 0.55, 1))
         table.sort(others)
-        for _, id in ipairs(others) do renderCarRow(id, id, nil) end
+        for _, id in ipairs(others) do
+            local curClass = Overrides.classOverride(id) or 'auto'
+            local classPreview = (curClass == 'auto') and 'auto' or curClass
+            ui.text(id)
+            ui.sameLine()
+            comboFor('##clsO' .. id, classPreview, curClass, CLASS_OPTS, function(opt) Overrides.setClass(id, opt) end)
+            ui.sameLine()
+            if ui.button('Reset##rO' .. id) then Overrides.resetCar(id) end
+        end
     end
 end
 
@@ -280,13 +314,17 @@ function script.windowMain()
 
     ui.newLine()
     ui.separator()
-    ui.textColored('Per-car class & driver', rgbm(0.6, 0.6, 0.6, 1))
-    ui.textWrapped('Class (left) is auto-detected and drives the physics (warm-up, wet, mistakes) -- override if it guesses wrong. Driver (right, optional) gives that grid slot its own pace, aggression and risk, from a real racer or a generic archetype. Session-only, so five identical cars can be five different drivers. Tip: pause on the grid with ESC to set up, or just hit Randomize.')
+    ui.textColored('Drivers (per grid slot)', rgbm(0.6, 0.6, 0.6, 1))
+    ui.textWrapped('Give any individual racer its own driver -- a real racer or a generic archetype -- and each grid slot is separate, so even a grid of identical cars can be all different drivers. Each gets that driver\'s pace, aggression and risk. Session-only, resets each race. Tip: pause on the grid with ESC to set up, or just hit Randomize.')
     if ui.button('Randomize driver grid') then Drivers.randomizeGrid() end
     if ui.itemHovered() then ui.setTooltip('Assign every AI car a unique driver from its class (overflow uses generic archetypes). Session-only, resets each race.') end
     ui.sameLine()
     if ui.button('Clear drivers') then Drivers.clearAll() end
-    carReviewList()
+    driverGridList()
+    ui.newLine()
+    ui.textColored('Car class (per model -- physics)', rgbm(0.6, 0.6, 0.6, 1))
+    ui.textWrapped('Auto-detected from each car and drives its physics (warm-up, wet, mistakes). Override if it guesses wrong -- applies to every car of that model.')
+    classOverrideList()
     ui.newLine()
     if ui.button('Reset settings to defaults') then resetGlobals() end
     ui.sameLine()
@@ -303,9 +341,17 @@ function script.windowMain()
             ui.text(string.format('Attacking: %d   Defending: %d', Racecraft.attacking or 0, Racecraft.defending or 0))
             ui.text('Track read as: ' .. (Racecraft.isOval and 'Oval / speedway (groove racing on)' or 'Road course'))
         end
-        if G.troubleSpots then ui.text(string.format('Trouble spots learned on this track: %d', Troublespots.hotCount())) end
+        if G.troubleSpots then
+            ui.text(string.format('Trouble spots learned on this track: %d', Troublespots.hotCount()))
+            local crash = Troublespots.crashiness()
+            if crash > 0.05 then ui.text(string.format('Track crash-risk: %d%% (field calmed to suit)', math.floor(crash * 100 + 0.5))) end
+        end
         ui.text(string.format('Recovering right now: %d', Recovery.count or 0))
-        if G.crashRepair then ui.text(string.format('Cars repaired & rejoined: %d', Recovery.repairedCount or 0)) end
+        if G.crashRepair then
+            ui.text(string.format('Crash repairs & rejoined: %d', Recovery.repairedCount or 0))
+            ui.text(string.format('Limp repairs (damaged cars re-bodied): %d', Recovery.limpCount or 0))
+            ui.text(string.format('Retired (genuinely wrecked): %d', Recovery.retiredCount or 0))
+        end
         pcall(function()
             local fc = ac.getSim().focusedCar
             if fc and fc >= 0 then

@@ -5,3 +5,7 @@ Thumbs.db
 .DS_Store
 dist/
 release notes*
+
+# local dev diagnostics -- never shipped or committed
+diag.lua
+diag_race_*.jsonl

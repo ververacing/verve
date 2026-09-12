@@ -74,6 +74,11 @@ local ISOLATED_CAUT  = 0.10  -- small lift when isolated (no pointless risk)
 -- field out, instead of the whole crowd circulating nose-to-tail at one pace.
 local PACK_LEAD_GAP  = 0.012 -- this much clear track ahead = "drive away" rather than defend a line
 local PACK_STRETCH   = 0.14  -- small pace stretch (less caution) for a car leading a pack, to open it up
+-- adaptive crash damping: the crashier a track has proven (from its learned trouble-spot history), the
+-- calmer the WHOLE field runs -- more caution, less aggression, a bigger opening-lap ease, and the pace
+-- stretch pulled back. Self-calibrating: a nasty track (Zandvoort) settles down, a clean one stays racy.
+local CRASH_CAUT     = 0.35  -- extra field-wide caution at a fully crash-prone track
+local CRASH_AGGR     = 0.35  -- aggression trimmed by up to this fraction at a fully crash-prone track
 -- anti rear-end: closing fast while sat DIRECTLY behind the car ahead (not moving alongside to pass)
 -- -> ease the final approach so we don't pile into its gearbox in the braking zone. AC's own AI does
 -- this badly; this is the biggest cause of the pack "wrecking crew". Even aggressive drivers keep a
@@ -86,7 +91,13 @@ local REAREND_CAUT   = 1.2   -- how firmly to back off (kept high because a rear
 -- blockage: a car crawling far below pace just ahead and on my line (a crash / spun / limping car) is
 -- an OBSTACLE, not a rival. Don't queue up behind it (anti-rear-end would just brake to a crawl) --
 -- sweep around it on the OPEN side of the track. This is "if the line's blocked, take the open road".
-local BLOCK_SPEED    = 24.0  -- a car ahead crawling below this is a blockage (stalled/crashed, not a slow corner)
+local BLOCK_SPEED    = 24.0  -- a car ahead crawling below this (absolute) is a blockage (stalled/crashed)
+-- OR a genuinely-slow car (a limper) that I'm arriving on much faster. Both gates matter: the absolute
+-- cap keeps this from firing on a car simply BRAKING for a corner (that's ~100+ km/h, not a limper) --
+-- without it, a fast car behind treated every braking car as an obstacle and swerved around it into the
+-- corner, which was a contact machine at fast tracks.
+local BLOCK_LIMP     = 55.0  -- only a car below THIS absolute speed can be a "limper" blockage
+local BLOCK_DELTA    = 50.0  -- and I must be at least this much faster than it (clearly arriving on it)
 local BLOCK_GAP      = 0.006 -- look this far ahead for the obstacle (start peeling off a bit earlier)
 local BLOCK_MARGIN   = 6.0   -- I only need to be a little faster than it (so cars queued behind it still peel off)
 local BLOCK_OFFSET   = 0.48  -- swing this far to the open side -- just enough to sneak past, not a huge berth
@@ -230,6 +241,7 @@ function R.evaluate(i, dt)
 
         local classKey = Classes.keyOf(i)
         local t = TACTICS[classKey] or TACTICS.road
+        local crash = Troublespots.crashiness()    -- 0..1: how crash-prone this track has proven
 
         local myLap = me.lapCount or 0
 
@@ -293,7 +305,8 @@ function R.evaluate(i, dt)
                     end
                 end
             end
-            if slowIdx >= 0 and slowSpd < BLOCK_SPEED and spd > slowSpd + BLOCK_MARGIN then
+            if slowIdx >= 0 and spd > slowSpd + BLOCK_MARGIN
+               and (slowSpd < BLOCK_SPEED or (slowSpd < BLOCK_LIMP and (spd - slowSpd) > BLOCK_DELTA)) then
                 local aLat = latOf(ac.getCar(slowIdx).position)
                 if math.abs(aLat) > 0.1 then blockSide = -sgn(aLat)                 -- obstacle off to a side -> go the other way (the open track)
                 elseif sgn(myLat) ~= 0 then blockSide = -sgn(myLat)                 -- obstacle mid-track -> head toward the roomier half
@@ -401,7 +414,7 @@ function R.evaluate(i, dt)
         -- opening-lap caution -- calmer + more spacing off the line, fading across the first lap.
         local openingLap = (myLap == 0 and crowd >= 1) and clamp(1 - mySpline / OPENLAP_FADE, 0, 1) or 0
         if openingLap > 0 then
-            caut = caut + OPENLAP_CAUT * openingLap
+            caut = caut + OPENLAP_CAUT * openingLap * (1 + crash)   -- crashy tracks get extra start caution (kills the opening-lap pile-ups)
             aggr = aggr * (1 - OPENLAP_AGGR * openingLap)
         end
         -- bring-it-home -- clear track both ways: nothing to race, so ease off a touch.
@@ -411,10 +424,16 @@ function R.evaluate(i, dt)
         -- pack leader -- clear road ahead but a pack right behind: a small pace stretch so the leader
         -- noses away and strings the field out, instead of the front artificially anchoring the bunch.
         elseif gapA > PACK_LEAD_GAP and crowd >= 2 then
-            caut = caut - PACK_STRETCH
+            caut = caut - PACK_STRETCH * (1 - crash)   -- don't stretch away (more catching) on a crashy track
         end
         -- trouble-spot learning: a bit more caution approaching a corner this class keeps crashing at.
         caut = caut + Troublespots.cautionAt(mySpline, classKey)
+        -- adaptive crash damping: on a track that keeps wrecking cars, calm the whole field (more caution,
+        -- less aggression) so the crash RATE falls, not just the after-the-fact repairs.
+        if crash > 0 then
+            caut = caut + CRASH_CAUT * crash
+            aggr = aggr * (1 - CRASH_AGGR * crash)
+        end
         -- anti rear-end: closing fast, right behind, and still ON the same line (not pulling out to
         -- pass) -> ease the approach. Risk lowers how much a driver backs off, but never to nothing.
         if gapA < REAREND_GAP and aheadIdx >= 0 and blockSide == 0 then    -- (going around a blockage? don't also brake to a crawl behind it)

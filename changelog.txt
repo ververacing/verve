@@ -1,5 +1,27 @@
 Verve - changelog
 
+0.10.3
+- Pick a driver for EVERY racer, not just per car model. The driver list is now one row per grid slot
+  (numbered, with each racer's name), so a grid of identical cars can be a full grid of different
+  drivers. Car class (the physics setting) stays per-model in its own section.
+- Adaptive crash damping: Verve now uses a track's own learned trouble-spot history to tell how
+  crash-prone it is, and calms the WHOLE field to suit -- more caution, less aggression, a bigger
+  opening-lap ease, and the pack pace-stretch pulled back. A nasty track (Zandvoort) settles down on
+  its own while a clean one stays racy. This attacks the crash RATE, not just after-the-fact repairs.
+  Biggest effect on opening-lap pile-ups. (Needs Trouble-spot learning on.)
+- Clearer status readout: the old "repaired & rejoined" tally is split into Crash repairs, Limp
+  repairs, and Retired (genuinely wrecked) -- so you can see the real picture (retirements vs the
+  ~10.5% real-world target) instead of one big, alarming number.
+- Damaged cars limp for far less time: the "give a knocked-about car a fresh wing/body" trigger now
+  catches smaller aero knocks and acts sooner, so a hobbled car rejoins racing pace instead of
+  crawling round for laps holding everyone up.
+- Cars go around a genuinely slow car instead of piling into it: the "take the open road" move now
+  also fires for a car limping at 30-55 km/h (not only a nearly-stopped one) -- including YOUR car if
+  you're wounded -- so fast traffic sweeps past cleanly instead of queuing up and rear-ending it. Tuned
+  so it does NOT fire on a car merely braking for a corner (that was causing swerves in the braking zones).
+- Fewer last-few-laps crashes: as tyres fade late in a stint, cars now back off a little more and
+  drive within the worn grip, instead of running at the limit and sliding off at the end.
+
 0.10.2
 - Crash recovery no longer strands cars off-track. A beached car is only counted "repaired & rejoined"
   once it's actually been put back on the racing line -- and the reposition now only waits for a

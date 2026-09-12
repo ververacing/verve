@@ -138,4 +138,13 @@ function T.hotCount()
     return n
 end
 
+-- How crash-prone this track has proven to be, 0..1, from the learned hot-spot count. It loads with
+-- the track's persisted history, so a known-nasty track (Zandvoort) reads "crashy" from lap one. The
+-- director uses this to calm the whole field down on tracks that keep wrecking cars.
+local CRASH_HOTS = 16      -- hot-spot count that reads as fully crash-prone (Zandvoort ~14)
+function T.crashiness()
+    if not T.ENABLED then return 0 end
+    return clamp(T.hotCount() / CRASH_HOTS, 0, 1)
+end
+
 return T
