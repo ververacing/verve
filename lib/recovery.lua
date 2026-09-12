@@ -59,6 +59,8 @@ local REPAIR_BASE       = 2.0  -- base repair seconds (on top of the ~2.5s recov
 local REPAIR_PER_IMPACT = 0.05 -- extra seconds per km/h of impact (bigger shunt = longer penalty)
 local REPAIR_MIN        = 2.0  -- clamp low = catch cars sooner, before AC's own retirement fires
 local REPAIR_MAX        = 9.0
+local REPAIR_GIVEUP     = 6    -- after THIS many crash-repairs, a car is a hopeless repeat offender ->
+                              -- let it retire (clears the track; brings retirements to a realistic handful)
 
 local hasMoved, stuckT, recT = {}, {}, {}
 local steerSign, lastErr, checkT = {}, {}, {}
@@ -66,6 +68,7 @@ local stallRef, stallT, backupT, backupSign, backupN = {}, {}, {}, {}, {}
 local repaired, repairRecT = {}, {}
 local limpT = {}           -- how long a DAMAGED car has been crawling on-track (blocking traffic)
 local limpDone = {}        -- cars already re-bodied for their CURRENT damage (don't re-body until it clears)
+local repairN = {}         -- how many times we've crash-repaired each car (for the repeat-offender rule)
 local rescued = {}         -- cars we've already spent their one pileup-rescue on (spread + retry)
 local retiredMark = {}     -- cars we've already counted as a retirement (count once)
 local reported = {}        -- have we logged this incident to trouble-spots yet? (once per episode)
@@ -150,18 +153,28 @@ end
 local function putBackOnLine(sim, i, progress, center, force)
     if not center then return false end
     if not force and not dropSafe(sim, i, progress) then return false end
-    local p1 = ac.trackProgressToWorldCoordinate((progress + 0.0015) % 1, false)
-    if not p1 then return false end
-    local fx, fy, fz = p1.x - center.x, p1.y - center.y, p1.z - center.z
+    -- forward direction from a CENTRED sample (a point behind -> a point ahead), which is far steadier
+    -- than a tiny forward-only step and always points along the racing direction.
+    local pB = ac.trackProgressToWorldCoordinate((progress - 0.003) % 1, false)
+    local p1 = ac.trackProgressToWorldCoordinate((progress + 0.003) % 1, false)
+    if not (pB and p1) then return false end
+    local fx, fy, fz = p1.x - pB.x, p1.y - pB.y, p1.z - pB.z
     local flen = math.sqrt(fx * fx + fy * fy + fz * fz)
     if flen < 1e-4 then return false end
     fx, fy, fz = fx / flen, fy / flen, fz / flen
     local dir = vec3(fx, fy, fz)
     local sx, sz = -fz, fx                                   -- level perpendicular to forward
-    local a = vec3(center.x + sx * 2.5, center.y + 0.3, center.z + sz * 2.5)
-    local b = vec3(center.x - sx * 2.5, center.y + 0.3, center.z - sz * 2.5)
+    local a = vec3(center.x + sx * 2.0, center.y + 0.3, center.z + sz * 2.0)
+    local b = vec3(center.x - sx * 2.0, center.y + 0.3, center.z - sz * 2.0)
     local pos = (math.abs(latOf(a)) <= math.abs(latOf(b))) and a or b   -- the roomier side (nearer track centre)
-    pcall(function() physics.setCarPosition(i, pos, dir) end)
+    pcall(function()
+        physics.setCarPosition(i, pos, dir)
+        -- CRUCIAL: setCarPosition sets orientation but NOT velocity, so a car sliding backward from its
+        -- crash keeps that momentum -- it lands facing forward but drifting BACKWARD, then recovery fights
+        -- it, swings it round and it beaches in the grass. Give it a small FORWARD velocity instead so it
+        -- sets off the right way and recovery just has to keep it rolling.
+        physics.setCarVelocity(i, dir * 8.0)
+    end)
     return true
 end
 
@@ -267,6 +280,13 @@ function R.update(dt)
             -- never a car we've already fixed and sent back out.)
             if R.CRASH_REPAIR and terminalDamage(car) then endRec(i); return end
 
+            -- REPEAT OFFENDER: a car we've already patched up many times that keeps wrecking itself is,
+            -- realistically, a broken car -- in real racing it would retire. Stop saving it and let it go,
+            -- so it clears the track instead of crash-looping all race (finishing 10+ laps down and piling
+            -- up traffic). This is what brings retirements up from zero to a realistic handful, and it
+            -- self-scales: a clean track rarely triggers it, a crash-heavy one retires its worst few.
+            if R.CRASH_REPAIR and (repairN[i] or 0) >= REPAIR_GIVEUP then endRec(i); return end
+
             -- HIJACK AC's retirement: while we're working this car, stop AC retiring it and release
             -- its post-incident "brake and wait" so it (and our recovery) can move. We keep calling
             -- these every frame it's in recovery; the moment recovery gives up (GIVEUP_TIME) we stop,
@@ -293,6 +313,7 @@ function R.update(dt)
                         repaired[i] = true
                         repairRecT[i] = recT[i]                              -- mark when we repaired, for the give-up logic
                         R.repairedCount = (R.repairedCount or 0) + 1
+                        repairN[i] = (repairN[i] or 0) + 1                   -- per-car tally, for the repeat-offender retirement
                         stallRef[i] = nil; stallT[i] = nil; backupT[i] = nil  -- fresh start for recovery driving
                     end
                 end
@@ -403,6 +424,7 @@ function R.reset()
     repaired, repairRecT = {}, {}
     limpT = {}
     limpDone = {}
+    repairN = {}
     rescued = {}
     retiredMark = {}
     reported = {}

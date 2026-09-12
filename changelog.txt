@@ -1,5 +1,22 @@
 Verve - changelog
 
+0.10.5
+- Recovered cars no longer set off backwards. Putting a car back on the racing line sets its orientation
+  but not its speed, so a car sliding out of a crash kept its backward momentum -- it would land facing
+  forward but drift the wrong way, fight itself, and beach in the grass. It's now given a small forward
+  push so it sets off the right way and just drives on.
+- Repeat-offender retirements: a car that's been crash-repaired many times and keeps wrecking itself is
+  a broken car -- it now retires instead of crash-looping all race and finishing laps down. This brings
+  retirements up from near-zero to a realistic handful, and self-scales -- a clean track barely triggers
+  it, a crash-heavy one retires its worst few. (It also cuts the total repair churn a lot, since the
+  hopeless cars stop generating endless repairs.)
+- Cleaner behaviour when you're being lapped: a lapped car now eases aside DECISIVELY and keeps rolling
+  instead of stacking every caution into a near-stop -- which was making faster cars pile up and rear-end
+  it. It moves clearly off-line, holds that line (no swerving for other obstacles while it yields), and
+  only lifts a touch as the car actually draws alongside.
+- No more giant berth for a car that's already off the road: cars only sweep around an obstacle that's
+  actually on the racing surface. A car parked well off to the side gets passed on the line, no swerve.
+
 0.10.4
 - Pile-ups no longer wipe out the grid. When a knot of cars gets wedged together and can't be freed,
   each one now gets one rescue -- a fresh body and a force-placed return to the racing line at a

@@ -102,8 +102,10 @@ local BLOCK_GAP      = 0.006 -- look this far ahead for the obstacle (start peel
 local BLOCK_MARGIN   = 6.0   -- I only need to be a little faster than it (so cars queued behind it still peel off)
 local BLOCK_OFFSET   = 0.48  -- swing this far to the open side -- just enough to sneak past, not a huge berth
 local BLOCK_HOLD     = 1.5   -- commit to the avoidance side briefly (don't dart back into it)
+local BLOCK_EDGE     = 0.60  -- only sweep around an obstacle THIS central; a car parked well off to the
+                             -- side (in the grass/gravel) needs no berth -- just drive past it on the line
 local YIELD_GAP      = 0.010 -- a lapping car this close behind -> start moving aside
-local YIELD_OFFSET   = 0.45  -- move this far off-line to let the lapper through
+local YIELD_OFFSET   = 0.58  -- move this far off-line to let the lapper through (decisive, so it's clearly out of the way)
 local YIELD_AGGR     = 0.45  -- ease off only slightly while being lapped -- you're still racing
 local YIELD_LIFT_GAP = 0.004 -- only actually lift once the lapper is THIS close (else keep racing pace)
 local YIELD_CAUT     = 0.18  -- small lift as the faster car draws right up (was a big early slowdown)
@@ -308,11 +310,17 @@ function R.evaluate(i, dt)
             if slowIdx >= 0 and spd > slowSpd + BLOCK_MARGIN
                and (slowSpd < BLOCK_SPEED or (slowSpd < BLOCK_LIMP and (spd - slowSpd) > BLOCK_DELTA)) then
                 local aLat = latOf(ac.getCar(slowIdx).position)
-                if math.abs(aLat) > 0.1 then blockSide = -sgn(aLat)                 -- obstacle off to a side -> go the other way (the open track)
-                elseif sgn(myLat) ~= 0 then blockSide = -sgn(myLat)                 -- obstacle mid-track -> head toward the roomier half
-                else blockSide = (hash01(i * 5 + 2) < 0.5) and -1 or 1 end          -- dead-centre -> pick a side and commit
+                -- ONLY sweep around an obstacle that's actually on the racing surface / in the path. A car
+                -- already parked well off to the side needs no berth -- just pass it on the line, don't
+                -- swerve all the way to the far side of the road for it.
+                if math.abs(aLat) < BLOCK_EDGE then
+                    if math.abs(aLat) > 0.1 then blockSide = -sgn(aLat)             -- obstacle off to a side -> go the other way (the open track)
+                    elseif sgn(myLat) ~= 0 then blockSide = -sgn(myLat)             -- obstacle mid-track -> head toward the roomier half
+                    else blockSide = (hash01(i * 5 + 2) < 0.5) and -1 or 1 end      -- dead-centre -> pick a side and commit
+                end
             end
         end
+        local yielding = false   -- set when we're being lapped (blue flag) -- suppresses obstacle-swerving
 
         -- raw instantaneous reads: is there a fight on right now?
         local rawAttack = (gapA < attackGap and spd >= aheadSpd - FASTER_MARGIN)
@@ -465,13 +473,17 @@ function R.evaluate(i, dt)
         -- blue-flag yield -- a car on a higher lap is coming through: concede the line and lift,
         -- rather than racing the leader. Overrides attack/defend; edge-safety below keeps it honest.
         if lapperIdx >= 0 then
+            yielding = true
             local lapLat = latOf(ac.getCar(lapperIdx).position)
-            target = ((lapLat >= myLat) and -1 or 1) * YIELD_OFFSET   -- move off the racing line, side the lapper isn't
-            aggr   = math.min(aggr, YIELD_AGGR)                       -- ease off only a little -- keep racing
-            -- keep racing pace until the faster car is right there, then lift just a touch to wave it by
-            if lapperGap < YIELD_LIFT_GAP then
-                caut = caut + YIELD_CAUT * clamp(1 - lapperGap / YIELD_LIFT_GAP, 0, 1)
-            end
+            target = ((lapLat >= myLat) and -1 or 1) * YIELD_OFFSET   -- move decisively off-line, side the lapper isn't
+            holdSign[i] = (target > 0) and 1 or -1; holdUntil[i] = os.clock() + SIDE_HOLD   -- commit to the move-aside
+            aggr   = math.min(aggr, YIELD_AGGR)
+            -- A lapped car should EASE aside and keep rolling, NOT crawl. Cap the total caution so the
+            -- other back-off terms (crash-damping, anti-rear-end, trouble-spots) can't stack into a near
+            -- stop -- that's what makes traffic pile up and rear-end a car being lapped. Lift a touch more
+            -- only as the faster car draws right alongside, to wave it by.
+            local lift = (lapperGap < YIELD_LIFT_GAP) and YIELD_CAUT * clamp(1 - lapperGap / YIELD_LIFT_GAP, 0, 1) or 0
+            caut = math.min(caut, YIELD_CAUT) + lift
             state  = 0
         end
 
@@ -521,7 +533,7 @@ function R.evaluate(i, dt)
         -- BLOCKAGE sweep (final word): a stopped/crawling car is on my line just ahead -> commit to the
         -- open side and go around, overriding the normal line, groove and funnel. Kept off the wall by
         -- flipping to the roomier side if the chosen one is already near an edge.
-        if blockSide ~= 0 then
+        if blockSide ~= 0 and not yielding then                          -- (a car being lapped holds its move-aside line)
             if (blockSide > 0 and myLat > EDGE_SOFT) or (blockSide < 0 and myLat < -EDGE_SOFT) then
                 blockSide = -blockSide                                   -- that side's against the edge -> take the other
             end
