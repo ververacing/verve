@@ -63,6 +63,7 @@ local REPAIR_GIVEUP     = 6    -- after THIS many crash-repairs, a car is a hope
                               -- let it retire (clears the track; brings retirements to a realistic handful)
 
 local hasMoved, stuckT, recT = {}, {}, {}
+local lastFwd = {}         -- each car's forward direction while it was last up to racing speed (ground-truth "forwards")
 local steerSign, lastErr, checkT = {}, {}, {}
 local stallRef, stallT, backupT, backupSign, backupN = {}, {}, {}, {}, {}
 local repaired, repairRecT = {}, {}
@@ -162,6 +163,13 @@ local function putBackOnLine(sim, i, progress, center, force)
     local flen = math.sqrt(fx * fx + fy * fy + fz * fz)
     if flen < 1e-4 then return false end
     fx, fy, fz = fx / flen, fy / flen, fz / flen
+    -- The spline tangent gives the LINE the car should sit on, but its sign (which way is "forwards")
+    -- can't be trusted -- on some tracks the track spline runs opposite to the racing direction, which
+    -- is what dropped cars in facing BACKWARD. So flip it to match the direction this car was actually
+    -- racing (recorded while it was up to speed). That's the ground truth for "forwards" here.
+    if lastFwd[i] and (fx * lastFwd[i].x + fy * lastFwd[i].y + fz * lastFwd[i].z) < 0 then
+        fx, fy, fz = -fx, -fy, -fz
+    end
     local dir = vec3(fx, fy, fz)
     local sx, sz = -fz, fx                                   -- level perpendicular to forward
     local a = vec3(center.x + sx * 2.0, center.y + 0.3, center.z + sz * 2.0)
@@ -197,7 +205,10 @@ function R.update(dt)
                 endRec(i); return
             end
             local spd = car.speedKmh or 0
-            if spd > MOVE_SPEED then hasMoved[i] = true; repaired[i] = nil; repairRecT[i] = nil end   -- back racing: reset
+            if spd > MOVE_SPEED then
+                hasMoved[i] = true; repaired[i] = nil; repairRecT[i] = nil   -- back racing: reset
+                if car.look then lastFwd[i] = vec3(car.look.x, car.look.y, car.look.z) end   -- remember which way it's racing
+            end
             if car.isInPitlane then stuckT[i] = 0; endRec(i); return end
             if not hasMoved[i] then return end
 
@@ -419,6 +430,7 @@ end
 
 function R.reset()
     hasMoved, stuckT, recT = {}, {}, {}
+    lastFwd = {}
     steerSign, lastErr, checkT = {}, {}, {}
     stallRef, stallT, backupT, backupSign, backupN = {}, {}, {}, {}, {}
     repaired, repairRecT = {}, {}
@@ -429,6 +441,30 @@ function R.reset()
     retiredMark = {}
     reported = {}
     R.count = 0; R.repairedCount = 0; R.limpCount = 0; R.retiredCount = 0
+end
+
+-- MANUAL "unstick my car" -- fired by a UI button, not the auto loop. Repairs the car's body, force-
+-- places it back on the racing line at its current progress facing forward (with the small forward push
+-- so it sets off cleanly), and clears its recovery state so nothing fights the reset. Does NOT touch fuel.
+-- Meant to be pressed while stuck (a retired car can't be brought back). Returns true if it repositioned.
+function R.forceRecover(i)
+    if type(i) ~= 'number' or i < 0 then return false end
+    local ok, sim = pcall(ac.getSim)
+    if not ok or not sim then return false end
+    local done = false
+    pcall(function()
+        local car = ac.getCar(i); if not car then return end
+        local tc = ac.worldCoordinateToTrack(car.position); if not tc then return end
+        local progress = tc.z
+        if progress < 0 or progress > 1 then return end
+        local center = ac.trackProgressToWorldCoordinate(progress, false); if not center then return end
+        pcall(function() physics.setCarBodyDamage(i, vec4(0, 0, 0, 0)) end)
+        putBackOnLine(sim, i, progress, center, true)          -- force: ignores traffic clearance
+        recT[i] = nil; stuckT[i] = nil; repaired[i] = nil; repairRecT[i] = nil
+        rescued[i] = nil; limpT[i] = nil; limpDone[i] = nil; hasMoved[i] = true
+        done = true
+    end)
+    return done
 end
 
 return R

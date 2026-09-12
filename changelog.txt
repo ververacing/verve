@@ -1,5 +1,17 @@
 Verve - changelog
 
+0.10.6
+- "Reset my car" button: stuck, beached, or wedged in the pits? One click repairs your car and drops it
+  back on the racing line facing forward, so you can get going again instead of sitting out the race.
+  (Top of the app, under Enable Verve. Press it WHILE stuck -- a car that's already retired can't return.)
+- Recovered cars now face the RIGHT way. On some tracks the track spline runs opposite to the racing
+  direction, which was dropping recovered cars in facing backward (they'd U-turn and beach in the grass).
+  Verve now remembers which way each car was actually racing and uses that, so a recovered car sets off
+  forward. Fixes both the button and every automatic recovery.
+- Trouble-spot learning no longer drops out after a reload. If the app reloaded mid-session, the learned
+  hot-spots for the track weren't reloaded and the adaptive crash-damping silently switched off; it now
+  reloads them automatically, so the damping stays active the whole session (and crashy tracks stay calm).
+
 0.10.5
 - Recovered cars no longer set off backwards. Putting a car back on the racing line sets its orientation
   but not its speed, so a car sliding out of a crash kept its backward momentum -- it would land facing

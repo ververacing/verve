@@ -30,6 +30,7 @@ local trackKey = 'track'
 local nbins, lookaheadFrac = 200, 0.008   -- recomputed per track from its length in T.reset()
 local lastSave, lastDecay = 0, 0
 local dirtyStore = false
+local booted = false             -- have we loaded this track's data yet? (self-heal after a hot-reload)
 
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
 
@@ -90,6 +91,7 @@ function T.reset()
         if type(td) == 'table' then data = td end
     end)
     lastSave = os.clock(); lastDecay = os.clock()
+    booted = true
 end
 
 -- Report an incident (a car crashed/spun/beached) at a track position, for a class.
@@ -121,6 +123,10 @@ function T.cautionAt(spline, cls)
 end
 
 function T.update(dt)
+    -- Self-heal: if the module re-initialised (a CSP hot-reload, or the app reloading) without a fresh
+    -- session start, `data` is empty and this track's learned hot-spots aren't loaded -- so the adaptive
+    -- damping silently stops. Load them on the first update if a reset hasn't run this load.
+    if not booted then booted = true; pcall(T.reset) end
     if not T.ENABLED then return end
     local now = os.clock()
     if now - lastDecay > 1.0 then

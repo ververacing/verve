@@ -260,6 +260,16 @@ function script.windowMain()
     ui.separator()
     if ui.checkbox('Enable Verve', G.enabled) then setG('enabled', not G.enabled) end
 
+    -- manual escape hatch: unstick YOUR car (repair + drop back on the racing line facing forward)
+    if ui.button('Reset my car (unstick)') then
+        pcall(function()
+            local sim = ac.getSim()
+            local idx = (sim and sim.focusedCar and sim.focusedCar >= 0) and sim.focusedCar or 0
+            Recovery.forceRecover(idx)
+        end)
+    end
+    if ui.itemHovered() then ui.setTooltip('Stuck, beached, or wedged in the pits? Repairs your car and drops it back on the racing line facing forward. Press it WHILE stuck -- a car that has already retired can\'t be brought back.') end
+
     -- save / session-only bar
     local as = S.autosave
     if ui.checkbox('Auto-save changes', as) then
