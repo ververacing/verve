@@ -65,7 +65,9 @@ local steerSign, lastErr, checkT = {}, {}, {}
 local stallRef, stallT, backupT, backupSign, backupN = {}, {}, {}, {}, {}
 local repaired, repairRecT = {}, {}
 local limpT = {}           -- how long a DAMAGED car has been crawling on-track (blocking traffic)
-local retiredMark = {}     -- cars we've already counted as a terminal retirement (count once)
+local limpDone = {}        -- cars already re-bodied for their CURRENT damage (don't re-body until it clears)
+local rescued = {}         -- cars we've already spent their one pileup-rescue on (spread + retry)
+local retiredMark = {}     -- cars we've already counted as a retirement (count once)
 local reported = {}        -- have we logged this incident to trouble-spots yet? (once per episode)
 R.repairedCount = 0    -- CRASH repairs: stuck/beached cars fixed + put back on track this session (for UI)
 R.limpCount = 0        -- LIMP repairs: damaged movers given a fresh body so they stop blocking (for UI)
@@ -174,7 +176,13 @@ function R.update(dt)
             if not car or not car.isAIControlled then return end
             local retired = false
             pcall(function() retired = (car.isRetired == true) end)
-            if retired then endRec(i); return end               -- AC has already killed it; can't help, don't cycle on it
+            if retired then
+                -- count the ACTUAL retirement (any cause: our give-up, terminal, or AC itself), once per car.
+                -- This is ground truth -- far more honest than counting our own "give up" decisions, which
+                -- don't always end in a retirement.
+                if not retiredMark[i] then retiredMark[i] = true; R.retiredCount = (R.retiredCount or 0) + 1 end
+                endRec(i); return
+            end
             local spd = car.speedKmh or 0
             if spd > MOVE_SPEED then hasMoved[i] = true; repaired[i] = nil; repairRecT[i] = nil end   -- back racing: reset
             if car.isInPitlane then stuckT[i] = 0; endRec(i); return end
@@ -185,12 +193,18 @@ function R.update(dt)
             -- short grace, give it a fresh body IN PLACE so it rejoins racing pace. Requires real damage
             -- (a big body impact), so it never fires on a healthy car just going slow through a corner; and
             -- not for a genuinely-wrecked (terminal) car, which should retire rather than be patched.
+            -- clear the guard only once the body damage is actually GONE (below the trigger). If a re-body
+            -- cleared it, the car no longer qualifies anyway; if the re-body didn't take, the damage stays
+            -- high and the guard stays set -- so we re-body a given car at most ONCE per damage episode,
+            -- never in a loop. (This is what turns the old runaway 180-360 count into a handful.)
+            if maxImpact(car) < LIMP_IMPACT then limpDone[i] = nil end
             if R.CRASH_REPAIR and spd > STOP_SPEED and spd < LIMP_SPEED
-               and maxImpact(car) >= LIMP_IMPACT and not terminalDamage(car) then
+               and maxImpact(car) >= LIMP_IMPACT and not limpDone[i] and not terminalDamage(car) then
                 limpT[i] = (limpT[i] or 0) + dt
                 if limpT[i] > LIMP_GRACE then
                     pcall(function() physics.setCarBodyDamage(i, vec4(0, 0, 0, 0)) end)
                     limpT[i] = 0
+                    limpDone[i] = true
                     R.limpCount = (R.limpCount or 0) + 1
                 end
             else
@@ -225,14 +239,24 @@ function R.update(dt)
             -- AC's retirement and working the car (backups, repair, driving it out).
             local exhausted = repaired[i] and repairRecT[i] and (recT[i] - repairRecT[i]) > POST_REPAIR_HOLD
             if exhausted or recT[i] > GIVEUP_TIME then
-                -- Last resort so a car is NEVER left beached off-track for the whole race: if it's still
-                -- off the surface, force it back onto the line (ignoring traffic clearance) with a fresh
-                -- body, then hand control back -- a car that rejoins and races always beats one stuck in
-                -- the gravel. If it's on-track-but-wedged, or genuinely wrecked, we stop here and it's AC's.
-                if R.CRASH_REPAIR and nearDist > OFFLINE_POWER and not terminalDamage(car) then
+                -- ONE rescue attempt before we EVER let a car retire (this is what breaks a pileup): if it
+                -- isn't terminally wrecked, give it a fresh body and force it back onto the racing line at a
+                -- STAGGERED point -- a per-car offset so a knot of wedged cars lands strung out over ~15-60 m
+                -- instead of restacking on the same spot -- then restart recovery and KEEP protecting it from
+                -- AC's retirement while it drives away. Cars in a heap get separated and rejoin, rather than
+                -- all timing out together and mass-retiring.
+                if R.CRASH_REPAIR and not rescued[i] and not terminalDamage(car) then
+                    rescued[i] = true
                     pcall(function() physics.setCarBodyDamage(i, vec4(0, 0, 0, 0)) end)
-                    putBackOnLine(sim, i, progress, center, true)
+                    local stagger = (progress + 0.004 + hash01(i * 17) * 0.010) % 1
+                    local sc = ac.trackProgressToWorldCoordinate(stagger, false)
+                    putBackOnLine(sim, i, stagger, sc or center, true)
+                    recT[i] = 0; repaired[i] = nil; repairRecT[i] = nil
+                    stallRef[i] = nil; stallT[i] = nil; backupT[i] = nil
+                    return
                 end
+                -- rescue already spent (or genuinely wrecked): hand it to AC. If it actually retires, the
+                -- isRetired check at the top of the loop counts it next frame (ground truth).
                 endRec(i); return
             end
             active = active + 1
@@ -241,10 +265,7 @@ function R.update(dt)
             -- to save it -- stop here so we quit blocking AC and it retires, and we don't waste a wing on
             -- it. (Body damage clears when we repair, so this only ever catches the ORIGINAL big hit,
             -- never a car we've already fixed and sent back out.)
-            if R.CRASH_REPAIR and terminalDamage(car) then
-                if not retiredMark[i] then retiredMark[i] = true; R.retiredCount = (R.retiredCount or 0) + 1 end
-                endRec(i); return
-            end
+            if R.CRASH_REPAIR and terminalDamage(car) then endRec(i); return end
 
             -- HIJACK AC's retirement: while we're working this car, stop AC retiring it and release
             -- its post-incident "brake and wait" so it (and our recovery) can move. We keep calling
@@ -381,6 +402,8 @@ function R.reset()
     stallRef, stallT, backupT, backupSign, backupN = {}, {}, {}, {}, {}
     repaired, repairRecT = {}, {}
     limpT = {}
+    limpDone = {}
+    rescued = {}
     retiredMark = {}
     reported = {}
     R.count = 0; R.repairedCount = 0; R.limpCount = 0; R.retiredCount = 0

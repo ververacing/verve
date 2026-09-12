@@ -1,5 +1,20 @@
 Verve - changelog
 
+0.10.4
+- Pile-ups no longer wipe out the grid. When a knot of cars gets wedged together and can't be freed,
+  each one now gets one rescue -- a fresh body and a force-placed return to the racing line at a
+  STAGGERED point, so the heap lands strung out over a stretch of track instead of restacking -- then
+  keeps being protected while it drives away. Cars in a heap get separated and rejoin, rather than all
+  timing out together and retiring at once.
+- "Limp repairs" no longer runs away. The give-a-hobbled-car-a-fresh-body helper now re-bodies a given
+  car at most ONCE per damage episode (it was re-firing every few seconds on kerb-worn cars, showing
+  hundreds of "repairs" a race). Body damage only, since that's all it can actually fix.
+- Retirement count is now the real thing: it counts cars that ACTUALLY retired, not our own "give up"
+  decisions -- so the number you see matches the grid (and the ~10.5% real-world target).
+- Trouble-spot learning is protected from being wiped. A reload used to be able to overwrite a track's
+  learned hot-spots with an empty set; now learned data is never overwritten with nothing, so the
+  adaptive crash-damping keeps building across sessions instead of resetting.
+
 0.10.3
 - Pick a driver for EVERY racer, not just per car model. The driver list is now one row per grid slot
   (numbered, with each racer's name), so a grid of identical cars can be a full grid of different

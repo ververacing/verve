@@ -64,6 +64,10 @@ function T.save(force)
     pcall(function()
         for _, bins in pairs(data) do pruneClass(bins) end    -- hard-bound each class before writing
         local all = loadAll()
+        -- NEVER overwrite a track's learned data with an empty set. A CSP hot-reload (or the app
+        -- re-initialising) resets `data` to {}; without this guard the next save/reset would wipe the
+        -- stored history for the track. If we have nothing in memory, leave whatever's on disk alone.
+        if next(data) == nil and all[trackKey] ~= nil then return end
         all[trackKey] = data
         store.troubleData = stringify(all)
     end)
