@@ -16,8 +16,11 @@ local STOP_SPEED  = 5.0
 local STUCK_TIME  = 2.0       -- engage a touch sooner, so AC can't retire a car in the gap
 local GIVEUP_TIME = 45.0      -- absolute backstop: only after this long total do we ever hand a car back to AC
 local POST_REPAIR_HOLD = 15.0 -- once we've REPAIRED a car, if it STILL won't move in this long it's wedged -> let it go
-local NEAR_MAX    = 45.0      -- start recovering cars this far off the line (wide first-corner shunts)
-local ABORT_DIST  = 85.0      -- and keep working them from this far out
+local NEAR_MAX    = 150.0     -- engage a STOPPED car this far off the line. Raised a lot: cars that fly
+                             -- deep into a runoff/barrier (30-100 m off) used to be beyond this and were
+                             -- skipped entirely -- never repositioned, never retired, frozen off-track all
+                             -- race. They're stopped, so we grab them and force them back (or retire if chronic).
+local ABORT_DIST  = 250.0    -- only give up on a truly absurd reading (a projection glitch), not a real crash
 local GAS         = 0.28
 local STEER_GAIN  = 2.0
 local TARGET_AHEAD= 0.002
@@ -48,7 +51,9 @@ local REPOSITION_DIST   = 9.0  -- metres off the racing line = genuinely OFF-tra
 -- re-fires forever (a kerb-riding car never stops qualifying). Suspension limpers are left to the
 -- blockage go-around (traffic routes around them) rather than pointlessly re-bodied.
 local LIMP_SPEED    = 100.0    -- km/h: below this while damaged = limping
-local LIMP_IMPACT   = 45.0     -- km/h body impact that counts as performance-hurting damage (catches a knocked wing, but not a light kerb tap)
+local LIMP_IMPACT   = 30.0     -- km/h body impact that counts as performance-hurting damage. Lowered so a
+                              -- damaged car gets a fresh body IN PLACE sooner -- before AC decides to send it
+                              -- to the pits (where it strands). The once-per-episode guard stops it spamming.
 local LIMP_GRACE    = 6.0      -- seconds limping before we give it a fresh body
 -- "genuinely wrecked" is judged by actual DAMAGE, not just closing speed: a very hard body impact OR
 -- broken suspension. A light touch (even at 150+ km/h) does neither, so it keeps racing.
@@ -194,7 +199,14 @@ function R.update(dt)
     for i = 0, sim.carsCount - 1 do          -- includes the player's car WHEN it's under AI control (Ctrl+C)
         pcall(function()
             local car = ac.getCar(i)
-            if not car or not car.isAIControlled then return end
+            if not car then return end
+            -- Record which way EVERY car is racing (incl. a manually-driven player) while it's up to speed,
+            -- so a reset -- the unstick button especially -- can face it the right way. Done before the
+            -- AI-control gate, because the player's own car isn't AI-controlled while you drive it.
+            if (car.speedKmh or 0) > MOVE_SPEED and car.look then
+                lastFwd[i] = vec3(car.look.x, car.look.y, car.look.z)
+            end
+            if not car.isAIControlled then return end
             local retired = false
             pcall(function() retired = (car.isRetired == true) end)
             if retired then
@@ -205,10 +217,7 @@ function R.update(dt)
                 endRec(i); return
             end
             local spd = car.speedKmh or 0
-            if spd > MOVE_SPEED then
-                hasMoved[i] = true; repaired[i] = nil; repairRecT[i] = nil   -- back racing: reset
-                if car.look then lastFwd[i] = vec3(car.look.x, car.look.y, car.look.z) end   -- remember which way it's racing
-            end
+            if spd > MOVE_SPEED then hasMoved[i] = true; repaired[i] = nil; repairRecT[i] = nil end   -- back racing: reset
             if car.isInPitlane then stuckT[i] = 0; endRec(i); return end
             if not hasMoved[i] then return end
 
@@ -242,10 +251,17 @@ function R.update(dt)
                 if stuckT[i] < STUCK_TIME then return end
             end
 
-            local tc = ac.worldCoordinateToTrack(car.position)
-            if not tc then return end
-            local progress = tc.z
-            if progress < 0 or progress > 1 then return end
+            -- Use car.splinePosition for the car's track progress -- AC tracks it reliably even when the
+            -- car is flung far off into a runoff. Projecting the world position onto the spline (the old
+            -- way) returns garbage for a deep-off car, which is exactly why those wrecks were judged
+            -- "impossibly far" and skipped -- frozen off-track all race. Fall back to the projection only
+            -- if splinePosition is somehow unavailable.
+            local progress = car.splinePosition
+            if type(progress) ~= 'number' or progress < 0 or progress > 1 then
+                local tc = ac.worldCoordinateToTrack(car.position)
+                progress = tc and tc.z
+            end
+            if type(progress) ~= 'number' or progress < 0 or progress > 1 then return end
             local center = ac.trackProgressToWorldCoordinate(progress, false)
             if not center then return end
             local nearDist = car.position:distance(center)
@@ -317,8 +333,15 @@ function R.update(dt)
                     -- a beached car can't drive out on gravel. If traffic blocks the drop this frame, we
                     -- DON'T mark it repaired (no false "rejoined"): we keep retrying next frames until the
                     -- spot is safe, and the give-up backstop forces it if a gap never comes.
+                    -- A beached car can't drive out of the gravel, so it MUST be repositioned. Respect
+                    -- traffic for the first few seconds (don't drop into a passing car), but after that
+                    -- FORCE it back on the line -- otherwise, on a busy track, the traffic check never
+                    -- clears and the car sits off-track the whole race (the "ran off, never rejoined" bug).
+                    -- Each reposition counts as a repair, so a car that keeps going off hits the
+                    -- repeat-offender limit and retires cleanly -- no car is ever left in limbo.
                     local offTrack = nearDist > REPOSITION_DIST
-                    local placed = (not offTrack) or putBackOnLine(sim, i, progress, center, false)
+                    local forceIt = recT[i] > penalty + 6
+                    local placed = (not offTrack) or putBackOnLine(sim, i, progress, center, forceIt)
                     if placed then
                         pcall(function() physics.setCarBodyDamage(i, vec4(0, 0, 0, 0)) end)   -- fresh wing/body, in place
                         repaired[i] = true
@@ -458,6 +481,8 @@ function R.forceRecover(i)
         local progress = tc.z
         if progress < 0 or progress > 1 then return end
         local center = ac.trackProgressToWorldCoordinate(progress, false); if not center then return end
+        -- Repositions onto the racing line at the car's progress -- crucially, this DOES move a car out
+        -- of the pit lane (AC's own resetCarState just repairs in place and leaves it stuck in the pits).
         pcall(function() physics.setCarBodyDamage(i, vec4(0, 0, 0, 0)) end)
         putBackOnLine(sim, i, progress, center, true)          -- force: ignores traffic clearance
         recT[i] = nil; stuckT[i] = nil; repaired[i] = nil; repairRecT[i] = nil

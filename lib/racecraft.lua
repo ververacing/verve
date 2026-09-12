@@ -106,6 +106,9 @@ local BLOCK_EDGE     = 0.60  -- only sweep around an obstacle THIS central; a ca
                              -- side (in the grass/gravel) needs no berth -- just drive past it on the line
 local YIELD_GAP      = 0.010 -- a lapping car this close behind -> start moving aside
 local YIELD_OFFSET   = 0.58  -- move this far off-line to let the lapper through (decisive, so it's clearly out of the way)
+local DAMAGE_YIELD   = 38    -- body damage above which a car pulls off the line (and stops racecraft-swerving)
+                            -- so healthy cars can pass. Lowered so a moderately-hurt car yields cleanly
+                            -- instead of limping down the middle and weaving as it tries to race.
 local YIELD_AGGR     = 0.45  -- ease off only slightly while being lapped -- you're still racing
 local YIELD_LIFT_GAP = 0.004 -- only actually lift once the lapper is THIS close (else keep racing pace)
 local YIELD_CAUT     = 0.18  -- small lift as the faster car draws right up (was a big early slowdown)
@@ -286,6 +289,11 @@ function R.evaluate(i, dt)
         end
         local myLat = latOf(me.position)          -- current lateral on track (-1 left .. +1 right)
         local target, aggr, wide = 0, baseA, 0    -- wide = 0..1 extra track width earned by an exit-speed run
+        local myDmg = 0                           -- worst body-damage zone (km/h) -- drives the damaged-car yield
+        pcall(function()
+            local d = me.damage
+            if d then for k = 0, 4 do local v = d[k]; if type(v) == 'number' and v > myDmg then myDmg = v end end end
+        end)
 
         -- BLOCKAGE detect: scan a short window ahead for the SLOWEST car -- a stalled/crashed/crawling car
         -- is an obstacle, not a rival. Crucially we key off the genuinely-slow car (usually the crash),
@@ -485,6 +493,20 @@ function R.evaluate(i, dt)
             local lift = (lapperGap < YIELD_LIFT_GAP) and YIELD_CAUT * clamp(1 - lapperGap / YIELD_LIFT_GAP, 0, 1) or 0
             caut = math.min(caut, YIELD_CAUT) + lift
             state  = 0
+        end
+
+        -- DAMAGED-CAR YIELD: a significantly damaged car pulls OFF the racing line (a self-imposed blue
+        -- flag) and keeps rolling, so the healthy field streams past instead of stacking up and rear-ending
+        -- a limping car. Commits to one side, eases aggression, and caps caution so it doesn't crawl-block.
+        if not yielding and myDmg > DAMAGE_YIELD then
+            yielding = true
+            state = 0                                                  -- stop racing (attack/defend) -- just yield
+            local side = (hash01(i * 5 + 7) < 0.5) and -1 or 1        -- a stable side per car (no waver)
+            if (side > 0 and myLat > EDGE_SOFT) or (side < 0 and myLat < -EDGE_SOFT) then side = -side end
+            target = side * YIELD_OFFSET
+            holdSign[i] = side; holdUntil[i] = os.clock() + SIDE_HOLD
+            aggr = math.min(aggr, YIELD_AGGR)
+            caut = math.min(caut, YIELD_CAUT)                          -- keep rolling; don't stack into a crawl
         end
 
         -- track-edge safety: never push a car further toward an edge it's already near (keeps cars off

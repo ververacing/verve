@@ -1,6 +1,20 @@
 Verve - changelog
 
-0.10.6
+0.10.7
+- Cars flung deep off track now come back. Recovery worked out where a car was by projecting its world
+  position onto the track -- which returns nonsense for a car thrown 30-50 m into a runoff, so those
+  wrecks were judged "impossibly far", skipped, and left frozen off-track for the whole race. It now
+  uses the car's own tracked spline position instead, so even a car deep in the gravel gets found,
+  repaired and put back on the racing line. (This also cured most of the "recovered facing the wrong
+  way" -- the bad position was feeding a bad facing direction too.)
+- No car is left in limbo. A beached car that can't drive out is now firmly put back on the line (after
+  a few seconds' grace for traffic), and one that keeps crashing hits the repeat-offender limit and
+  retires -- so every stricken car resolves: it races again, or it retires. Nothing sits dead off-track.
+- Damaged cars pull aside. A hurt car now moves decisively off the racing line and stops trying to race
+  (no more weaving down the middle as it limps), so the healthy field can stream past cleanly. And a
+  damaged car gets patched up in place sooner -- ideally before AC packs it off to the pits.
+- "Reset my car" button now reliably moves you OUT of the pits (and anywhere else you're stuck) and
+  drops you back on the racing line.
 - "Reset my car" button: stuck, beached, or wedged in the pits? One click repairs your car and drops it
   back on the racing line facing forward, so you can get going again instead of sitting out the race.
   (Top of the app, under Enable Verve. Press it WHILE stuck -- a car that's already retired can't return.)
