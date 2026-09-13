@@ -20,6 +20,7 @@
 local Classes   = require('lib.classes')
 local Drivers   = require('lib.drivers')
 local Troublespots = require('lib.troublespots')
+local Recovery  = require('lib.recovery')     -- for damage-since-repair (recovery never requires racecraft: no cycle)
 
 local R = {}
 R.ENABLED     = true
@@ -77,8 +78,13 @@ local PACK_STRETCH   = 0.14  -- small pace stretch (less caution) for a car lead
 -- adaptive crash damping: the crashier a track has proven (from its learned trouble-spot history), the
 -- calmer the WHOLE field runs -- more caution, less aggression, a bigger opening-lap ease, and the pace
 -- stretch pulled back. Self-calibrating: a nasty track (Zandvoort) settles down, a clean one stays racy.
-local CRASH_CAUT     = 0.35  -- extra field-wide caution at a fully crash-prone track
+local CRASH_CAUT     = 0.20  -- extra field-wide caution at a fully crash-prone track (was 0.35 -- see CAUT_MAX)
 local CRASH_AGGR     = 0.35  -- aggression trimmed by up to this fraction at a fully crash-prone track
+-- The back-off terms (hot corner, crash damping, cold tyres, anti-rear-end, pounce, leave-room...) are each
+-- sensible alone but they STACK: a train reached caution 1.9 into a corner and its front cars crawled
+-- through at 76 km/h while the tail arrived at 170. Different speeds in one corner is what actually
+-- causes pile-ups, so the total racecraft caution is capped -- "careful", never "crawling".
+local CAUT_MAX       = 0.80
 -- anti rear-end: closing fast while sat DIRECTLY behind the car ahead (not moving alongside to pass)
 -- -> ease the final approach so we don't pile into its gearbox in the braking zone. AC's own AI does
 -- this badly; this is the biggest cause of the pack "wrecking crew". Even aggressive drivers keep a
@@ -100,12 +106,17 @@ local BLOCK_LIMP     = 55.0  -- only a car below THIS absolute speed can be a "l
 local BLOCK_DELTA    = 50.0  -- and I must be at least this much faster than it (clearly arriving on it)
 local BLOCK_GAP      = 0.006 -- look this far ahead for the obstacle (start peeling off a bit earlier)
 local BLOCK_MARGIN   = 6.0   -- I only need to be a little faster than it (so cars queued behind it still peel off)
+local BLOCK_TIME     = 2.0   -- ...and at least this many SECONDS of travel at my speed: 27 m is 0.8 s at 120 km/h,
+                             -- which is how a car T-boned a crawler at the last corner before it could move over
 local BLOCK_OFFSET   = 0.48  -- swing this far to the open side -- just enough to sneak past, not a huge berth
 local BLOCK_HOLD     = 1.5   -- commit to the avoidance side briefly (don't dart back into it)
 local BLOCK_EDGE     = 0.60  -- only sweep around an obstacle THIS central; a car parked well off to the
                              -- side (in the grass/gravel) needs no berth -- just drive past it on the line
 local YIELD_GAP      = 0.010 -- a lapping car this close behind -> start moving aside
-local YIELD_OFFSET   = 0.58  -- move this far off-line to let the lapper through (decisive, so it's clearly out of the way)
+local YIELD_OFFSET   = 0.45  -- move this far off-line to let a faster car through. Was 0.58: at speed that put
+                             -- yielding cars (damaged ones especially) into the gravel mid-corner -- a car
+                             -- width is enough, and it's speed-damped below like every other line change
+local DAMAGE_YIELD_HOLD = 4.0 -- a damaged car commits to its off-line side this long (vs SIDE_HOLD) -- no weaving
 local DAMAGE_YIELD   = 38    -- body damage above which a car pulls off the line (and stops racecraft-swerving)
                             -- so healthy cars can pass. Lowered so a moderately-hurt car yields cleanly
                             -- instead of limping down the middle and weaving as it tries to race.
@@ -144,6 +155,39 @@ local SPEED_MIN    = 30.0
 local CROWD_GAP    = 0.006     -- cars within this spline gap count as "in the pack"
 local SAMPLE_D     = 0.004     -- spline fraction between racing-line samples (~20m on a 5km track)
 local CORNER_TURN  = 0.01      -- min (1 - dot) between tangents to count as "a corner ahead" (~8 deg)
+local CLASS_YIELD_MARGIN = 15.0 -- km/h: a faster CLASS closing at least this much faster gets let through (multi-class)
+-- PACE-aware yield: the same thing by MEASURED pace, not class label. A mixed grid of "formula" mods spans
+-- F3.5s to F1s -- all one class key, so the class rule never fired -- and the data shows it: the slowest
+-- mod on today's grid (a Formula Renault 3.5 among F1s) averaged 1.9 laps before being collected. A car
+-- whose best lap is this much slower than the one closing on it is being LAPPED in all but name: let it by.
+local PACE_YIELD_RATIO   = 1.04
+-- YELLOW FLAG: a stopped car on the road ahead gets everyone arriving a hard speed cap that tightens as they
+-- approach -- double-waved yellows. Class-agnostic absolute caps: no racing car should pass a stationary
+-- car faster than this. (The go-around handles the LATERAL part; this is the "slow down".) Before this, a
+-- car sat sideways on the line after a spin was hit twice by cars arriving at full speed, and a just-
+-- rescued car was T-boned at 150 km/h.
+local YELLOW_NEAR    = 40    -- metres from the obstacle at which the cap is at its tightest...
+local YELLOW_CAP     = 60    -- ...this (km/h). 80 let cars arrive at a blocked road at 80-95 and hit it; 45 had
+                             -- the whole field crawling through a zone with one stopped car and stacking up
+local YELLOW_FAR     = 250   -- the zone starts this far out...
+local YELLOW_CAP_FAR = 200   -- ...at this cap (km/h), easing linearly to YELLOW_CAP
+local YELLOW_LAT     = 1.3   -- a stopped car this far from the centre line still counts (edge/kerb); deep in the gravel doesn't
+
+-- TRACK-LENGTH SCALING: every gap above is a spline FRACTION, and the tuning was done on ~4.5 km circuits.
+-- A fraction is a different distance on every track (0.008 is 36 m at Zandvoort, 160 m at the
+-- Nordschleife, 8 m on a kart track), so racecraft that felt right at one length was blind or twitchy at
+-- another. The gaps are re-derived from METRES each session -- same names, identical values at 4.5 km.
+local REF_LEN  = 4500
+local trackLen = REF_LEN
+local scaled   = false
+local function scaleToTrack(len)
+    trackLen = (type(len) == 'number' and len > 200) and len or REF_LEN
+    local function m(x) return x / trackLen end
+    GROOVE_RANGE  = m(90);   ISOLATED_GAP = m(135);  PACK_LEAD_GAP = m(54);   REAREND_GAP   = m(22.5)
+    BLOCK_GAP     = m(27);   YIELD_GAP    = m(45);   YIELD_LIFT_GAP = m(18);  ALONGSIDE_GAP = m(11)
+    ATTACK_GAP    = m(36);   PASS_GAP     = m(16);   DEFEND_GAP   = m(22.5);  CROWD_GAP     = m(27)
+    SAMPLE_D      = m(18);   GRID_FADE_END = m(225); GRID_CAPTURE = m(90)
+end
 
 -- per-class racecraft tactics: gap = striking range, offset = how far off-line, corner = how hard
 -- it commits to an inside dive (vs a straight slipstream pass), defend = defensive firmness.
@@ -164,6 +208,7 @@ local TACTICS = {
     nascar    = { gap = 1.2,  offset = 1.2, corner = 0.8, defend = 1.1, follow = 1.4 }, -- pack/draft: run right up in the tow, use the whole width (high/low lines), block the draft
 }
 local curOffset = {}
+local latNow = {}           -- every car's lateral track position this frame (one projection per car, not per pair; filled in beginFrame)
 local gridLat = {}          -- each car's captured starting-lane lateral, for the grid funnel
 local holdSign, holdUntil = {}, {}
 local pounceT = {}
@@ -256,22 +301,59 @@ function R.evaluate(i, dt)
         local nearGap, nearIdx, nearAhead = 1e9, -1, true   -- closest car by on-track gap (either side)
         local lapperIdx, lapperGap = -1, 1e9                -- nearest car on a higher lap coming through
         local crowd = 0
+        local myPace = me.bestLapTimeMs                     -- (0 until the car has set a lap)
+        if type(myPace) ~= 'number' or myPace <= 0 then myPace = nil end
+        local yellowD = 1e9                                 -- nearest STOPPED car on the road ahead (yellow flag)
+        local yellowRange = YELLOW_FAR / trackLen
         local sim = ac.getSim()
         for j = 0, sim.carsCount - 1 do
             if j ~= i then
                 local oc = ac.getCar(j)
                 if oc and oc.splinePosition then
+                    local ocSpd = oc.speedKmh or 0
                     local d = oc.splinePosition - mySpline; if d < 0 then d = d + 1 end
-                    if d > 0 and d < gapA then gapA = d; aheadSpd = oc.speedKmh or 0; aheadIdx = j end
                     local b = mySpline - oc.splinePosition; if b < 0 then b = b + 1 end
-                    if b > 0 and b < gapB then gapB = b; behindSpd = oc.speedKmh or 0; behindIdx = j end
-                    if d < CROWD_GAP or b < CROWD_GAP then crowd = crowd + 1 end
-                    local nd = d < b and d or b                       -- true nearest on track
-                    if nd < nearGap then nearGap = nd; nearIdx = j; nearAhead = (d <= b) end
-                    if b < YIELD_GAP and (oc.lapCount or 0) > myLap and b < lapperGap then lapperIdx = j; lapperGap = b end
+                    local ocLat = latNow[j] or 0
+                    -- a stopped (or crawling) car ON the road ahead is a yellow flag, not a rival
+                    if d > 0 and d < yellowRange and ocSpd < BLOCK_SPEED and math.abs(ocLat) < YELLOW_LAT and d < yellowD then
+                        yellowD = d
+                    end
+                    -- stopped or off-track cars aren't rivals to attack/defend against (the blockage scan and
+                    -- the yellow handle them). A repaired car once "attacked" a wreck parked 40 m out in the
+                    -- gravel and drove itself off the road doing it.
+                    if ocSpd >= BLOCK_SPEED and math.abs(ocLat) <= OFFLINE_MAX then
+                        if d > 0 and d < gapA then gapA = d; aheadSpd = ocSpd; aheadIdx = j end
+                        if b > 0 and b < gapB then gapB = b; behindSpd = ocSpd; behindIdx = j end
+                        if d < CROWD_GAP or b < CROWD_GAP then crowd = crowd + 1 end
+                        local nd = d < b and d or b                       -- true nearest on track
+                        if nd < nearGap then nearGap = nd; nearIdx = j; nearAhead = (d <= b) end
+                        -- a car on a higher lap (blue flag) -- or, in a MIXED field, a faster CLASS closing on me:
+                        -- multi-class racing lets the prototypes through rather than fighting them corner by corner.
+                        -- (Same class = a rival, however fast: that's racing.)
+                        if b < YIELD_GAP and b < lapperGap then
+                            local faster = ocSpd > spd + CLASS_YIELD_MARGIN
+                            local slowerPace = false
+                            if faster and myPace then
+                                local op = oc.bestLapTimeMs
+                                slowerPace = type(op) == 'number' and op > 0 and myPace > op * PACE_YIELD_RATIO
+                            end
+                            if (oc.lapCount or 0) > myLap or (faster and (slowerPace or Classes.keyOf(j) ~= classKey)) then
+                                lapperIdx = j; lapperGap = b
+                            end
+                        end
+                    end
                 end
             end
         end
+        -- YELLOW FLAG speed cap (cleared -- 1e9 -- every frame it doesn't apply), combined with recovery's
+        -- own cap for a car that's just been set back on the track (the two are the only writers of it)
+        local cap = 1e9
+        if yellowD < 1e9 then
+            local dm = yellowD * trackLen
+            cap = YELLOW_CAP + (YELLOW_CAP_FAR - YELLOW_CAP) * clamp((dm - YELLOW_NEAR) / (YELLOW_FAR - YELLOW_NEAR), 0, 1)
+        end
+        pcall(function() cap = math.min(cap, Recovery.rampCap(i)) end)
+        pcall(function() physics.setAITopSpeed(i, cap) end)
 
         local attackGap = ATTACK_GAP * t.gap
         local defendGap = DEFEND_GAP
@@ -289,11 +371,10 @@ function R.evaluate(i, dt)
         end
         local myLat = latOf(me.position)          -- current lateral on track (-1 left .. +1 right)
         local target, aggr, wide = 0, baseA, 0    -- wide = 0..1 extra track width earned by an exit-speed run
-        local myDmg = 0                           -- worst body-damage zone (km/h) -- drives the damaged-car yield
-        pcall(function()
-            local d = me.damage
-            if d then for k = 0, 4 do local v = d[k]; if type(v) == 'number' and v > myDmg then myDmg = v end end end
-        end)
+        -- body damage SINCE the car's last repair (km/h). Not raw `me.damage`: that's a never-decreasing
+        -- record of the worst hit, so a repaired car would read as wrecked for the rest of the race.
+        local myDmg = 0
+        pcall(function() myDmg = Recovery.damageOf(i) end)
 
         -- BLOCKAGE detect: scan a short window ahead for the SLOWEST car -- a stalled/crashed/crawling car
         -- is an obstacle, not a rival. Crucially we key off the genuinely-slow car (usually the crash),
@@ -304,12 +385,13 @@ function R.evaluate(i, dt)
         local blockSide = 0
         do
             local slowIdx, slowSpd = -1, 1e9
+            local blockLook = math.max(BLOCK_GAP, (spd / 3.6) * BLOCK_TIME / trackLen)   -- speed-scaled lookahead
             for j = 0, sim.carsCount - 1 do
                 if j ~= i then
                     local oc = ac.getCar(j)
                     if oc and oc.splinePosition then
                         local d = oc.splinePosition - mySpline; if d < 0 then d = d + 1 end
-                        if d > 0 and d < BLOCK_GAP and (oc.speedKmh or 1e9) < slowSpd then
+                        if d > 0 and d < blockLook and (oc.speedKmh or 1e9) < slowSpd then
                             slowSpd = oc.speedKmh or 1e9; slowIdx = j
                         end
                     end
@@ -443,7 +525,8 @@ function R.evaluate(i, dt)
             caut = caut - PACK_STRETCH * (1 - crash)   -- don't stretch away (more catching) on a crashy track
         end
         -- trouble-spot learning: a bit more caution approaching a corner this class keeps crashing at.
-        caut = caut + Troublespots.cautionAt(mySpline, classKey)
+        local tsCaut = Troublespots.cautionAt(mySpline, classKey)
+        caut = caut + tsCaut
         -- adaptive crash damping: on a track that keeps wrecking cars, calm the whole field (more caution,
         -- less aggression) so the crash RATE falls, not just the after-the-fact repairs.
         if crash > 0 then
@@ -483,7 +566,7 @@ function R.evaluate(i, dt)
         if lapperIdx >= 0 then
             yielding = true
             local lapLat = latOf(ac.getCar(lapperIdx).position)
-            target = ((lapLat >= myLat) and -1 or 1) * YIELD_OFFSET   -- move decisively off-line, side the lapper isn't
+            target = ((lapLat >= myLat) and -1 or 1) * YIELD_OFFSET * speedDamp   -- off-line, side the lapper isn't (less at speed)
             holdSign[i] = (target > 0) and 1 or -1; holdUntil[i] = os.clock() + SIDE_HOLD   -- commit to the move-aside
             aggr   = math.min(aggr, YIELD_AGGR)
             -- A lapped car should EASE aside and keep rolling, NOT crawl. Cap the total caution so the
@@ -491,22 +574,32 @@ function R.evaluate(i, dt)
             -- stop -- that's what makes traffic pile up and rear-end a car being lapped. Lift a touch more
             -- only as the faster car draws right alongside, to wave it by.
             local lift = (lapperGap < YIELD_LIFT_GAP) and YIELD_CAUT * clamp(1 - lapperGap / YIELD_LIFT_GAP, 0, 1) or 0
-            caut = math.min(caut, YIELD_CAUT) + lift
+            caut = math.min(caut, YIELD_CAUT + tsCaut) + lift   -- (never capped BELOW the corner's own trouble-spot caution)
             state  = 0
         end
 
-        -- DAMAGED-CAR YIELD: a significantly damaged car pulls OFF the racing line (a self-imposed blue
-        -- flag) and keeps rolling, so the healthy field streams past instead of stacking up and rear-ending
-        -- a limping car. Commits to one side, eases aggression, and caps caution so it doesn't crawl-block.
+        -- DAMAGED CAR: a significantly damaged car stops RACING (no attack/defend, eased aggression,
+        -- stays on the line) and, when a healthy car is right behind, pulls OFF the line to let it
+        -- through -- a self-imposed blue flag. It does NOT live off-line permanently and its caution is
+        -- NOT capped: an earlier build did both, and over ten Zandvoort races 73% of the cars that
+        -- crossed the damage threshold went off AGAIN within 24-40 s -- driving every corner 0.58 off
+        -- the racing line with less caution than a healthy car. (It also took out the leader and the
+        -- player together: P1 picked up 48 km/h of damage, was sent off-line into the banked corner
+        -- with the player 30 m behind, and both were collected.) A real driver nurses a damaged car
+        -- ON the line and moves over when someone's on their tail.
         if not yielding and myDmg > DAMAGE_YIELD then
-            yielding = true
-            state = 0                                                  -- stop racing (attack/defend) -- just yield
-            local side = (hash01(i * 5 + 7) < 0.5) and -1 or 1        -- a stable side per car (no waver)
-            if (side > 0 and myLat > EDGE_SOFT) or (side < 0 and myLat < -EDGE_SOFT) then side = -side end
-            target = side * YIELD_OFFSET
-            holdSign[i] = side; holdUntil[i] = os.clock() + SIDE_HOLD
+            state = 0
+            target = 0                                                 -- no diving for passes with a bent car
             aggr = math.min(aggr, YIELD_AGGR)
-            caut = math.min(caut, YIELD_CAUT)                          -- keep rolling; don't stack into a crawl
+            if behindIdx >= 0 and gapB < YIELD_GAP and behindSpd > spd - FASTER_MARGIN then
+                yielding = true
+                -- keep whatever side we've already committed to (don't re-pick and weave); only choose
+                -- one the first time, or if the current side is against an edge.
+                local side = holdSign[i] or ((hash01(i * 5 + 7) < 0.5) and -1 or 1)
+                if (side > 0 and myLat > EDGE_SOFT) or (side < 0 and myLat < -EDGE_SOFT) then side = -side end
+                target = side * YIELD_OFFSET * speedDamp
+                holdSign[i] = side; holdUntil[i] = os.clock() + DAMAGE_YIELD_HOLD   -- long hold: pick a side and STAY
+            end
         end
 
         -- track-edge safety: never push a car further toward an edge it's already near (keeps cars off
@@ -563,6 +656,9 @@ function R.evaluate(i, dt)
             holdSign[i] = blockSide; holdUntil[i] = os.clock() + BLOCK_HOLD
         end
 
+        -- cap the stacked back-off (see CAUT_MAX); the attack/defend NEGATIVE caution is left alone
+        if caut > CAUT_MAX then caut = CAUT_MAX end
+
         -- slew the offset (anti-dart)
         local cur = curOffset[i] or 0
         local step = OFFSET_SLEW * (dt > 0 and dt < 0.5 and dt or 0.016)
@@ -573,15 +669,35 @@ function R.evaluate(i, dt)
 
         physics.setAISplineOffset(i, clamp(cur, -1, 1), false)
         physics.setAIAggression(i, clamp(aggr, 0, 1))
+        -- what we actually applied this frame, for the diagnostics log (reused table: no per-frame garbage)
+        local L = R.last[i] or {}
+        L.off, L.aggr, L.caut, L.state, L.yield, L.block, L.dmg = cur, aggr, caut, state, yielding, blockSide, myDmg
+        R.last[i] = L
     end)
     if state == 1 then R.attacking = R.attacking + 1
     elseif state == 2 then R.defending = R.defending + 1 end
     return caut
 end
 
-function R.beginFrame() R.attacking = 0; R.defending = 0 end
+R.last = {}                 -- per-car applied values (offset/aggr/caution/state) -- diagnostics only
+function R.beginFrame()
+    R.attacking = 0; R.defending = 0
+    pcall(function()
+        local s = ac.getSim()
+        for j = 0, s.carsCount - 1 do
+            local c = ac.getCar(j)
+            latNow[j] = c and latOf(c.position) or 0
+        end
+    end)
+    if not scaled then      -- (re)derive the metre-based gaps for this track (also self-heals after a hot-reload)
+        scaled = true
+        pcall(function() local s = ac.getSim(); scaleToTrack(s and s.trackLengthM) end)
+    end
+end
 function R.reset()
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
+    R.last = {}
+    scaled = false
     R.isOval = detectOval()     -- classify the track once per session (oval vs road course)
 end
 

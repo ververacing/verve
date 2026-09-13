@@ -3,6 +3,12 @@
 -- field stops piling into the same corner. Per track + per class, with a track-wide fallback until a
 -- class has its own history. Persisted across sessions via ac.storage, so the second race on a track
 -- already knows its hot spots. Heat decays if incidents stop, so a corner we've calmed relaxes again.
+--
+-- A trouble spot is RELATIVE: the handful of corners that are hot compared with the rest of the track.
+-- An earlier build used an absolute threshold, and on a track with a long history (Zandvoort) every
+-- kept bin ended up over it -- 40 "hot spots", a quarter of the lap, the whole field pegged at maximum
+-- caution everywhere and the per-corner lever meaningless. Now the worst corner gets the full caution,
+-- the others in proportion, and a merely-average bin gets none.
 
 local T = {}
 T.ENABLED = false
@@ -12,25 +18,40 @@ T.ENABLED = false
 local BIN_METERS    = 24.0       -- target bin length
 local MIN_BINS      = 40         -- clamp the count for very short / very long tracks
 local MAX_BINS      = 600
-local LOOKAHEAD_M   = 30.0       -- apply the caution ~this many metres BEFORE the spot (brake earlier)
+local LOOKAHEAD_M   = 45.0       -- apply the caution ~this many metres BEFORE the spot (brake earlier). Raised:
+                                 -- the offs cluster at a few specific corners, so cars need to be slowing
+                                 -- for the hot corner sooner, not just at it.
 local INCIDENT_HEAT = 1.0
 local UPSTREAM      = 3          -- also heat this many bins upstream (the cause precedes the mess)
-local HOT_THRESHOLD = 2.5        -- bin heat before we treat it as a trouble spot
-local HOT_RANGE     = 4.0        -- heat above threshold that maps to full caution
-local MAX_CAUT      = 0.45       -- most caution a trouble spot adds
+local HOT_THRESHOLD = 2.5        -- bin heat before it can count as a trouble spot at all...
+local HOT_REL       = 0.5        -- ...AND it must be at least this fraction of the track's hottest bin
+local MAX_CAUT      = 0.35       -- caution added at the track's WORST corner (others in proportion). Was 0.70:
+                                 -- the cars at the FRONT of a train crawled through the hot corner at 76 km/h
+                                 -- while the ones behind arrived at 170 -- the caution itself made the pile-up.
+                                 -- Drivers are a bit more careful at a corner that bites; they don't tiptoe.
 local DECAY_PER_SEC = 0.0002     -- heat bleeds off slowly (~a few races) if incidents stop
 local SAVE_EVERY    = 20.0       -- seconds between debounced saves
 local FLOOR         = 0.05       -- drop a bin once its heat decays below this (keeps storage sparse)
 local HEAT_MAX      = 9.0        -- cap heat so it can't grow unbounded over hundreds of races (small numbers)
 local MAX_BINS_KEPT = 40         -- keep only the hottest N bins per class per track -- hard bound on size
+-- Field-wide "crashiness" comes from what's happening THIS session, not from the stored map: a decaying
+-- count of recent incidents. (Seeding it from history pegged it at 1.0 on Zandvoort from lap one, and
+-- the logs showed that permanent max damping didn't reduce the offs at all -- it just made everyone
+-- slow.) Drivers calm down after seeing crashes and relax again when the race settles: that's human.
+local RECENT_TAU    = 240.0      -- seconds: how long a recent incident keeps the field's guard up
+local CRASH_RECENT  = 6.0        -- this many recent incidents = fully crash-prone
 
 local store = ac.storage({ troubleData = '' })
 local data  = {}                 -- data[cls][bin] = heat for the CURRENT track ('_global' = all classes)
+local peak  = {}                 -- peak[cls] = hottest bin heat in that class map (refreshed each second)
 local trackKey = 'track'
 local nbins, lookaheadFrac = 200, 0.008   -- recomputed per track from its length in T.reset()
 local lastSave, lastDecay = 0, 0
 local dirtyStore = false
 local booted = false             -- have we loaded this track's data yet? (self-heal after a hot-reload)
+local recent = 0                 -- decaying count of incidents this session
+T.storeLen = 0                   -- diagnostics: size of the last persisted map
+T.lastSaveOk = true              -- diagnostics: did the last save read back intact?
 
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
 
@@ -42,6 +63,15 @@ local function pruneClass(bins)
     for b, h in pairs(bins) do arr[#arr + 1] = { b, h } end
     table.sort(arr, function(a, c) return a[2] > c[2] end)
     for k = MAX_BINS_KEPT + 1, #arr do bins[arr[k][1]] = nil end
+end
+
+local function refreshPeaks()
+    peak = {}
+    for cls, bins in pairs(data) do
+        local p = 0
+        for _, h in pairs(bins) do if h > p then p = h end end
+        peak[cls] = p
+    end
 end
 
 local function curTrackKey()
@@ -70,7 +100,14 @@ function T.save(force)
         -- stored history for the track. If we have nothing in memory, leave whatever's on disk alone.
         if next(data) == nil and all[trackKey] ~= nil then return end
         all[trackKey] = data
-        store.troubleData = stringify(all)
+        local s = stringify(all)
+        store.troubleData = s
+        T.storeLen = #s
+        -- self-check: read it straight back. If the store silently rejected it (size, format), say so in
+        -- the CSP log rather than quietly losing a track's history.
+        local back = store.troubleData
+        T.lastSaveOk = (type(back) == 'string' and #back == #s)
+        if not T.lastSaveOk then ac.log(string.format('Verve: trouble-spot save did not stick (%d chars)', #s)) end
     end)
     dirtyStore = false
 end
@@ -86,9 +123,20 @@ function T.reset()
     nbins = clamp(math.floor(len / BIN_METERS + 0.5), MIN_BINS, MAX_BINS)
     lookaheadFrac = clamp(LOOKAHEAD_M / len, 0.001, 0.05)
     data = {}
+    recent = 0
     pcall(function()
         local td = loadAll()[trackKey]
         if type(td) == 'table' then data = td end
+    end)
+    refreshPeaks()
+    -- Seed the field's guard from the track's history, DECAYING: a known-nasty track starts the race
+    -- cautious (that's what kept the opening-lap pile-ups down -- removing it cost 9 lap-0 incidents in
+    -- one race) and relaxes over the first minutes if the race is actually clean.
+    recent = CRASH_RECENT * 0.6 * clamp((peak['_global'] or 0) / HEAT_MAX, 0, 1)
+    pcall(function()
+        local n = 0
+        if data['_global'] then for _ in pairs(data['_global']) do n = n + 1 end end
+        ac.log(string.format('Verve: trouble-spots for %s: %d bins, peak heat %.1f', trackKey, n, peak['_global'] or 0))
     end)
     lastSave = os.clock(); lastDecay = os.clock()
     booted = true
@@ -109,17 +157,32 @@ function T.incident(spline, cls)
             data['_global'][b] = math.min(HEAT_MAX, (data['_global'][b] or 0) + w * INCIDENT_HEAT)
         end
     end
+    recent = recent + 1
     dirtyStore = true
 end
 
+-- heat of a bin IF it's a trouble spot for this class (relative to the class map's peak), else 0.
+-- Falls back to the track-wide map when the class has no history of its own there.
+local function hotHeat(cls, bin)
+    local h = (data[cls] and data[cls][bin]) or 0
+    local p = peak[cls] or 0
+    if h < HOT_THRESHOLD or h < p * HOT_REL then
+        h = (data['_global'] and data['_global'][bin]) or 0
+        p = peak['_global'] or 0
+    end
+    if h < HOT_THRESHOLD or h < p * HOT_REL then return 0, p end
+    return h, p
+end
+
 -- Caution to apply for a car approaching `spline` in class `cls` (0 if it isn't a trouble spot).
+-- The track's worst corner gets MAX_CAUT; lesser hot spots get a proportional share.
 function T.cautionAt(spline, cls)
     if not T.ENABLED or type(spline) ~= 'number' then return 0 end
     local bin = math.floor(((spline + lookaheadFrac) % 1) * nbins) % nbins
-    local h = (data[cls] and data[cls][bin]) or 0
-    if h < HOT_THRESHOLD then h = (data['_global'] and data['_global'][bin]) or 0 end   -- fallback
-    if h < HOT_THRESHOLD then return 0 end
-    return clamp((h - HOT_THRESHOLD) / HOT_RANGE, 0, 1) * MAX_CAUT
+    local h, p = hotHeat(cls or 'road', bin)
+    if h <= 0 then return 0 end
+    local span = math.max(p, HOT_THRESHOLD + 1.0) - HOT_THRESHOLD
+    return clamp((h - HOT_THRESHOLD) / span, 0, 1) * MAX_CAUT
 end
 
 function T.update(dt)
@@ -130,31 +193,38 @@ function T.update(dt)
     if not T.ENABLED then return end
     local now = os.clock()
     if now - lastDecay > 1.0 then
-        local f = 1 - DECAY_PER_SEC * (now - lastDecay); lastDecay = now
+        local el = now - lastDecay
+        local f = 1 - DECAY_PER_SEC * el; lastDecay = now
         for _, bins in pairs(data) do
             for b, h in pairs(bins) do
                 local nh = h * f
                 if nh < FLOOR then bins[b] = nil else bins[b] = nh end
+                dirtyStore = true   -- decay changes the map too -> must be saved, or a calmed corner reloads hot
             end
         end
+        recent = math.max(0, recent * (1 - el / RECENT_TAU))
+        refreshPeaks()
     end
     if now - lastSave > SAVE_EVERY then lastSave = now; T.save(false) end
 end
 
--- diagnostic: how many hot spots the track currently has (global aggregate)
+-- diagnostic: how many genuine trouble spots the track currently has (track-wide map)
 function T.hotCount()
     local n, g = 0, data['_global']
-    if g then for _, h in pairs(g) do if h >= HOT_THRESHOLD then n = n + 1 end end end
+    local p = peak['_global'] or 0
+    if g then for _, h in pairs(g) do if h >= HOT_THRESHOLD and h >= p * HOT_REL then n = n + 1 end end end
     return n
 end
 
--- How crash-prone this track has proven to be, 0..1, from the learned hot-spot count. It loads with
--- the track's persisted history, so a known-nasty track (Zandvoort) reads "crashy" from lap one. The
--- director uses this to calm the whole field down on tracks that keep wrecking cars.
-local CRASH_HOTS = 16      -- hot-spot count that reads as fully crash-prone (Zandvoort ~14)
+-- diagnostic: the hottest bin's heat on this track
+function T.peakHeat() return peak['_global'] or 0 end
+
+-- How crash-prone the race is proving RIGHT NOW, 0..1, from recent incidents this session (decaying).
+-- The director uses this to calm the whole field down while cars keep going off -- and to let them
+-- race again once things settle.
 function T.crashiness()
     if not T.ENABLED then return 0 end
-    return clamp(T.hotCount() / CRASH_HOTS, 0, 1)
+    return clamp(recent / CRASH_RECENT, 0, 1)
 end
 
 return T

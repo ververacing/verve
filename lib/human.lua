@@ -11,6 +11,7 @@
 
 local Classes = require('lib.classes')
 local Drivers = require('lib.drivers')
+local Troublespots = require('lib.troublespots')
 local H = {}
 
 -- driven by the app each frame:
@@ -31,6 +32,10 @@ local PRESSURE_GAP    = 0.0035
 local PRESSURE_NERVES = 0.02
 local MISTAKE_RATE    = 0.02
 local MISTAKE_BASE    = 0.003
+local MISTAKE_CRASHY  = 0.70     -- on a track proven treacherous (trouble-spot crashiness), drivers stop taking
+                                 -- liberties: mistake FREQUENCY drops by up to this fraction, and severity softens.
+                                 -- Data: ~95% of offs on such tracks are SOLO (no contact) -- a gentle bobble that's
+                                 -- harmless at Silverstone is an off at a banked, no-margin Zandvoort corner.
 -- Mistakes come in human FLAVOURS instead of one generic grip dip. Each is small and
 -- recoverable; most add a touch of caution too (the driver lifts to gather it), which makes
 -- them read as human AND keeps a bobble from turning into a crash. grip/caut are amplitudes,
@@ -42,9 +47,14 @@ local MISTAKES = {
     { kind = "twitch",   grip = 0.035, caut = 0.05, dur = 0.6, w = 20 }, -- caught a wobble and gathered it
     { kind = "lockup",   grip = 0.045, caut = 0.06, dur = 0.5, w = 15 }, -- brief brake lock, released
 }
-local WARMUP_LAPS     = 1.5
-local WARMUP_MAX_GRIP = 0.06     -- cold-tyre grip loss -> AI takes corners slower when cold (anti run-wide)
-local WARMUP_MAX_CAUT = 0.13
+local WARMUP_LAPS     = 2.0      -- takes a bit longer to come up to temperature (like a real out-lap or two)
+-- Cold tyres now genuinely bite for the AI, like they do for you -- it follows the car's real tyre
+-- temperature, so on cold rubber it has LESS grip (slips a little, not planted) AND drives more carefully
+-- (it "knows" the tyres are cold), then comes up to full pace as they warm. This closes the early-race
+-- gap where the AI cornered on rails while you were sliding. The heavy caution keeps the lower grip from
+-- turning into cold-tyre crashes.
+local WARMUP_MAX_GRIP = 0.10     -- cold-tyre grip loss (was 0.06 -- too small to feel)
+local WARMUP_MAX_CAUT = 0.28     -- and it backs off more when cold, so it doesn't run wide on the low grip
 local WET_MAX_GRIP    = 0.06
 local WET_MAX_CAUT    = 0.30
 local TOW_GAP         = 0.0030
@@ -53,6 +63,15 @@ local TOW_GRIP        = 0.015
 local TOW_CAUT        = 0.05
 local DIRTY_GAP       = 0.0030
 local DIRTY_MIN_KMH   = 80
+-- TRACK-LENGTH SCALING: the three gaps above are spline fractions tuned on ~4.5 km circuits; a fraction is
+-- a different distance on every track (a tow at 13 m is a tow everywhere), so they're re-derived from
+-- METRES each session. Same values at 4.5 km.
+local REF_LEN = 4500
+local scaled  = false
+local function scaleToTrack(len)
+    local tl = (type(len) == 'number' and len > 200) and len or REF_LEN
+    PRESSURE_GAP = 16 / tl; TOW_GAP = 13.5 / tl; DIRTY_GAP = 13.5 / tl
+end
 local DIRTY_MAX_GRIP  = 0.015       -- dirty air is mostly a BACK-OFF (caution), only a little grip loss --
 local DIRTY_MAX_CAUT  = 0.20        -- a following car keeps distance instead of sliding off (fragile-car crashes)
 local GRIP_MIN, GRIP_MAX = -0.16, 0.03
@@ -241,9 +260,12 @@ local function dirtyair01(i, myCar)
     return d
 end
 
+function H.reset() scaled = false end     -- session start: re-derive the per-track distances
+
 -- Returns additive (gripOffset, cautionOffset). Player / slow / recovering cars -> 0,0.
 function H.getModifiers(i)
     if not H.ENABLED then return 0, 0 end
+    if not scaled then scaled = true; pcall(function() scaleToTrack(ac.getSim().trackLengthM) end) end
     if i == nil or i < 1 then return 0, 0 end
     do
         local ok, spd = pcall(function() local c = ac.getCar(i); return (c and c.speedKmh) or 999 end)
@@ -292,6 +314,13 @@ function H.getModifiers(i)
                 elseif classGate > 0 then
                     rate = (MISTAKE_BASE + MISTAKE_RATE * p) * classGate
                 end
+                -- Treacherous-track discipline: scale mistakes by how crash-prone the track has proven
+                -- (from the learned trouble-spot map). Fewer, gentler bobbles where a bobble = an off.
+                local crash = Troublespots.crashiness()
+                if crash > 0 then
+                    rate = rate * (1 - MISTAKE_CRASHY * crash)
+                    sevScale = sevScale * (1 - 0.5 * crash)
+                end
                 local dtp = lastT[i] and (now - lastT[i]) or 0
                 if rate > 0 and dtp > 0 and dtp < 1 and (not mistakeUntil[i] or now > mistakeUntil[i]) then
                     if math.random() < rate * dtp then
@@ -322,7 +351,13 @@ function H.getModifiers(i)
 
         if H.CLASS_PHYSICS then
             local wu = warmupFrac(i, car)
-            if wu > 0 then pGrip = pGrip - WARMUP_MAX_GRIP * wu * cm.warmup; pCaut = pCaut + WARMUP_MAX_CAUT * wu * cm.warmup end
+            if wu > 0 then
+                -- Cold tyres genuinely bite, on every track -- the same rubber you're on. (A build briefly
+                -- removed the grip cut on "crashy" tracks; the data said cold tyres were NOT the cause of
+                -- the offs -- 20 of 23 happened on warm rubber -- so the human version stays.)
+                pGrip = pGrip - WARMUP_MAX_GRIP * wu * cm.warmup
+                pCaut = pCaut + WARMUP_MAX_CAUT * wu * cm.warmup
+            end
             local wet = wetness01()
             if wet > 0 then pGrip = pGrip - WET_MAX_GRIP * wet * cm.wet; pCaut = pCaut + WET_MAX_CAUT * wet * cm.wet end
             local da = dirtyair01(i, car)

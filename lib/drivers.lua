@@ -472,9 +472,11 @@ local baseLevel = {}
 local fieldMaxPace, paceDirty = 1.0, true
 local function recomputeFieldMaxPace()
     local m = 0
-    for _, k in pairs(assigned) do
-        local d = BY_KEY[k]
-        if d and d.pace and d.pace > m then m = d.pace end
+    for i, k in pairs(assigned) do
+        if i ~= 0 then                       -- skip slot 0 (the player) -- a profile you assigned yourself
+            local d = BY_KEY[k]              -- shouldn't drag the AI field's pace anchor around
+            if d and d.pace and d.pace > m then m = d.pace end
+        end
     end
     fieldMaxPace = (m > 0) and m or 1.0
     paceDirty = false

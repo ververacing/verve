@@ -1,5 +1,46 @@
 Verve - changelog
 
+0.11.0
+- Recovery rebuilt around what the logs actually showed. A stuck car is now put back on the racing line
+  with the AI-aware teleport (the AI driver moves WITH the car -- before, the car moved and the driver
+  didn't, and it sat in neutral on the rev limiter), set down facing the right way (the game's direction
+  convention turned out to be the reverse of what was assumed -- every reset was backwards -- it's now
+  verified after every move), on the tyre temperatures it had (a teleport resets tyres to ambient; on a
+  cold day cars were being set down on 12 C rubber and spinning at the next corner), and handed straight
+  to the AI. Verve no longer drives stuck cars itself: taking the controls left every car it touched with
+  no drive and a locked wheel once handed back. Result on the hardest test grid (18 mixed F1 mods,
+  Zandvoort, 11 C): rejoins went from 0 of 270 to 21 of 21.
+- No more frozen cars. A car Verve gives up on is cleared to its pit box at once instead of sitting in
+  the gravel for minutes waiting on the game's own retirement timer, and a car wedged at the pit exit
+  after the game's damage-pit teleport is reset onto the track like any other stuck car.
+- Repositioning judges itself. Every reset is scored (did the car actually get going?), and if a session's
+  grid/track/day makes resets fail, Verve stops doing them and lets cars retire cleanly rather than
+  parking wrecks on the racing line for the next car to hit.
+- Repairs now register. The damage value the rules read is a never-decreasing record of the worst hit,
+  so a repaired car was treated as wrecked for the rest of the race (kept off-line, growing penalties).
+  Rules now use damage SINCE the last repair.
+- Damaged cars nurse it home on the line and move over only when a faster car is actually on their tail
+  (a self-imposed blue flag) -- instead of living 0.58 off the racing line with their caution capped,
+  which sent 73% of them off again within 40 s.
+- Yellow flags. A stopped car on the road ahead now gives everyone arriving a speed cap that tightens
+  as they approach (double-waved yellows), and the go-around looks ahead by time, not a fixed distance,
+  so a car at 200 km/h starts moving over much earlier than one at 80.
+- Caution is capped. The back-off terms (hot corner, crash damping, cold tyres, anti-rear-end...) used
+  to stack until the front of a train crawled through a corner at 76 km/h while the tail arrived at
+  170 -- the caution itself made the pile-up. Careful, never crawling.
+- Hot spots are relative: the few corners that are hot compared with the rest of the track, not every
+  bin over a fixed line (a track with history had 40 "hot spots" and the whole lap at max caution).
+  Field-wide crash damping now comes from incidents in THIS session and relaxes when the race settles.
+- Works the same on every track: every gap Verve uses (attack range, rear-end guard, blockage lookahead,
+  tow, dirty air, safe-drop checks) is now defined in metres and derived per track. A spline fraction is
+  36 m at Zandvoort, 160 m at the Nordschleife and 8 m on a kart track; it was tuned for one of those.
+- Mixed grids race properly: a faster class -- or simply a much faster car by measured lap time --
+  closing on a slower one is let through rather than fought corner by corner (the slowest mod in a
+  mixed F1 field was lasting 1.9 laps on average).
+- Repeat-offender retirement counts incidents, not retries (a car patched three times inside one pile-up
+  had ONE crash), and a car that keeps wrecking in the same corner for a minute is retired like a broken
+  car should be.
+
 0.10.7
 - Cars flung deep off track now come back. Recovery worked out where a car was by projecting its world
   position onto the track -- which returns nonsense for a car thrown 30-50 m into a runoff, so those

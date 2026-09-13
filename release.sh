@@ -53,7 +53,7 @@ echo "built $ZIP"
 
 # --- 3. commit + tag ---
 git add -A
-git commit -q -m "Release $TAG" || echo "(nothing to commit)"
+git commit -q -m "Release $TAG" ${COMMIT_TRAILER:+-m "$COMMIT_TRAILER"} || echo "(nothing to commit)"
 git tag -f "$TAG"
 
 # --- 4. push (if a remote exists) ---

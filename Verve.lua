@@ -53,7 +53,11 @@ local function clamp(x, a, b) if x < a then return a elseif x > b then return b 
 local managed = 0
 
 function script.update(dt)
-    if not G.enabled then return end
+    if not G.enabled then
+        -- (local dev diagnostics still log a DISABLED race, so a baseline run can be compared)
+        if Diag then pcall(function() Diag.update(dt, { managed = 0 }) end) end
+        return
+    end
     local ok, sim = pcall(ac.getSim)
     if not ok or not sim then return end
 
@@ -70,6 +74,7 @@ function script.update(dt)
 
     local behaviourOn = G.humanVar or G.classPhys or G.racecraft
     local n = 0
+    local diagPer = {}    -- per-car values we applied this frame (only read by the local diagnostics logger)
     -- start at 0 so the player's own car is managed WHEN (and only when) it's under AI control
     -- (Ctrl+C takeover): the isAIControlled gate below means we never touch it while you drive.
     for i = 0, sim.carsCount - 1 do
@@ -79,6 +84,7 @@ function script.update(dt)
             if car.isInPitlane then return end          -- never touch a car doing a pit stop (player or AI)
             Drivers.applyPace(i)                        -- per-slot driver pace via AI level (self-restores when cleared)
             local gOff, cOff = Human.getModifiers(i)
+            local gripApplied = nil
             if G.controlGrip then
                 local grip = G.baseGrip + gOff
                 -- launch assist: a brief traction boost off a standing start (AC's AI bogs down off the
@@ -87,12 +93,15 @@ function script.update(dt)
                     local s = car.speedKmh or 0
                     if s < 90 then grip = grip + 0.07 * clamp(1 - s / 90, 0, 1) end
                 end
-                physics.setExtraAIGrip(i, clamp(grip, 0.5, 1.6))
+                gripApplied = clamp(grip, 0.5, 1.6)
+                physics.setExtraAIGrip(i, gripApplied)
             end
             local rcCaut = Racecraft.evaluate(i, dt)
+            local cautApplied = clamp(1.0 + cOff + rcCaut, 0.0, 16.0)
             if behaviourOn then
-                physics.setAICaution(i, clamp(1.0 + cOff + rcCaut, 0.0, 16.0))
+                physics.setAICaution(i, cautApplied)
             end
+            if Diag then diagPer[i] = { hG = gOff, hC = cOff, grip = gripApplied, rc = rcCaut, caut = cautApplied } end
             -- Formula DRS discipline: close DRS when the game says it isn't available (outside a
             -- zone / not within range). Toggle-based with a cooldown so it doesn't flip-flop.
             if G.drsDiscipline and Classes.keyOf(i) == 'formula' and car.drsPresent
@@ -121,12 +130,17 @@ function script.update(dt)
             recovering = Recovery.count, crashRepairs = Recovery.repairedCount,
             limpRepairs = Recovery.limpCount, retired = Recovery.retiredCount,
             hotSpots = Troublespots.hotCount(), crashRisk = Troublespots.crashiness(), isOval = Racecraft.isOval,
+            peak = Troublespots.peakHeat(), storeLen = Troublespots.storeLen, saveOk = Troublespots.lastSaveOk,
+            per = diagPer, rc = Racecraft.last, recState = Recovery.stateOf,
+            recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, dropsOff = Recovery.dropsOff,
+            fwdSign = (Recovery.fwdSign and Recovery.fwdSign() or 0), dropFlips = Recovery.dropFlips,
         })
     end) end
 end
 
 ac.onSessionStart(function()
     pcall(Classes.reset)
+    pcall(Human.reset)            -- per-track distances
     pcall(Racecraft.reset)
     pcall(Drivers.reset)          -- driver profiles are session-only: wipe every race
     pcall(Recovery.reset)         -- clear per-car recovery + pit-rescue state
@@ -262,11 +276,9 @@ function script.windowMain()
 
     -- manual escape hatch: unstick YOUR car (repair + drop back on the racing line facing forward)
     if ui.button('Reset my car (unstick)') then
-        pcall(function()
-            local sim = ac.getSim()
-            local idx = (sim and sim.focusedCar and sim.focusedCar >= 0) and sim.focusedCar or 0
-            Recovery.forceRecover(idx)
-        end)
+        -- Always the player's own car (index 0 in single-player), NOT the focused camera car -- otherwise
+        -- watching another driver would reset THAT opponent.
+        pcall(function() Recovery.forceRecover(0) end)
     end
     if ui.itemHovered() then ui.setTooltip('Stuck, beached, or wedged in the pits? Repairs your car and drops it back on the racing line facing forward. Press it WHILE stuck -- a car that has already retired can\'t be brought back.') end
 
@@ -307,7 +319,7 @@ function script.windowMain()
     toggle('Formula DRS discipline', 'drsDiscipline', 'On Formula cars, close DRS when the game says it is not available (outside a DRS zone or not within range). In-zone DRS is left to the game.')
     toggle('Self-recovery', 'recovery', 'Un-sticks spun/beached AI that are not wrecked. Never touches the race start or pit exit.')
     toggle('Trouble-spot learning (experimental)', 'troubleSpots', 'Learns where cars repeatedly crash on a track and adds a little caution there, so the field stops piling into the same corner. Per track and per class, and REMEMBERED across sessions (the second race on a track already knows its hot spots). Self-corrects as corners calm down. Off by default.')
-    toggle('Crash repair (experimental)', 'crashRepair', 'Needs Self-recovery ON. Hijacks AC\'s retirement: while recovery is working a stuck car, AC is told NOT to retire it, and after a short penalty it gets a fresh wing/body IN PLACE (no teleport, no pit) so recovery can drive it out. Only genuinely hopeless cars (broken suspension, or unrecoverable after ~15s) are allowed to retire. No teleporting -- cannot disrupt the pack or a race start. Off by default.')
+    toggle('Crash repair (experimental)', 'crashRepair', 'Needs Self-recovery ON. Hijacks AC\'s retirement: while recovery is working a stuck car, AC is told NOT to retire it, and after a short penalty it gets a fresh wing/body IN PLACE so recovery can drive it out. A car that\'s truly beached off-track (can\'t drive out of the gravel) is put back on the racing line -- staggered, and only after a few seconds\' grace for traffic. Only genuinely hopeless cars (broken suspension, or ones that keep wrecking themselves) are allowed to retire. Off by default.')
     toggle('Control AI grip', 'controlGrip', 'Verve sets each AI car grip = base + variability. Turn OFF to defer grip to another AI mod (recovery still works).')
 
     ui.newLine()
