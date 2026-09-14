@@ -94,6 +94,7 @@ local function minOf(t) local m = nil; for _, v in ipairs(t) do if m == nil or v
 
 local function jsonEscape(s) return (tostring(s):gsub('[%c"\\]', function(ch) return string.format('\\u%04x', ch:byte()) end)) end
 local function jnum(v) if type(v) ~= 'number' or v ~= v or v == math.huge or v == -math.huge then return 'null' end; return string.format('%.3f', v):gsub('%.?0+$', '') end
+local function jint(v) if type(v) ~= 'number' or v ~= v or v == math.huge or v == -math.huge then return 'null' end; return string.format('%d', math.floor(v + 0.5)) end
 local function jstr(v) if v == nil then return 'null' end; return '"' .. jsonEscape(v) .. '"' end
 local function jbool(v) if v == nil then return 'null' end; return v and 'true' or 'false' end
 
@@ -141,36 +142,36 @@ function T.buildReport(sim, ctx, completed, abortReason)
         '"install_id":' .. jstr(S.installId),
         '"verve_version":' .. jstr(T.VERSION),
         '"schema_version":2',
-        '"csp_build":' .. jnum(ctx.cspBuild),
+        '"csp_build":' .. jint(ctx.cspBuild),
         '"session_type":' .. jstr(stype),
         '"unattended":' .. jbool(T.UNATTENDED),
         '"track":' .. jstr(track), '"layout":' .. jstr(layout),
-        '"track_length_m":' .. jnum(sim.trackLengthM),
-        '"laps":' .. jnum(ctx.laps), '"cars":' .. jnum(n),
+        '"track_length_m":' .. jint(sim.trackLengthM),
+        '"laps":' .. jint(ctx.laps), '"cars":' .. jint(n),
         '"car_classes":{' .. table.concat(clsParts, ',') .. '}',
         '"car_models":[' .. table.concat(models, ',') .. ']',
         '"player_car":' .. jstr(ctx.playerModel), '"player_class":' .. jstr(ctx.classOf and ctx.classOf(0) or nil),
         '"is_wet":' .. jbool(wet),
-        '"ambient_c":' .. jnum(sim.ambientTemperature), '"road_c":' .. jnum(sim.roadTemperature),
+        '"ambient_c":' .. jint(sim.ambientTemperature), '"road_c":' .. jint(sim.roadTemperature),
         '"time_of_day":' .. jstr(sim.timeHours and string.format('%02d:00', sim.timeHours) or nil),
-        '"ai_level":' .. jnum(ctx.meter),
+        '"ai_level":' .. jint(ctx.meter),
         '"ai_level_applied":' .. (ctx.appliedJson or 'null'),
         '"is_career":' .. jbool(ctx.isCareer), '"career_event":' .. jstr(ctx.careerEvent),
-        '"running_end":' .. jnum(running), '"retired":' .. jnum(retired),
-        '"retired_by_verve":' .. jnum(ctx.retiredByVerve), '"frozen_cars":' .. jnum(ctx.frozen),
-        '"incidents":' .. jnum(totalInc), '"incidents_contact":' .. jnum(st.incContact), '"incidents_solo":' .. jnum(st.incSolo), '"incidents_lap1":' .. jnum(st.incLap1),
-        '"crash_repairs":' .. jnum(ctx.crashRepairs), '"limp_repairs":' .. jnum(ctx.limpRepairs),
-        '"repositions":' .. jnum(ctx.drops), '"repositions_ok":' .. jnum(ctx.dropsOk),
-        '"lead_changes":' .. jnum(st.leadChanges), '"pit_stops":' .. jnum(totalPits),
+        '"running_end":' .. jint(running), '"retired":' .. jint(retired),
+        '"retired_by_verve":' .. jint(ctx.retiredByVerve), '"frozen_cars":' .. jint(ctx.frozen),
+        '"incidents":' .. jint(totalInc), '"incidents_contact":' .. jint(st.incContact), '"incidents_solo":' .. jint(st.incSolo), '"incidents_lap1":' .. jint(st.incLap1),
+        '"crash_repairs":' .. jint(ctx.crashRepairs), '"limp_repairs":' .. jint(ctx.limpRepairs),
+        '"repositions":' .. jint(ctx.drops), '"repositions_ok":' .. jint(ctx.dropsOk),
+        '"lead_changes":' .. jint(st.leadChanges), '"pit_stops":' .. jint(totalPits),
         '"ai_best_lap_s":' .. jnum(aiBest), '"ai_median_lap_s":' .. jnum(median(aiMed)), '"field_spread_pct":' .. jnum(spread),
-        '"player_start_pos":' .. jnum(st.startPos[0]), '"player_finish_pos":' .. jnum(p and p.racePosition or nil),
-        '"player_laps":' .. jnum(#st.laps[0]), '"player_best_lap_s":' .. jnum(pBest), '"player_median_lap_s":' .. jnum(pMed),
-        '"player_incidents":' .. jnum(st.inc[0]), '"player_max_damage":' .. jnum(st.maxDmg[0]), '"player_pit_stops":' .. jnum(st.pits[0]),
+        '"player_start_pos":' .. jint(st.startPos[0]), '"player_finish_pos":' .. jint(p and p.racePosition or nil),
+        '"player_laps":' .. jint(#st.laps[0]), '"player_best_lap_s":' .. jnum(pBest), '"player_median_lap_s":' .. jnum(pMed),
+        '"player_incidents":' .. jint(st.inc[0]), '"player_max_damage":' .. jint(st.maxDmg[0]), '"player_pit_stops":' .. jint(st.pits[0]),
         '"player_finished":' .. jbool(st.finished[0] == true),
         '"completed":' .. jbool(completed), '"abort_reason":' .. jstr(abortReason),
-        '"duration_s":' .. jnum(os.time() - st.t0),
-        '"profiles_used":' .. jnum(ctx.profilesUsed), '"archetypes_used":' .. jnum(ctx.archetypesUsed),
-        '"trouble_spots":' .. jnum(ctx.troubleSpots),
+        '"duration_s":' .. jint(os.time() - st.t0),
+        '"profiles_used":' .. jint(ctx.profilesUsed), '"archetypes_used":' .. jint(ctx.archetypesUsed),
+        '"trouble_spots":' .. jint(ctx.troubleSpots),
         '"fps_avg":' .. jnum(st.fpsN > 0 and st.fps / st.fpsN or nil),
         '"settings":' .. (ctx.settingsJson or 'null'),
         '"cars_detail":[' .. table.concat(detail, ',') .. ']',
@@ -183,7 +184,9 @@ local function post(body, onDone)
         web.post(URL, { ['apikey'] = KEY, ['Authorization'] = 'Bearer ' .. KEY, ['Content-Type'] = 'application/json', ['Prefer'] = 'return=minimal' }, body,
             function(err, res)
                 local ok = (not err) and res and res.status and res.status >= 200 and res.status < 300
-                pcall(function() ac.log(string.format('Verve telemetry: %s (%s)', ok and 'sent' or 'failed', tostring(err or (res and res.status)))) end)
+                local rejected = (not ok) and res and res.status and res.status >= 400 and res.status < 500
+                pcall(function() ac.log(string.format('Verve telemetry: %s (%s) %s', ok and 'sent' or 'failed', tostring(err or (res and res.status)), rejected and tostring(res.body):sub(1, 200) or '')) end)
+                if rejected then S.pending = '' end        -- malformed row: drop it, don't retry forever
                 if onDone then onDone(ok) end
             end)
     end)
