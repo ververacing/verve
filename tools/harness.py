@@ -305,6 +305,38 @@ def race_state(diag):
         return None
 
 
+def force_ai_level(ini, level):
+    """Overwrite AI_LEVEL on every CAR_n (n >= 1) and in [RACE]: the calibration runs need one known level."""
+    if not level:
+        return
+    ini.set("RACE", "AI_LEVEL", str(int(level)))
+    k = 1
+    while ini.has_section(f"CAR_{k}"):
+        ini.set(f"CAR_{k}", "AI_LEVEL", str(int(level)))
+        k += 1
+
+
+RACE_OUT = os.path.join(DOCS, "out", "race_out.json")
+
+
+def best_laps_from_race_out(t_launch):
+    """AC writes out/race_out.json when the session ends cleanly (Verve's graceful shutdown makes that happen
+    in unattended runs). Returns {car_index: best_lap_s} for the race session, or {} if there is no fresh file."""
+    try:
+        if os.path.getmtime(RACE_OUT) < t_launch:
+            return {}
+        d = json.load(open(RACE_OUT, encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    best = {}
+    for sess in d.get("sessions", []):
+        for l in sess.get("laps", []):
+            t = l.get("time", 0) / 1000.0
+            if t > 10:
+                best[l["car"]] = min(best.get(l["car"], 1e9), t)
+    return best
+
+
 def run_once(args, arm, run_idx):
     if acs_running():
         raise SystemExit("acs.exe is already running -- close the game first (a run must own it)")
@@ -313,6 +345,7 @@ def run_once(args, arm, run_idx):
     if not os.path.exists(backup):
         shutil.copy2(RACE_INI, backup)
     ini, ncars = build_race_ini(args, backup if args.grid is None else RACE_INI)
+    force_ai_level(ini, getattr(args, "ai_level", 0))
     write_ini(ini, RACE_INI)
     budget = args.laps * args.lap_budget_s + 240 + 60 * (getattr(args, "practice", 0) + getattr(args, "quali", 0)) + (120 if (getattr(args, "practice", 0) or getattr(args, "quali", 0)) else 0)
     write_harness_lua(arm, ttl_s=int(budget) + 120)
@@ -322,7 +355,21 @@ def run_once(args, arm, run_idx):
     t_launch = time.time()
     proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
     finished = False
+    ours = True
     try:
+        # Someone may have started the game in the same second (the user, from the launcher): a second acs.exe
+        # exits at once. If OUR process is gone within 30 s the running game is not ours -- leave it alone,
+        # never kill it, and don't score its diagnostics (2026-09-13: a harness run killed the user's drift session).
+        for _ in range(6):
+            time.sleep(5)
+            if proc.poll() is not None:
+                break
+        if proc.poll() is not None and acs_running():
+            ours = False
+            print("  !! another Assetto Corsa instance is running (not ours) -- aborting this run without touching it")
+            if os.path.exists(HARNESS_LUA):
+                os.remove(HARNESS_LUA)
+            return None
         # End of race is read from the diagnostics file (AC only rewrites out/race_out.json on exit to the
         # menu, so that signal never fires in an unattended run): the leader has completed all the laps,
         # or every car is stationary in the pits and the logger has gone quiet.
@@ -346,7 +393,8 @@ def run_once(args, arm, run_idx):
                     time.sleep(5)
                 break
     finally:
-        subprocess.run(["taskkill", "/IM", "acs.exe", "/F"], capture_output=True)
+        if ours:
+            subprocess.run(["taskkill", "/IM", "acs.exe", "/F"], capture_output=True)
         if os.path.exists(HARNESS_LUA):
             os.remove(HARNESS_LUA)
     time.sleep(3)
@@ -364,9 +412,24 @@ def run_once(args, arm, run_idx):
     m["label"] = label
     m["run"] = run_idx
     m["finished"] = finished
+    # exact lap times from AC itself (only when AC exited cleanly): AI best / median-of-best, player best
+    best = best_laps_from_race_out(t_launch)
+    ai_best = sorted(v for k, v in best.items() if k != 0)
+    m["ai_level"] = getattr(args, "ai_level", 0) or ""
+    m["ai_best_lap_s"] = round(ai_best[0], 2) if ai_best else ""
+    m["ai_median_best_lap_s"] = round(ai_best[len(ai_best) // 2], 2) if ai_best else ""
+    m["player_best_lap_s"] = round(best[0], 2) if 0 in best else ""
+    if best:
+        shutil.copy2(RACE_OUT, os.path.join(RESULTS_DIR, f"race_out_{time.strftime('%Y%m%d_%H%M%S')}_{label}.json"))
     m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers")}, sort_keys=True)
     csv_path = os.path.join(RESULTS_DIR, "results.csv")
     new = not os.path.exists(csv_path)
+    if not new:   # the columns changed (2026-09-13: ai_level + exact lap times): rotate the old file rather than misalign rows
+        with open(csv_path, encoding="utf-8") as f:
+            header = f.readline().strip().split(",")
+        if header != list(m.keys()):
+            os.replace(csv_path, csv_path.replace(".csv", f"_until_{time.strftime('%Y%m%d_%H%M')}.csv"))
+            new = True
     with open(csv_path, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(m.keys()))
         if new:
@@ -399,6 +462,7 @@ def main():
     ap.add_argument("--drivers", choices=["none", "random"], default="none", help="random: assign Verve driver profiles to the whole grid (the Randomize button)")
     ap.add_argument("--ab", nargs=2, metavar=("A.json", "B.json"), help="two arm files; runs alternate A,B,A,B...")
     ap.add_argument("--lap-budget-s", type=int, default=150, help="seconds allowed per lap before a run is killed")
+    ap.add_argument("--ai-level", type=int, default=0, help="force every AI car's AI_LEVEL (career events and --models grids alike); 0 = as configured")
     args = ap.parse_args()
     if not args.laps and not args.career:
         args.laps = 6
