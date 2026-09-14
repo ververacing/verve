@@ -125,8 +125,12 @@ def career_race_ini(spec, base_path):
     ev = read_ini(os.path.join(CAREER_DIR, series, event, "event.ini"))
     opp = read_ini(os.path.join(CAREER_DIR, series, "opponents.ini"))
     ini = read_ini(base_path)
+    if ini.has_section("SPECIAL_EVENT"):
+        ini.remove_section("SPECIAL_EVENT")
     for sec in ev.sections():
-        if sec.startswith("CONDITION_") or sec == "EVENT":
+        # CONDITION_n / EVENT are launcher metadata. SPECIAL_EVENT makes acs.exe load THAT special event
+        # (GUID 49 = a drift session in the Audi quattro) instead of this race.ini -- never copy it.
+        if sec.startswith("CONDITION_") or sec in ("EVENT", "SPECIAL_EVENT"):
             continue
         if not ini.has_section(sec):
             ini.add_section(sec)
