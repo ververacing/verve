@@ -263,13 +263,32 @@ def lua_literal(v):
     return "nil"
 
 
-def write_harness_lua(arm, ttl_s):
+def parse_profiles(spec, ncars):
+    """'all=arch_rookie,last=lewis_hamilton,3=kevin_estre' -> {"all": key, "slots": {idx: key}}; 'last' = the back of the grid."""
+    if not spec:
+        return None
+    out = {"all": "", "slots": {}}
+    for part in spec.split(","):
+        k, _, v = part.partition("=")
+        k = k.strip(); v = v.strip()
+        if k == "all":
+            out["all"] = v
+        elif k == "last":
+            out["slots"][ncars - 1] = v
+        else:
+            out["slots"][int(k)] = v
+    return out
+
+
+def write_harness_lua(arm, ttl_s, ncars=0):
     body = {
         "expires": int(time.time()) + ttl_s,
         "autopilot": True,
         "label": arm.get("label", "A"),
         "randomizeDrivers": bool(arm.get("drivers") == "random"),
+        "profiles": parse_profiles(arm.get("profiles"), ncars),   # fixed grid: {all=key, slots={[i]=key}} (nil = untouched)
         "shutdownAtEnd": True,        # Verve quits AC ~20 s after the flag so the replay autosaves
+        "raceFeed": True,             # 1-2 Hz race feed (Documents/Assetto Corsa/verve_feed) -- the 8 s diag can't resolve who hit whom
         "settings": arm.get("settings", {}),
         "recovery": arm.get("recovery", {}),
         "racecraft": arm.get("racecraft", {}),
@@ -352,7 +371,7 @@ def run_once(args, arm, run_idx):
     force_ai_level(ini, getattr(args, "ai_level", 0))
     write_ini(ini, RACE_INI)
     budget = args.laps * args.lap_budget_s + 240 + 60 * (getattr(args, "practice", 0) + getattr(args, "quali", 0)) + (120 if (getattr(args, "practice", 0) or getattr(args, "quali", 0)) else 0)
-    write_harness_lua(arm, ttl_s=int(budget) + 120)
+    write_harness_lua(arm, ttl_s=int(budget) + 120, ncars=ncars)
     label = arm.get("label", "A")
     print(f"[{label} #{run_idx}] {ini.get('RACE', 'TRACK')} x{args.laps} laps, {ncars} cars, budget {budget:.0f}s")
 
@@ -413,6 +432,11 @@ def run_once(args, arm, run_idx):
         print("  !! no diagnostics file produced (is diag.lua present? did the session start?)")
         return None
     m = metrics(diag)
+    if "error" in m:      # e.g. the session never got going: log it as a failed run instead of crashing the batch
+        print(f"  !! run not scorable: {m['error']} ({os.path.basename(diag)})")
+        keys = ["leader_laps", "running_at_end", "within_1_lap", "within_2_laps", "retired_or_parked", "incidents", "incidents_lap0_1",
+                "incidents_low_speed", "crash_repairs", "drops", "drops_ok", "drops_off", "frozen_cars", "laptime_median_spread_s"]
+        m = {"file": os.path.basename(diag), **{k: "" for k in keys}, "error": m["error"]}
     m["label"] = label
     m["run"] = run_idx
     m["finished"] = finished
@@ -464,6 +488,7 @@ def main():
     ap.add_argument("--label", default="A")
     ap.add_argument("--settings", help="JSON of Verve global settings to override for the run")
     ap.add_argument("--drivers", choices=["none", "random"], default="none", help="random: assign Verve driver profiles to the whole grid (the Randomize button)")
+    ap.add_argument("--profiles", help="fixed profiles: 'all=arch_rookie,last=lewis_hamilton,3=kevin_estre' (slot 0 = the autopilot player car; 'last' = back of the grid)")
     ap.add_argument("--ab", nargs=2, metavar=("A.json", "B.json"), help="two arm files; runs alternate A,B,A,B...")
     ap.add_argument("--lap-budget-s", type=int, default=150, help="seconds allowed per lap before a run is killed")
     ap.add_argument("--ai-level", type=int, default=0, help="force every AI car's AI_LEVEL (career events and --models grids alike); 0 = as configured")
@@ -476,7 +501,7 @@ def main():
         for i, a in enumerate(arms):
             a.setdefault("label", chr(ord("A") + i))
     else:
-        arms = [{"label": args.label, "settings": json.loads(args.settings) if args.settings else {}, "drivers": args.drivers}]
+        arms = [{"label": args.label, "settings": json.loads(args.settings) if args.settings else {}, "drivers": args.drivers, "profiles": args.profiles}]
 
     results = []
     for r in range(args.runs):
