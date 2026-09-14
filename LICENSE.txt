@@ -1,6 +1,6 @@
 Verve - License
 
-Copyright (c) 2026 terranitup
+Copyright (c) 2026 TC Verve
 
 Verve is free to download and use.
 

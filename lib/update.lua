@@ -6,7 +6,7 @@
 local U = {}
 U.LOCAL_VERSION = "0.12.0"
 -- Raw version.json in the GitHub repo (updated on every release by release.sh).
-U.VERSION_URL   = "https://raw.githubusercontent.com/tyleebs-hub/verve/main/version.json"
+U.VERSION_URL   = "https://raw.githubusercontent.com/ververacing/verve/main/version.json"
 
 U.latest, U.downloadUrl, U.summary = nil, nil, nil
 local checked = false
