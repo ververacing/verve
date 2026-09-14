@@ -232,27 +232,66 @@ local baseLevel = {}
 local fieldMaxPace, paceDirty = 1.0, true
 local function recomputeFieldMaxPace()
     local m = 0
-    for _, k in pairs(assigned) do
-        local d = BY_KEY[k]
-        if d and d.pace and d.pace > m then m = d.pace end
+    for i, k in pairs(assigned) do
+        if i ~= 0 then                       -- skip slot 0 (the player) -- a profile you assigned yourself
+            local d = BY_KEY[k]              -- shouldn't drag the AI field's pace anchor around
+            if d and d.pace and d.pace > m then m = d.pace end
+        end
     end
     fieldMaxPace = (m > 0) and m or 1.0
     paceDirty = false
 end
 
+-- The name AC shows for a slot (leaderboard, results) follows the profile: pick a driver and the AI is
+-- renamed to it; clear the profile and AC's original name comes back. Slot 0 (the player) is never renamed.
+local origName = {}
+local function applyName(i)
+    if i == 0 then return end
+    pcall(function()
+        if origName[i] == nil then origName[i] = ac.getDriverName(i) or '' end
+        local key = assigned[i]
+        local name = key and D.nameOf(key) or origName[i]
+        if name and #name > 0 then physics.setAIDriverName(i, name) end
+    end)
+end
 function D.setProfile(i, key)
     if key == nil or key == '' then assigned[i] = nil else assigned[i] = key end
     paceDirty = true
+    applyName(i)
 end
 function D.profileOf(i) return assigned[i] end
+
+-- Match AC's own driver names to the roster (Content Manager grids often carry real names): a slot whose
+-- in-game name is a known driver gets that profile automatically. Unknown/random names stay unassigned.
+local matched = false
+function D.autoMatch()
+    if matched then return end
+    matched = true
+    pcall(function()
+        local sim = ac.getSim(); if not sim then return end
+        local byName = {}
+        for _, d in ipairs(D.DRIVERS) do byName[d.name:lower()] = d end
+        for i = 1, sim.carsCount - 1 do
+            local car = ac.getCar(i)
+            if car and car.isAIControlled and not assigned[i] then
+                local nm = (ac.getDriverName(i) or ''):lower():gsub('^%s+', ''):gsub('%s+$', '')
+                local d = byName[nm]
+                if d then assigned[i] = d.key; paceDirty = true end
+            end
+        end
+    end)
+end
 function D.statsOf(i)
     local k = assigned[i]
     if not k then return nil end
     return BY_KEY[k]
 end
 function D.anyAssigned() for _ in pairs(assigned) do return true end return false end
-function D.clearAll() assigned = {}; paceDirty = true end
-function D.reset() assigned = {}; baseLevel = {}; fieldMaxPace = 1.0; paceDirty = true end
+function D.clearAll()
+    for i in pairs(assigned) do assigned[i] = nil; applyName(i) end
+    assigned = {}; paceDirty = true
+end
+function D.reset() assigned = {}; baseLevel = {}; fieldMaxPace = 1.0; paceDirty = true; origName = {}; matched = false end
 
 function D.randomizeGrid()
     pcall(function()
@@ -276,7 +315,7 @@ function D.randomizeGrid()
                     end
                 end
                 if not pick and #ARCHETYPES > 0 then pick = ARCHETYPES[math.random(#ARCHETYPES)] end
-                if pick then assigned[i] = pick.key end
+                if pick then assigned[i] = pick.key; applyName(i) end
             end
         end
         paceDirty = true

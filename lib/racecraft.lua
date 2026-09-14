@@ -155,7 +155,8 @@ local SPEED_MIN    = 30.0
 local CROWD_GAP    = 0.006     -- cars within this spline gap count as "in the pack"
 local SAMPLE_D     = 0.004     -- spline fraction between racing-line samples (~20m on a 5km track)
 local CORNER_TURN  = 0.01      -- min (1 - dot) between tangents to count as "a corner ahead" (~8 deg)
-local CLASS_YIELD_MARGIN = 15.0 -- km/h: a faster CLASS closing at least this much faster gets let through (multi-class)
+local CLASS_YIELD_FRAC   = 0.08 -- a faster CLASS closing at least this fraction of my speed faster gets let through
+local CLASS_YIELD_MIN    = 8.0  -- ...but never less than this many km/h (15 km/h flat was a huge margin for a kart at 70)
 -- PACE-aware yield: the same thing by MEASURED pace, not class label. A mixed grid of "formula" mods spans
 -- F3.5s to F1s -- all one class key, so the class rule never fired -- and the data shows it: the slowest
 -- mod on today's grid (a Formula Renault 3.5 among F1s) averaged 1.9 laps before being collected. A car
@@ -331,7 +332,7 @@ function R.evaluate(i, dt)
                         -- multi-class racing lets the prototypes through rather than fighting them corner by corner.
                         -- (Same class = a rival, however fast: that's racing.)
                         if b < YIELD_GAP and b < lapperGap then
-                            local faster = ocSpd > spd + CLASS_YIELD_MARGIN
+                            local faster = ocSpd > spd + math.max(CLASS_YIELD_MIN, spd * CLASS_YIELD_FRAC)
                             local slowerPace = false
                             if faster and myPace then
                                 local op = oc.bestLapTimeMs

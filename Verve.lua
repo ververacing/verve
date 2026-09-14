@@ -9,28 +9,50 @@ local Overrides = require('lib.overrides')
 local Update    = require('lib.update')
 local Drivers   = require('lib.drivers')
 local Troublespots = require('lib.troublespots')
+local Feed      = require('lib.feed')         -- structured race feed (opt-in; consumed by Verve Booth / Race Engineer)
 local Diag = nil; pcall(function() Diag = require('diag') end)   -- LOCAL dev diagnostics; absent in the shipped build
+-- LOCAL test harness (tools/harness.py writes harness.lua right before launching a run, and it self-expires):
+-- can put the player's car on autopilot, override settings for the run, and label the diagnostics file.
+-- Never shipped; ignored unless the file is fresh, so a stale one can't hijack a real race.
+local Harness = nil
+pcall(function()
+    local h = require('harness')
+    if type(h) == 'table' and type(h.expires) == 'number' and h.expires > os.time() then Harness = h end
+end)
+local harnessApplied, autopilotArmed, harnessT = false, false, 0
+local harnessStartT, harnessStarted = 0, false   -- "press Drive" on AC's pre-session screen (ac.tryToStart)
+local harnessEndT = 0                            -- seconds a timed session (practice/quali) has been over
+local harnessDoneT, harnessQuit = 0, false       -- race-over timer / already asked AC to quit
 
 -- defaults for the global settings (also used for "reset to defaults")
+-- Core behaviour (humanVar, classPhys, racecraft, recovery, crashRepair, troubleSpots) is what Verve IS: it's
+-- always on when Verve is enabled and has no user toggle (the keys remain so a test harness can A/B them).
+-- The user-facing options are the ones a player might genuinely want different.
 local DEFAULTS = {
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
-    crashRepair = false, troubleSpots = false,
+    crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
 }
+local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
 
 -- S = persisted store; G = working copy the game actually reads (so "session-only" edits can
 -- be live without being saved until the user commits).
 local S = ac.storage({
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
-    crashRepair = false, troubleSpots = false,
+    crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
-    autosave = true,
+    autosave = true, schema = 1,
 })
+-- settings migration: 0.12 made crash repair + trouble spots core (they were opt-in experiments; a day-long
+-- A/B showed crash repair is the single biggest thing Verve does). A stored "false" from an older install
+-- would silently keep them off, so bump them once.
+if (S.schema or 1) < 2 then S.crashRepair = true; S.troubleSpots = true; S.schema = 2 end
 local drsCd = {}
 local G = {}
 for k in pairs(DEFAULTS) do G[k] = S[k] end
+for _, k in ipairs(CORE) do G[k] = true end   -- core is always on (a harness override can still flip it for a run)
 
 local function setG(k, v) G[k] = v; if S.autosave then S[k] = v end end
 local function commitGlobals() for k in pairs(DEFAULTS) do S[k] = G[k] end end
@@ -53,6 +75,85 @@ local function clamp(x, a, b) if x < a then return a elseif x > b then return b 
 local managed = 0
 
 function script.update(dt)
+    if Harness then
+        if not harnessApplied then
+            harnessApplied = true
+            if type(Harness.settings) == 'table' then
+                for k, v in pairs(Harness.settings) do if DEFAULTS[k] ~= nil then G[k] = v end end   -- session only, never saved
+            end
+            if type(Harness.recovery) == 'table' then for k, v in pairs(Harness.recovery) do Recovery[k] = v end end
+            if type(Harness.racecraft) == 'table' then for k, v in pairs(Harness.racecraft) do Racecraft[k] = v end end
+            if Diag and Harness.label then Diag.label = tostring(Harness.label) end
+        end
+        -- AC loads to a pre-session screen and waits for the Drive button; nothing (not even the AI grid)
+        -- moves until it's pressed. Press it a few seconds after load, and keep trying until it takes.
+        local okS, simH = pcall(ac.getSim)
+        if okS and simH and not harnessStarted then
+            harnessStartT = harnessStartT + dt
+            if harnessStartT > 4.0 and simH.isInMainMenu then
+                harnessStartT = 0
+                pcall(function() harnessStarted = ac.tryToStart(true) == true end)
+                if harnessStarted then pcall(function() ac.log('Verve harness: pressed Drive') end) end
+            elseif harnessStartT > 4.0 and not simH.isInMainMenu then
+                harnessStarted = true      -- already driving (someone pressed it, or no such screen this session)
+            end
+        end
+        -- WEEKEND: a timed practice / qualifying session is over -> advance to the next session (AC waits
+        -- for a click on the results screen otherwise). The race session ends itself.
+        if okS and simH and (simH.raceSessionType == ac.SessionType.Practice or simH.raceSessionType == ac.SessionType.Qualify)
+           and simH.isSessionStarted and (simH.sessionTimeLeft or 1) <= 0 then
+            harnessEndT = harnessEndT + dt
+            if harnessEndT > 8.0 then
+                harnessEndT = -20.0     -- (don't hammer it: retry every ~28 s)
+                pcall(function() ac.log('Verve harness: session over, advancing'); ac.tryToSkipSession() end)
+            end
+        end
+        -- RACE OVER (every car parked in the pits and still, well into a race session): quit AC gracefully
+        -- so it autosaves the replay -- a killed process saves nothing, and the produced broadcasts
+        -- need the replay.
+        if Harness.shutdownAtEnd and okS and simH and simH.raceSessionType == ac.SessionType.Race and simH.isSessionStarted then
+            local allParked, anyLap = true, false
+            for i = 0, simH.carsCount - 1 do
+                local c = ac.getCar(i)
+                if c then
+                    if not (c.isInPitlane and (c.speedKmh or 0) < 1) then allParked = false end
+                    if (c.lapCount or 0) >= 1 then anyLap = true end
+                end
+            end
+            if allParked and anyLap then
+                harnessDoneT = harnessDoneT + dt
+                if harnessDoneT > 20.0 and not harnessQuit then
+                    harnessQuit = true
+                    pcall(function() ac.log('Verve harness: race over, shutting AC down (replay autosave)'); ac.shutdownAssettoCorsa() end)
+                end
+            else
+                harnessDoneT = 0
+            end
+        end
+        if Harness.autopilot and not autopilotArmed then
+            if okS and simH and simH.isSessionStarted then
+                harnessT = harnessT + dt
+                if harnessT > 2.0 then
+                    autopilotArmed = true
+                    pcall(function() physics.setCarAutopilot(true, true) end)
+                    -- chase camera for unattended runs: markedly lighter on the GPU than the cockpit view
+                    pcall(function() ac.setCurrentCamera(ac.CameraMode.Drivable); ac.setCurrentDrivableCamera(ac.DrivableCamera.Chase) end)
+                    -- randomised driver profiles, the way a real grid will be run (same as the UI button)
+                    if Harness.randomizeDrivers then
+                        pcall(function()
+                            Drivers.randomizeGrid()
+                            local parts = {}
+                            for i = 1, simH.carsCount - 1 do
+                                local k = Drivers.profileOf(i)
+                                parts[#parts + 1] = string.format('%d=%s', i, k and Drivers.nameOf(k) or '-')
+                            end
+                            ac.log('Verve harness: driver profiles ' .. table.concat(parts, ', '))
+                        end)
+                    end
+                end
+            end
+        end
+    end
     if not G.enabled then
         -- (local dev diagnostics still log a DISABLED race, so a baseline run can be compared)
         if Diag then pcall(function() Diag.update(dt, { managed = 0 }) end) end
@@ -61,6 +162,7 @@ function script.update(dt)
     local ok, sim = pcall(ac.getSim)
     if not ok or not sim then return end
 
+    Drivers.autoMatch()                       -- once per session: AC driver names that match the roster get their profile
     Human.ENABLED       = true
     Human.HUMAN_VAR     = G.humanVar
     Human.INTENSITY     = G.intensity
@@ -136,15 +238,20 @@ function script.update(dt)
             fwdSign = (Recovery.fwdSign and Recovery.fwdSign() or 0), dropFlips = Recovery.dropFlips,
         })
     end) end
+    Feed.ENABLED = G.raceFeed
+    if G.raceFeed then pcall(Feed.update, dt, { rc = Racecraft.last, recState = Recovery.stateOf, recentDrops = Recovery.recentDrops }) end
 end
 
 ac.onSessionStart(function()
+    -- harness: every session of a weekend needs its own Drive press + autopilot arming
+    harnessStarted, harnessStartT, autopilotArmed, harnessT, harnessEndT = false, 0, false, 0, 0
     pcall(Classes.reset)
     pcall(Human.reset)            -- per-track distances
     pcall(Racecraft.reset)
     pcall(Drivers.reset)          -- driver profiles are session-only: wipe every race
     pcall(Recovery.reset)         -- clear per-car recovery + pit-rescue state
     pcall(Troublespots.reset)     -- save the old track's learned hot spots, load the new track's
+    pcall(Feed.reset)
     if Diag then pcall(Diag.reset) end
 end)
 
@@ -198,7 +305,10 @@ local function driverGridList()
         ui.sameLine()
         driverComboFor(i)
         ui.sameLine()
-        ui.textColored(drv .. (i == 0 and '  (you)' or ''), rgbm(0.6, 0.6, 0.6, 1))
+        -- AC's own driver label. Once a profile is picked the AI is renamed to it, so this reads the same;
+        -- when no profile is set it's just AC's label (Content Manager's name) and does nothing.
+        if i == 0 then ui.textColored(drv .. '  (you)', rgbm(0.6, 0.6, 0.6, 1))
+        elseif not Drivers.profileOf(i) then ui.textColored(drv, rgbm(0.5, 0.5, 0.5, 1)) end
     end
 end
 
@@ -311,16 +421,19 @@ function script.windowMain()
         ui.separator()
     end
 
-    ui.text('Behaviour')
-    toggle('Human pace variability', 'humanVar', 'Per-driver personality, slow pace drift, tyre fade, pressure, slipstream.')
-    toggle('Class-aware physics', 'classPhys', 'Cold-tyre warm-up, wet caution, dirty-air grip loss following in corners. Scaled by car class.')
+    ui.text('What Verve does (always on)')
+    ui.textWrapped('Human pace variability  -  class-aware tyre, wet and dirty-air physics  -  racecraft (overtaking, defending, blue flags, yellow flags)  -  self-recovery with crash repair (a stuck car is repaired and set back on the racing line; genuinely wrecked cars retire)  -  trouble-spot learning per track.')
+    if ui.itemHovered() then ui.setTooltip('These are Verve. They can\'t be half-enabled: turn Verve off to get stock AC.') end
+
+    ui.newLine()
+    ui.text('Options')
     toggle('Human errors', 'humanErrors', 'Occasional gentle bobbles on forgiving cars. Never on Formula/Prototype/Hypercar. Grip-slewed so it will not spin cars.')
-    toggle('Racecraft (overtaking & defending)', 'racecraft', 'AI close up and pressure, pull off-line to pass on straights, and make one clean defensive move. Collision-awareness stays on.')
     toggle('Formula DRS discipline', 'drsDiscipline', 'On Formula cars, close DRS when the game says it is not available (outside a DRS zone or not within range). In-zone DRS is left to the game.')
-    toggle('Self-recovery', 'recovery', 'Un-sticks spun/beached AI that are not wrecked. Never touches the race start or pit exit.')
-    toggle('Trouble-spot learning (experimental)', 'troubleSpots', 'Learns where cars repeatedly crash on a track and adds a little caution there, so the field stops piling into the same corner. Per track and per class, and REMEMBERED across sessions (the second race on a track already knows its hot spots). Self-corrects as corners calm down. Off by default.')
-    toggle('Crash repair (experimental)', 'crashRepair', 'Needs Self-recovery ON. Hijacks AC\'s retirement: while recovery is working a stuck car, AC is told NOT to retire it, and after a short penalty it gets a fresh wing/body IN PLACE so recovery can drive it out. A car that\'s truly beached off-track (can\'t drive out of the gravel) is put back on the racing line -- staggered, and only after a few seconds\' grace for traffic. Only genuinely hopeless cars (broken suspension, or ones that keep wrecking themselves) are allowed to retire. Off by default.')
-    toggle('Control AI grip', 'controlGrip', 'Verve sets each AI car grip = base + variability. Turn OFF to defer grip to another AI mod (recovery still works).')
+    if ui.checkbox('Advanced', G.showAdvanced) then setG('showAdvanced', not G.showAdvanced) end
+    if G.showAdvanced then
+        toggle('Control AI grip', 'controlGrip', 'Verve sets each AI car grip = base + variability. Turn OFF to defer grip to another AI mod (recovery still works).')
+        toggle('Race feed (for Verve Booth / Race Engineer)', 'raceFeed', 'Writes a structured, timestamped race feed (positions, gaps, overtakes, incidents, pits, and Verve\'s own decisions) to Documents/Assetto Corsa/verve_feed/ for companion tools. Off unless you use them.')
+    end
 
     ui.newLine()
     ui.text('Tuning')

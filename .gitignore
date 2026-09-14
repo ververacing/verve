@@ -9,3 +9,8 @@ release notes*
 # local dev diagnostics -- never shipped or committed
 diag.lua
 diag_race_*.jsonl
+
+# local test harness -- never shipped or committed
+harness.lua
+tools/harness_results/
+__pycache__/

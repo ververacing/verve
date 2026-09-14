@@ -1,5 +1,18 @@
 Verve - changelog
 
+0.12.0
+- Core behaviour is now always on: human variability, class physics, racecraft, self-recovery with
+  crash repair, and trouble-spot learning have no user toggle any more (turn Verve off for stock AC).
+  Crash repair and trouble spots were opt-in experiments; a day of A/B racing showed crash repair is the
+  single biggest thing Verve does, so both are on for everyone (older settings are migrated once).
+- Settings window restructured: what Verve does, then the few real options (human errors, Formula DRS
+  discipline), with an Advanced section for controlling AI grip and the race feed.
+- Driver profiles rename the AI: pick a profile and AC's leaderboard shows that driver; clear it and the
+  original name returns. AC driver names that match the roster get their profile automatically.
+- Race feed (advanced, off by default): a structured JSONL race feed for companion tools.
+- Test harness: full weekends (practice/quali auto-advance), randomized driver grids, chase camera, and a
+  graceful AC shutdown after the flag so the replay autosaves.
+
 0.11.0
 - Recovery rebuilt around what the logs actually showed. A stuck car is now put back on the racing line
   with the AI-aware teleport (the AI driver moves WITH the car -- before, the car moved and the driver

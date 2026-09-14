@@ -105,7 +105,12 @@ R.count = 0    -- how many cars are being actively recovered right now (for UI)
 
 -- crash repair: repair a stuck car IN PLACE (recovery then drives it out). No teleport, no pit.
 local REPAIR_SLOW       = 15.0 -- km/h: below this counts as stuck/crippled
-local REPOSITION_DIST   = 9.0  -- metres off the racing line = genuinely OFF-track -> set it back on the line
+-- "Off track" is judged in the TRACK FRAME (lateral 0 = centre, 1 = edge), not in metres from the racing
+-- line: 9 m from the line is the far side of the tarmac on a 20 m-wide oval or Paul Ricard's runoff, and
+-- three car-widths into the grass on a kart track. The metre test is kept only as a backstop for a car
+-- thrown so far that the track-frame projection is no longer trustworthy.
+local OFF_LAT           = 1.02 -- beyond the edge by this much (track frame) = off the road
+local REPOSITION_FAR    = 25.0 -- metres from the line where it's certainly off, whatever the projection says
 -- limping repair: a BODY-DAMAGED car still crawling ON-track (not stuck) drags the whole field. Only
 -- BODY damage -- re-bodying clears body damage but NOT suspension, so triggering on suspension just
 -- re-fires forever (a kerb-riding car never stops qualifying). Suspension limpers are left to the
@@ -779,7 +784,7 @@ function R.update(dt)
                     -- clears and the car sits off-track the whole race (the "ran off, never rejoined" bug).
                     -- Each reposition counts as a repair, so a car that keeps going off hits the
                     -- repeat-offender limit and retires cleanly -- no car is ever left in limbo.
-                    local offTrack = nearDist > REPOSITION_DIST
+                    local offTrack = nearDist > REPOSITION_FAR or (nearDist > 3.0 and math.abs(latOf(car.position)) > OFF_LAT)
                     local forceIt = recT[i] > penalty + 6
                     -- an off-track car that may not be repositioned goes back to AC's AI unprotected: it
                     -- drives out if it can (shallow run-off), else AC retires it
