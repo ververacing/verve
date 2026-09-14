@@ -37,9 +37,39 @@ local function bandFor(meter)
     return a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f
 end
 
--- % slower than expert -> AI level. PROVISIONAL: lap time ~ 1/level.
-local function pctToLevel(pct)
-    return 1.0 / (1.0 + math.max(0, pct) / 100.0)
+-- MEASURED level -> lap time (single-make M3 E92 field, Nurburgring Sprint, 3 laps each, 2026-09-14;
+-- blend of best and median-of-best laps, % slower than level 1.00). Two things the numbers say: the first
+-- ten points barely register, and below ~0.75 the AI falls off a cliff (0.70 and 0.60 are identical: the
+-- sim floors the level there, and the laps get erratic). So the usable range is 0.75..1.00, about 0..12%.
+local PCT_AT_LEVEL = { [100] = 0.0, [90] = 1.5, [80] = 6.7, [75] = 11.5, [70] = 16.6 }
+local LEVEL_MIN = 0.72
+-- % slower than expert -> AI level (inverse of the table, linear between points, clamped to the usable range)
+function D.pctToLevel(pct)
+    pct = math.max(0, pct or 0)
+    local pts = { { 100, 0.0 }, { 90, 1.5 }, { 80, 6.7 }, { 75, 11.5 }, { 70, 16.6 } }
+    for k = 1, #pts - 1 do
+        local l1, p1 = pts[k][1], pts[k][2]
+        local l2, p2 = pts[k + 1][1], pts[k + 1][2]
+        if pct <= p2 then
+            local f = (p2 > p1) and (pct - p1) / (p2 - p1) or 0
+            return math.max(LEVEL_MIN, (l1 + (l2 - l1) * f) / 100)
+        end
+    end
+    return LEVEL_MIN
+end
+local pctToLevel = D.pctToLevel
+-- and the forward direction (what a level costs), for the UI / reports
+function D.levelToPct(level)
+    local l = (level or 1) * 100
+    local pts = { { 100, 0.0 }, { 90, 1.5 }, { 80, 6.7 }, { 75, 11.5 }, { 70, 16.6 } }
+    if l >= 100 then return 0 end
+    for k = 1, #pts - 1 do
+        if l >= pts[k + 1][1] then
+            local f = (pts[k][1] - l) / (pts[k][1] - pts[k + 1][1])
+            return pts[k][2] + (pts[k + 1][2] - pts[k][2]) * f
+        end
+    end
+    return pts[#pts][2]
 end
 
 local cache = {}          -- [i] = level
@@ -61,9 +91,10 @@ local function compute(i)
         for k, v in pairs(Career.carLevels) do if k > 0 and v and v > 0 then sum = sum + v; cnt = cnt + 1 end end
         local mean = cnt > 0 and sum / cnt or (Career.eventLevel or iniLevel)
         local rel = (mean > 0 and iniLevel > 0) and (iniLevel / mean) or 1.0
-        return math.max(0.5, math.min(1.2, base * rel))
+        return math.max(LEVEL_MIN, math.min(1.2, base * rel))
     end
-    return math.max(0.5, math.min(1.2, iniLevel / 100.0))
+    -- outside career the launcher's number is taken as AC's own level scale, clamped out of the cliff
+    return math.max(LEVEL_MIN, math.min(1.2, iniLevel / 100.0))
 end
 
 -- the level car i should run at this session (nil = leave AC's own)

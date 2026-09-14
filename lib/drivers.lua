@@ -18,7 +18,7 @@ local function clamp(x, a, b) if x < a then return a elseif x > b then return b 
 -- slider level, and everyone else is spaced below by how far their pace rating trails his -- so the
 -- field genuinely strings out instead of bunching. Widened (0.16 -> 0.32) because the old value barely
 -- separated the field: a mid-pack driver ended up only a few hundredths of an AI level off the ace.
-local PACE_SPREAD = 0.12   -- provisional: 0.32 spread a field by a third of a lap (Silverstone GP 2026-09-14); re-fit with the level calibration
+local SPREAD_PCT = 8.0     -- lap-time % between a 1.0-rated driver and a 0.0-rated one (a Rookie at 0.30 vs a 0.96 star ~ 5.3%; real F1 fields spread 2-3%, club grids 5-10%)
 
 -- Detected class -> roster bucket. Classes not listed (road) offer only the archetypes.
 local CLASS_BUCKET = {
@@ -598,7 +598,11 @@ function D.applyPace(i, base)
         local lvl = base
         if st then
             if paceDirty then recomputeFieldMaxPace() end
-            lvl = clamp(base - (fieldMaxPace - st.pace) * PACE_SPREAD, 0.50, base)
+            -- the fastest profile on the grid runs at `base`; the rest are spread BELOW it by pace rating,
+            -- in lap-time terms (SPREAD_PCT per 1.0 of rating), converted to a level through the measured curve
+            local Difficulty = require('lib.difficulty')
+            local basePct = Difficulty.levelToPct(base)
+            lvl = math.min(base, Difficulty.pctToLevel(basePct + (fieldMaxPace - st.pace) * SPREAD_PCT))
         end
         lvl = math.floor(lvl * 1000 + 0.5) / 1000
         if lastApplied[i] ~= lvl then physics.setAILevel(i, lvl); lastApplied[i] = lvl end   -- only on change (18 cars x 60 Hz otherwise)

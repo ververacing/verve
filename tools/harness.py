@@ -421,6 +421,20 @@ def run_once(args, arm, run_idx):
         if os.path.exists(HARNESS_LUA):
             os.remove(HARNESS_LUA)
     time.sleep(3)
+    # keep the replay: AC's autosave only retains the last two race replays, and the broadcast pipeline
+    # needs them later (Documents/Assetto Corsa/replay/temp -> tools/harness_results/replays/<label>.acreplay)
+    try:
+        rdir = os.path.join(DOCS, "replay", "temp")
+        cands = [os.path.join(rdir, f) for f in os.listdir(rdir) if f.endswith(".acreplay") and os.path.getmtime(os.path.join(rdir, f)) >= t_launch]
+        if cands:
+            newest = max(cands, key=os.path.getmtime)
+            keep = os.path.join(RESULTS_DIR, "replays")
+            os.makedirs(keep, exist_ok=True)
+            dst = os.path.join(keep, f"{time.strftime('%Y%m%d_%H%M')}_{label}.acreplay")
+            shutil.copy2(newest, dst)
+            print(f"  replay kept: {os.path.basename(dst)} ({os.path.getsize(dst) / 1e6:.0f} MB)")
+    except OSError as e:
+        print("  (replay not kept:", e, ")")
     diag = newest_diag(t_launch)
     if diag and (getattr(args, "practice", 0) or getattr(args, "quali", 0)):
         # a weekend writes one file per session; score the race's

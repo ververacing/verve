@@ -117,7 +117,11 @@ local YIELD_OFFSET   = 0.45  -- move this far off-line to let a faster car throu
                              -- yielding cars (damaged ones especially) into the gravel mid-corner -- a car
                              -- width is enough, and it's speed-damped below like every other line change
 local DAMAGE_YIELD_HOLD = 4.0 -- a damaged car commits to its off-line side this long (vs SIDE_HOLD) -- no weaving
-local DAMAGE_YIELD   = 38    -- body damage above which a car pulls off the line (and stops racecraft-swerving)
+local DAMAGE_YIELD   = 55    -- body damage above which a car NURSES it: no diving for passes, moves over for a faster car.
+                             -- Was 38: a 41 km/h first-lap tap turned a star driver into a backmarker for 15 laps (Imola 2026-09-14).
+local DAMAGE_HEAVY   = 95    -- above this the car nurses it for the rest of the race
+local DAMAGE_NURSE_LAPS = 2  -- lighter damage: nurse for this many laps after the last hit, then race again
+local dmgSeen, dmgLap = {}, {}   -- per car: worst damage reading seen, and the lap it was seen on
                             -- so healthy cars can pass. Lowered so a moderately-hurt car yields cleanly
                             -- instead of limping down the middle and weaving as it tries to race.
 local YIELD_AGGR     = 0.45  -- ease off only slightly while being lapped -- you're still racing
@@ -597,11 +601,14 @@ function R.evaluate(i, dt)
         -- player together: P1 picked up 48 km/h of damage, was sent off-line into the banked corner
         -- with the player 30 m behind, and both were collected.) A real driver nurses a damaged car
         -- ON the line and moves over when someone's on their tail.
-        if not yielding and myDmg > DAMAGE_YIELD then
+        -- how fresh is the damage? (a real driver nurses a fresh hit, then gets on with it unless the car is wrecked)
+        if myDmg > (dmgSeen[i] or 0) + 3 then dmgSeen[i] = myDmg; dmgLap[i] = myLap end
+        local nursing = myDmg > DAMAGE_YIELD and (myDmg > DAMAGE_HEAVY or (myLap - (dmgLap[i] or myLap)) < DAMAGE_NURSE_LAPS)
+        if not yielding and nursing then
             state = 0
             target = 0                                                 -- no diving for passes with a bent car
             aggr = math.min(aggr, YIELD_AGGR)
-            if behindIdx >= 0 and gapB < YIELD_GAP and behindSpd > spd - FASTER_MARGIN then
+            if behindIdx >= 0 and gapB < YIELD_GAP and behindSpd > spd + FASTER_MARGIN then
                 yielding = true
                 -- keep whatever side we've already committed to (don't re-pick and weave); only choose
                 -- one the first time, or if the current side is against an edge.
@@ -708,6 +715,7 @@ function R.beginFrame()
     end
 end
 function R.reset()
+    dmgSeen, dmgLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     R.last = {}
     scaled = false

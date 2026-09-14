@@ -48,6 +48,9 @@ local function sample(sim)
     st.samples = st.samples + 1
     pcall(function() if sim.fps and sim.fps > 0 then st.fps = st.fps + sim.fps; st.fpsN = st.fpsN + 1 end end)
     local leader = nil
+    local inPits = 0
+    for i = 0, sim.carsCount - 1 do local c0 = ac.getCar(i); if c0 and c0.isInPitlane then inPits = inPits + 1 end end
+    local massPit = inPits > sim.carsCount / 2
     for i = 0, sim.carsCount - 1 do
         local c = ac.getCar(i)
         if c then
@@ -75,7 +78,8 @@ local function sample(sim)
             if dmg > st.maxDmg[i] then st.maxDmg[i] = dmg end
             -- pit stops (entering the box)
             local inPit = false; pcall(function() inPit = c.isInPit == true end)
-            if inPit and not st.wasInPit[i] and (c.lapCount or 0) >= 1 then st.pits[i] = st.pits[i] + 1 end
+            -- a real stop, not the session-end teleport (everyone lands in the pits at once) or a finished car
+            if inPit and not st.wasInPit[i] and (c.lapCount or 0) >= 1 and not c.isRaceFinished and not massPit then st.pits[i] = st.pits[i] + 1 end
             st.wasInPit[i] = inPit
             if c.racePosition == 1 then leader = i end
             if c.isRaceFinished then st.finished[i] = true end

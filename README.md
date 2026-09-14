@@ -1,5 +1,8 @@
 # Verve — AI that feels human
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ververacing)
+
+
 A Custom Shaders Patch (CSP) Lua app for Assetto Corsa that makes the AI feel human and keep
 racing, on **any** car and track. Toggle and tune everything in the in‑game panel.
 

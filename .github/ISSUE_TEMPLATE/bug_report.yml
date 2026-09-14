@@ -1,0 +1,33 @@
+name: Bug report
+description: Something in Verve misbehaved in a race
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes: { label: Verve version, placeholder: "0.13.0 (shown at the top of the Verve window)" }
+    validations: { required: true }
+  - type: input
+    id: csp
+    attributes: { label: CSP version, placeholder: "0.2.x preview" }
+  - type: input
+    id: combo
+    attributes: { label: Track and cars, placeholder: "ks_nurburgring sprint, 8x BMW (career Novice 2 event 4)" }
+    validations: { required: true }
+  - type: textarea
+    id: what
+    attributes: { label: What happened, description: "What you saw, which lap, which car if you know it.", placeholder: "Car 7 sat frozen at the pit exit from lap 9 to the flag." }
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes: { label: What you expected }
+  - type: checkboxes
+    id: repro
+    attributes:
+      label: Does it happen again?
+      options:
+        - label: Yes, every time with this combo
+        - label: Sometimes
+        - label: Seen once
+  - type: textarea
+    id: log
+    attributes: { label: Log lines, description: "Optional: lines containing 'Verve' from Documents/Assetto Corsa/logs/custom_shaders_patch.log", render: text }

@@ -1,5 +1,21 @@
 Verve - changelog
 
+0.13.0
+- Difficulty means something. Verve now applies the AI level the launcher configured for each car itself
+  (AC ignored it on the installs we measured: 60 and 100 gave identical lap times), using a curve measured on a
+  real field: 90 is nearly full pace, 80 is about 7% off, and the erratic zone below 0.75 is never used.
+- Career: the difficulty meter picks a pace band and AC's own event ramp moves you through it (soft first
+  series, a real fight at the end). Option "Career: scale difficulty across the series", on by default.
+  Career events lock driver profiles; the curve owns the field. This replaces the separate Career Ramp tool.
+- Driver profiles: three archetypes only (Rookie, Midfielder, Veteran), listed first. Profile pace is now a
+  lap-time spread (a Rookie about 5% off a star) instead of a raw level.
+- Opt-in "Send anonymous race stats to improve Verve" (off by default): one small summary per race, no names,
+  no paths, no hardware ids; sent at the next launch if the game was quit or crashed.
+- Racing: lapping cars no longer tiptoe behind a yielding backmarker; two repositioned cars can't cap each
+  other to a crawl; a car left in its pit box by AC's damage teleport is retired instead of "running" forever.
+- Settings window: the driver list no longer squashes rows once a profile is picked.
+- Diagnostics log tyre wear, compound and fuel.
+
 0.12.0
 - Core behaviour is now always on: human variability, class physics, racecraft, self-recovery with
   crash repair, and trouble-spot learning have no user toggle any more (turn Verve off for stock AC).

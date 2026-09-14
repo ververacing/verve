@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Race scenario requests
+    url: https://ververacing.github.io/verve-site/
+    about: Want to see a matchup on the channel? Vote or request it on the board, not here.
+  - name: Questions and general discussion
+    url: https://github.com/ververacing/verve/discussions
+    about: Setup help, "is this normal", ideas that aren't a concrete change yet.

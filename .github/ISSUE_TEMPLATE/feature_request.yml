@@ -1,0 +1,14 @@
+name: Suggestion
+description: An idea for Verve (AI behaviour, an option, a class that needs attention)
+labels: [suggestion]
+body:
+  - type: textarea
+    id: idea
+    attributes: { label: The idea, placeholder: "The AI should back off less when lapping a car that has already moved over." }
+    validations: { required: true }
+  - type: textarea
+    id: why
+    attributes: { label: Why it would make racing better, description: "Real-world behaviour it matches, or a race where its absence hurt." }
+  - type: input
+    id: combo
+    attributes: { label: Where you noticed it, placeholder: "GT3 at Spa, 15 laps" }
