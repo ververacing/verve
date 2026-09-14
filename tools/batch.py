@@ -52,6 +52,16 @@ with open(log_path, "a", encoding="utf-8") as log:
                 break
             log.write(f"=== cool-down: GPU hot spot {hot:.0f}C >= {COOL_C}C, waiting 60 s\n"); log.flush()
             time.sleep(60); waited += 60
+        # the game is someone else's if it's already running (the user playing): wait, don't fight for it
+        busy = 0
+        while "acs.exe" in subprocess.run(["tasklist", "/FI", "IMAGENAME eq acs.exe"], capture_output=True, text=True).stdout:
+            if busy == 0:
+                log.write(f"=== {time.strftime('%H:%M:%S')}: Assetto Corsa is already running (someone's playing) -- waiting\n"); log.flush()
+            time.sleep(60); busy += 60
+        if busy:
+            time.sleep(120)     # a quiet gap after they quit, in case they're just restarting a session
+            if "acs.exe" in subprocess.run(["tasklist", "/FI", "IMAGENAME eq acs.exe"], capture_output=True, text=True).stdout:
+                continue
         log.write(f"=== step {n}/{len(lines)} {time.strftime('%H:%M:%S')}: harness.py {args}\n"); log.flush()
         subprocess.run([sys.executable, os.path.join(here, "harness.py")] + args.split(), cwd=root, stdout=log, stderr=subprocess.STDOUT)
         log.flush()
