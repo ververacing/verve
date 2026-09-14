@@ -74,6 +74,46 @@ end
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
 local managed = 0
 
+-- Session reset: everything per-session starts over. Called from ac.onSessionStart AND from the restart
+-- detector below -- AC's "Restart session" does NOT fire onSessionStart, and without a reset the modules
+-- carried stale state into the new start (recovery saw a field that "had moved" now sitting still on the
+-- grid and crash-repaired every car in the first 8 s of the re-run -- seen 2026-09-13, Imola career).
+local function sessionReset(restart)
+    harnessStarted, harnessStartT, autopilotArmed, harnessT, harnessEndT = false, 0, false, 0, 0
+    pcall(Classes.reset)
+    pcall(Human.reset)            -- per-track distances
+    pcall(Racecraft.reset)
+    -- driver profiles are session-only: wipe every race. NOT on a restart: the picks should survive it, and
+    -- the AI-level overrides persist in physics across a restart, so the remembered base levels stay valid
+    if not restart then pcall(Drivers.reset) end
+    pcall(Recovery.reset)         -- clear per-car recovery + pit-rescue state
+    pcall(Troublespots.reset)     -- save the old track's learned hot spots, load the new track's
+    pcall(Feed.reset)
+    if Diag then pcall(Diag.reset) end
+end
+
+-- Restart detector: the field had been moving, and now EVERY car is stationary on lap 0 in the grid zone
+-- (just before the line). That only happens on a restart -- a real-race pile-up never stops all cars at
+-- once inside the last 8% of the lap with nobody past the line.
+local fieldMoved = false
+local function detectRestart(sim)
+    local anyMoving, allGrid = false, true
+    for i = 0, sim.carsCount - 1 do
+        local c = ac.getCar(i)
+        if c then
+            if (c.speedKmh or 0) > 5 then anyMoving = true end
+            local sp = c.splinePosition or 0
+            if (c.lapCount or 0) > 0 or (c.speedKmh or 0) > 1 or not (sp > 0.92 or sp < 0.03) then allGrid = false end
+        end
+    end
+    if anyMoving then fieldMoved = true
+    elseif allGrid and fieldMoved then
+        fieldMoved = false
+        pcall(function() ac.log('Verve: session restart detected, resetting') end)
+        sessionReset(true)
+    end
+end
+
 function script.update(dt)
     if Harness then
         if not harnessApplied then
@@ -162,6 +202,7 @@ function script.update(dt)
     local ok, sim = pcall(ac.getSim)
     if not ok or not sim then return end
 
+    detectRestart(sim)                        -- "Restart session" doesn't fire onSessionStart; catch it ourselves
     Drivers.autoMatch()                       -- once per session: AC driver names that match the roster get their profile
     Human.ENABLED       = true
     Human.HUMAN_VAR     = G.humanVar
@@ -244,15 +285,8 @@ end
 
 ac.onSessionStart(function()
     -- harness: every session of a weekend needs its own Drive press + autopilot arming
-    harnessStarted, harnessStartT, autopilotArmed, harnessT, harnessEndT = false, 0, false, 0, 0
-    pcall(Classes.reset)
-    pcall(Human.reset)            -- per-track distances
-    pcall(Racecraft.reset)
-    pcall(Drivers.reset)          -- driver profiles are session-only: wipe every race
-    pcall(Recovery.reset)         -- clear per-car recovery + pit-rescue state
-    pcall(Troublespots.reset)     -- save the old track's learned hot spots, load the new track's
-    pcall(Feed.reset)
-    if Diag then pcall(Diag.reset) end
+    fieldMoved = false
+    sessionReset()
 end)
 
 -- ------------------------------- UI -------------------------------
