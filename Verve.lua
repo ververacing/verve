@@ -9,7 +9,10 @@ local Overrides = require('lib.overrides')
 local Update    = require('lib.update')
 local Drivers   = require('lib.drivers')
 local Troublespots = require('lib.troublespots')
-local Feed      = require('lib.feed')         -- structured race feed (opt-in; consumed by Verve Booth / Race Engineer)
+local Feed      = require('lib.feed')
+local Career    = require('lib.career')       -- recognises AC career events; reads the launcher's difficulty numbers
+local Difficulty = require('lib.difficulty')  -- makes those numbers real (AC ignores them on some installs)
+local Telemetry = require('lib.telemetry')    -- opt-in anonymous race reports         -- structured race feed (opt-in; consumed by Verve Booth / Race Engineer)
 local Diag = nil; pcall(function() Diag = require('diag') end)   -- LOCAL dev diagnostics; absent in the shipped build
 -- LOCAL test harness (tools/harness.py writes harness.lua right before launching a run, and it self-expires):
 -- can put the player's car on autopilot, override settings for the run, and label the diagnostics file.
@@ -32,6 +35,7 @@ local DEFAULTS = {
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
     crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
+    careerCurve = true, shareData = false,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
@@ -42,6 +46,7 @@ local S = ac.storage({
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
     crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
+    careerCurve = true, shareData = false,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     autosave = true, schema = 1,
 })
@@ -78,7 +83,11 @@ local managed = 0
 -- detector below -- AC's "Restart session" does NOT fire onSessionStart, and without a reset the modules
 -- carried stale state into the new start (recovery saw a field that "had moved" now sitting still on the
 -- grid and crash-repaired every car in the first 8 s of the re-run -- seen 2026-09-13, Imola career).
+local telemetryCtx   -- defined below (needs the modules)
 local function sessionReset(restart)
+    pcall(function() local okS, simR = pcall(ac.getSim); if okS and simR then Telemetry.abort(restart and 'restart' or 'session change', simR, telemetryCtx()) end end)
+    pcall(Career.reset)
+    pcall(Difficulty.reset)
     harnessStarted, harnessStartT, autopilotArmed, harnessT, harnessEndT = false, 0, false, 0, 0
     pcall(Classes.reset)
     pcall(Human.reset)            -- per-track distances
@@ -95,20 +104,22 @@ end
 -- Restart detector: the field had been moving, and now EVERY car is stationary on lap 0 in the grid zone
 -- (just before the line). That only happens on a restart -- a real-race pile-up never stops all cars at
 -- once inside the last 8% of the lap with nobody past the line.
-local fieldMoved = false
-local function detectRestart(sim)
+local fieldMoved, racedT = false, 0
+local function detectRestart(sim, dt)
     local anyMoving, allGrid = false, true
     for i = 0, sim.carsCount - 1 do
         local c = ac.getCar(i)
         if c then
-            if (c.speedKmh or 0) > 5 then anyMoving = true end
+            if (c.speedKmh or 0) > 30 then anyMoving = true end
             local sp = c.splinePosition or 0
             if (c.lapCount or 0) > 0 or (c.speedKmh or 0) > 1 or not (sp > 0.92 or sp < 0.03) then allGrid = false end
         end
     end
-    if anyMoving then fieldMoved = true
+    -- arm only after the field has genuinely raced (a quali->race transition briefly shows moving cars,
+    -- then a stationary grid: that is not a restart -- seen 2026-09-14 as duplicate diag files)
+    if anyMoving then racedT = racedT + (dt or 0); if racedT > 10 then fieldMoved = true end
     elseif allGrid and fieldMoved then
-        fieldMoved = false
+        fieldMoved = false; racedT = 0
         pcall(function() ac.log('Verve: session restart detected, resetting') end)
         sessionReset(true)
     end
@@ -190,6 +201,13 @@ function script.update(dt)
                             ac.log('Verve harness: driver profiles ' .. table.concat(parts, ', '))
                         end)
                     end
+                    -- fixed grid profiles ({all=key, slots={[i]=key}}), e.g. a Rookie field with one star at the back
+                    if type(Harness.profiles) == 'table' then
+                        pcall(function()
+                            Drivers.applyFixed(Harness.profiles)
+                            ac.log('Verve harness: fixed profiles all=' .. tostring(Harness.profiles.all))
+                        end)
+                    end
                 end
             end
         end
@@ -202,7 +220,10 @@ function script.update(dt)
     local ok, sim = pcall(ac.getSim)
     if not ok or not sim then return end
 
-    detectRestart(sim)                        -- "Restart session" doesn't fire onSessionStart; catch it ourselves
+    detectRestart(sim, dt)                    -- "Restart session" doesn't fire onSessionStart; catch it ourselves
+    Career.detect()                           -- once per session: is this a career event? what did the launcher configure?
+    Difficulty.CAREER_CURVE = G.careerCurve
+    Drivers.LOCKED = Career.active            -- career: the difficulty curve sets the field; profiles are off
     Drivers.autoMatch()                       -- once per session: AC driver names that match the roster get their profile
     Human.ENABLED       = true
     Human.HUMAN_VAR     = G.humanVar
@@ -225,7 +246,7 @@ function script.update(dt)
             local car = ac.getCar(i)
             if not car or not car.isAIControlled then return end
             if car.isInPitlane then return end          -- never touch a car doing a pit stop (player or AI)
-            Drivers.applyPace(i)                        -- per-slot driver pace via AI level (self-restores when cleared)
+            Drivers.applyPace(i, Difficulty.levelFor(i)) -- configured/career difficulty, then the driver profile's pace on top
             local gOff, cOff = Human.getModifiers(i)
             local gripApplied = nil
             if G.controlGrip then
@@ -281,11 +302,38 @@ function script.update(dt)
     end) end
     Feed.ENABLED = G.raceFeed
     if G.raceFeed then pcall(Feed.update, dt, { rc = Racecraft.last, recState = Recovery.stateOf, recentDrops = Recovery.recentDrops }) end
+    Telemetry.ENABLED = G.shareData == true
+    Telemetry.VERSION = Update.LOCAL_VERSION or '0.0.0'
+    Telemetry.UNATTENDED = Harness ~= nil and Harness.autopilot == true
+    if Telemetry.ENABLED then pcall(Telemetry.update, dt, telemetryCtx()) end
 end
+
+-- everything the anonymous race report needs from the other modules (no names, no paths)
+telemetryCtx = function()
+    local settings = {}
+    for _, k in ipairs({ 'humanErrors', 'drsDiscipline', 'controlGrip', 'careerCurve', 'intensity', 'rcIntensity', 'baseGrip' }) do
+        local v = G[k]; settings[#settings + 1] = string.format('"%s":%s', k, type(v) == 'number' and string.format('%.2f', v) or tostring(v == true))
+    end
+    local pu, au = 0, 0
+    pcall(function() pu, au = Drivers.counts() end)
+    local playerModel = ''; pcall(function() playerModel = ac.getCarID(0) or '' end)
+    local cspBuild = nil; pcall(function() cspBuild = ac.getPatchVersionCode() end)
+    return {
+        classOf = Classes.keyOf, recState = Recovery.stateOf, levelOf = Difficulty.levelFor,
+        meter = Career.meter, isCareer = Career.active, careerEvent = Career.active and (Career.series .. '/' .. Career.event) or nil,
+        laps = Career.laps, playerModel = playerModel, cspBuild = cspBuild,
+        retiredByVerve = Recovery.retiredCount, crashRepairs = Recovery.repairedCount, limpRepairs = Recovery.limpCount,
+        drops = Recovery.dropN, dropsOk = Recovery.dropOK, troubleSpots = Troublespots.hotCount(),
+        profilesUsed = pu, archetypesUsed = au,
+        appliedJson = string.format('{"meter":%d,"career":%s,"curve":%s,"ramp":%.2f}', Career.meter or 100, tostring(Career.active), tostring(G.careerCurve == true), Career.ramp or 0),
+        settingsJson = '{' .. table.concat(settings, ',') .. '}',
+    }
+end
+ac.onRelease(function() pcall(function() local okS, simR = pcall(ac.getSim); if okS and simR then Telemetry.abort('quit', simR, telemetryCtx()) end end) end)
 
 ac.onSessionStart(function()
     -- harness: every session of a weekend needs its own Drive press + autopilot arming
-    fieldMoved = false
+    fieldMoved, racedT = false, 0
     sessionReset()
 end)
 
@@ -338,11 +386,11 @@ local function driverGridList()
         ui.text(string.format('%2d.', i + 1))
         ui.sameLine()
         driverComboFor(i)
-        ui.sameLine()
         -- AC's own driver label. Once a profile is picked the AI is renamed to it, so this reads the same;
         -- when no profile is set it's just AC's label (Content Manager's name) and does nothing.
-        if i == 0 then ui.textColored(drv .. '  (you)', rgbm(0.6, 0.6, 0.6, 1))
-        elseif not Drivers.profileOf(i) then ui.textColored(drv, rgbm(0.5, 0.5, 0.5, 1)) end
+        -- (sameLine only when a label follows -- a dangling sameLine pulled the NEXT row up onto this one)
+        if i == 0 then ui.sameLine(); ui.textColored(drv .. '  (you)', rgbm(0.6, 0.6, 0.6, 1))
+        elseif not Drivers.profileOf(i) then ui.sameLine(); ui.textColored(drv, rgbm(0.5, 0.5, 0.5, 1)) end
     end
 end
 
@@ -462,6 +510,8 @@ function script.windowMain()
     ui.newLine()
     ui.text('Options')
     toggle('Human errors', 'humanErrors', 'Occasional gentle bobbles on forgiving cars. Never on Formula/Prototype/Hypercar. Grip-slewed so it will not spin cars.')
+    toggle('Career: scale difficulty across the series', 'careerCurve', 'In AC career events the difficulty meter picks a pace band and each event moves you through it: soft first series, a real fight at the end, never leaving the band. Off = every career event at the meter\'s flat level. (Outside career the meter always applies as set.)')
+    toggle('Send anonymous race stats to improve Verve', 'shareData', 'After each race, send one small anonymous summary (track, cars, laps, difficulty, finishers, incidents, repairs, your positions and lap times). No names, no gamer tag, no paths, no hardware ids. Off by default.')
     toggle('Formula DRS discipline', 'drsDiscipline', 'On Formula cars, close DRS when the game says it is not available (outside a DRS zone or not within range). In-zone DRS is left to the game.')
     if ui.checkbox('Advanced', G.showAdvanced) then setG('showAdvanced', not G.showAdvanced) end
     if G.showAdvanced then
@@ -485,11 +535,16 @@ function script.windowMain()
     ui.separator()
     ui.textColored('Drivers (per grid slot)', rgbm(0.6, 0.6, 0.6, 1))
     ui.textWrapped('Give any individual racer its own driver -- a real racer or a generic archetype -- and each grid slot is separate, so even a grid of identical cars can be all different drivers. Each gets that driver\'s pace, aggression and risk. Session-only, resets each race. Tip: pause on the grid with ESC to set up, or just hit Randomize.')
-    if ui.button('Randomize driver grid') then Drivers.randomizeGrid() end
-    if ui.itemHovered() then ui.setTooltip('Assign every AI car a unique driver from its class (overflow uses generic archetypes). Session-only, resets each race.') end
-    ui.sameLine()
-    if ui.button('Clear drivers') then Drivers.clearAll() end
-    driverGridList()
+    if Career.active then
+        ui.textColored('Career event: driver profiles are off. The career difficulty curve sets the field (see Options).', rgbm(0.8, 0.7, 0.4, 1))
+        ui.textColored(Difficulty.describe(), rgbm(0.6, 0.6, 0.6, 1))
+    else
+        if ui.button('Randomize driver grid') then Drivers.randomizeGrid() end
+        if ui.itemHovered() then ui.setTooltip('Assign every AI car a unique driver from its class (overflow uses the Rookie / Midfielder / Veteran archetypes). Session-only, resets each race.') end
+        ui.sameLine()
+        if ui.button('Clear drivers') then Drivers.clearAll() end
+        driverGridList()
+    end
     ui.newLine()
     ui.textColored('Car class (per model -- physics)', rgbm(0.6, 0.6, 0.6, 1))
     ui.textWrapped('Auto-detected from each car and drives its physics (warm-up, wet, mistakes). Override if it guesses wrong -- applies to every car of that model.')

@@ -172,6 +172,7 @@ local YELLOW_CAP     = 60    -- ...this (km/h). 80 let cars arrive at a blocked 
                              -- the whole field crawling through a zone with one stopped car and stacking up
 local YELLOW_FAR     = 250   -- the zone starts this far out...
 local YELLOW_CAP_FAR = 200   -- ...at this cap (km/h), easing linearly to YELLOW_CAP
+local FREEPASS_CAUT  = 0.15  -- caution taken OFF a car lapping a yielding backmarker
 local YELLOW_LAT     = 1.3   -- a stopped car this far from the centre line still counts (edge/kerb); deep in the gravel doesn't
 
 -- TRACK-LENGTH SCALING: every gap above is a spline FRACTION, and the tuning was done on ~4.5 km circuits.
@@ -304,7 +305,8 @@ function R.evaluate(i, dt)
         local crowd = 0
         local myPace = me.bestLapTimeMs                     -- (0 until the car has set a lap)
         if type(myPace) ~= 'number' or myPace <= 0 then myPace = nil end
-        local yellowD = 1e9                                 -- nearest STOPPED car on the road ahead (yellow flag)
+        local yellowD, yellowSpd = 1e9, 0                   -- nearest STOPPED car on the road ahead (yellow flag)
+        local lappedAhead = false                           -- the car ahead is a lap down and letting me through
         local yellowRange = YELLOW_FAR / trackLen
         local sim = ac.getSim()
         for j = 0, sim.carsCount - 1 do
@@ -317,13 +319,17 @@ function R.evaluate(i, dt)
                     local ocLat = latNow[j] or 0
                     -- a stopped (or crawling) car ON the road ahead is a yellow flag, not a rival
                     if d > 0 and d < yellowRange and ocSpd < BLOCK_SPEED and math.abs(ocLat) < YELLOW_LAT and d < yellowD then
-                        yellowD = d
+                        yellowD = d; yellowSpd = ocSpd
                     end
                     -- stopped or off-track cars aren't rivals to attack/defend against (the blockage scan and
                     -- the yellow handle them). A repaired car once "attacked" a wreck parked 40 m out in the
                     -- gravel and drove itself off the road doing it.
                     if ocSpd >= BLOCK_SPEED and math.abs(ocLat) <= OFFLINE_MAX then
-                        if d > 0 and d < gapA then gapA = d; aheadSpd = ocSpd; aheadIdx = j end
+                        if d > 0 and d < gapA then
+                            gapA = d; aheadSpd = ocSpd; aheadIdx = j
+                            local L2 = R.last[j]
+                            lappedAhead = (oc.lapCount or 0) < myLap and L2 ~= nil and L2.yield == true
+                        end
                         if b > 0 and b < gapB then gapB = b; behindSpd = ocSpd; behindIdx = j end
                         if d < CROWD_GAP or b < CROWD_GAP then crowd = crowd + 1 end
                         local nd = d < b and d or b                       -- true nearest on track
@@ -352,6 +358,9 @@ function R.evaluate(i, dt)
         if yellowD < 1e9 then
             local dm = yellowD * trackLen
             cap = YELLOW_CAP + (YELLOW_CAP_FAR - YELLOW_CAP) * clamp((dm - YELLOW_NEAR) / (YELLOW_FAR - YELLOW_NEAR), 0, 1)
+            -- a CRAWLING obstacle (a car just set back on the road, getting going) is passed at moderate speed,
+            -- not matched: two repositioned cars capping each other crawled at 50 km/h for 30 s (Silverstone)
+            if yellowSpd > 15 then cap = math.max(cap, yellowSpd + 40) end
         end
         pcall(function() cap = math.min(cap, Recovery.rampCap(i)) end)
         pcall(function() physics.setAITopSpeed(i, cap) end)
@@ -657,6 +666,9 @@ function R.evaluate(i, dt)
             holdSign[i] = blockSide; holdUntil[i] = os.clock() + BLOCK_HOLD
         end
 
+        -- FREE PASS: the car ahead is a lap down and already yielding -- go by, don't tiptoe. Lapping cars ran
+        -- 6-13 km/h under their own pace behind yielding backmarkers (Zandvoort 72-lap GP, 2026-09-14).
+        if lappedAhead then caut = caut - FREEPASS_CAUT; if state == 0 then state = 1 end end
         -- cap the stacked back-off (see CAUT_MAX); the attack/defend NEGATIVE caution is left alone
         if caut > CAUT_MAX then caut = CAUT_MAX end
 

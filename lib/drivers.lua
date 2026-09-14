@@ -18,7 +18,7 @@ local function clamp(x, a, b) if x < a then return a elseif x > b then return b 
 -- slider level, and everyone else is spaced below by how far their pace rating trails his -- so the
 -- field genuinely strings out instead of bunching. Widened (0.16 -> 0.32) because the old value barely
 -- separated the field: a mid-pack driver ended up only a few hundredths of an AI level off the ace.
-local PACE_SPREAD = 0.32
+local PACE_SPREAD = 0.12   -- provisional: 0.32 spread a field by a third of a lap (Silverstone GP 2026-09-14); re-fit with the level calibration
 
 -- Detected class -> roster bucket. Classes not listed (road) offer only the archetypes.
 local CLASS_BUCKET = {
@@ -437,13 +437,10 @@ D.DRIVERS = {
 
     -- Generic archetypes: always offered, used for randomize overflow. Labelled so nobody mistakes
     -- them for a real name.
-    { key='arch_ace',        name='Archetype - Ace',        bucket='archetype', pace=0.90, aggr=0.70, risk=0.25, cons=0.90 },
-    { key='arch_charger',    name='Archetype - Charger',    bucket='archetype', pace=0.80, aggr=0.95, risk=0.55, cons=0.75 },
-    { key='arch_veteran',    name='Archetype - Veteran',    bucket='archetype', pace=0.75, aggr=0.55, risk=0.20, cons=0.95 },
-    { key='arch_midfield',   name='Archetype - Midfielder', bucket='archetype', pace=0.50, aggr=0.50, risk=0.35, cons=0.80 },
-    { key='arch_wildcard',   name='Archetype - Wildcard',   bucket='archetype', pace=0.65, aggr=0.75, risk=0.80, cons=0.45 },
-    { key='arch_rookie',     name='Archetype - Rookie',     bucket='archetype', pace=0.35, aggr=0.50, risk=0.60, cons=0.50 },
-    { key='arch_backmarker', name='Archetype - Backmarker', bucket='archetype', pace=0.20, aggr=0.40, risk=0.45, cons=0.70 },
+    -- Three archetypes, always listed first: a beginner, a solid midfielder, a seasoned front-runner.
+    { key='arch_rookie',     name='Rookie',     bucket='archetype', pace=0.30, aggr=0.50, risk=0.60, cons=0.50 },
+    { key='arch_midfield',   name='Midfielder', bucket='archetype', pace=0.60, aggr=0.55, risk=0.35, cons=0.80 },
+    { key='arch_veteran',    name='Veteran',    bucket='archetype', pace=0.85, aggr=0.55, risk=0.20, cons=0.95 },
 }
 
 -- indexes
@@ -458,15 +455,18 @@ function D.nameOf(key) local d = BY_KEY[key]; return d and d.name or key end
 function D.rosterFor(classKey)
     local bucket = CLASS_BUCKET[classKey]
     local out = {}
+    for _, d in ipairs(ARCHETYPES) do out[#out + 1] = d end     -- archetypes first, then the class roster
     if bucket then
         for _, d in ipairs(D.DRIVERS) do if d.bucket == bucket then out[#out + 1] = d end end
     end
-    for _, d in ipairs(ARCHETYPES) do out[#out + 1] = d end
     return out
 end
 
+D.LOCKED = false      -- career events: profiles are off (the difficulty curve owns the field)
+
 local assigned = {}
 local baseLevel = {}
+local lastApplied = {}   -- level last pushed per slot
 -- the fastest pace rating among drivers currently on the grid -- the anchor everyone is spread below.
 -- Recomputed lazily whenever the grid changes, so difficulty always tracks the best driver present.
 local fieldMaxPace, paceDirty = 1.0, true
@@ -495,6 +495,7 @@ local function applyName(i)
     end)
 end
 function D.setProfile(i, key)
+    if D.LOCKED then return end
     if key == nil or key == '' then assigned[i] = nil else assigned[i] = key end
     paceDirty = true
     applyName(i)
@@ -531,9 +532,28 @@ function D.clearAll()
     for i in pairs(assigned) do assigned[i] = nil; applyName(i) end
     assigned = {}; paceDirty = true
 end
-function D.reset() assigned = {}; baseLevel = {}; fieldMaxPace = 1.0; paceDirty = true; origName = {}; matched = false end
+function D.reset() assigned = {}; baseLevel = {}; lastApplied = {}; fieldMaxPace = 1.0; paceDirty = true; origName = {}; matched = false end
+
+-- fixed grid ({all=key, slots={[i]=key}}) -- harness tests such as "a Rookie field with one star at the back"
+function D.applyFixed(spec)
+    if D.LOCKED or type(spec) ~= 'table' then return end
+    local sim = ac.getSim(); if not sim then return end
+    for i = 0, sim.carsCount - 1 do
+        local key = (spec.slots and spec.slots[i]) or spec.all
+        if key and key ~= '' and BY_KEY[key] then assigned[i] = key; applyName(i) end
+    end
+    paceDirty = true
+end
+
+-- how many real-name profiles vs archetypes are on the grid (telemetry)
+function D.counts()
+    local real, arch = 0, 0
+    for _, k in pairs(assigned) do local d = BY_KEY[k]; if d then if d.bucket == 'archetype' then arch = arch + 1 else real = real + 1 end end end
+    return real, arch
+end
 
 function D.randomizeGrid()
+    if D.LOCKED then return end
     pcall(function()
         math.randomseed(os.time() + math.floor((os.clock() * 1000) % 100000))
         local sim = ac.getSim(); if not sim then return end
@@ -562,23 +582,26 @@ function D.randomizeGrid()
     end)
 end
 
-function D.applyPace(i)
+-- `base` = the level the difficulty module wants for this car (configured / career curve); nil = AC's own.
+-- A driver profile spreads the field BELOW that base by pace rating (the fastest profile runs at base).
+function D.applyPace(i, base)
     pcall(function()
         local st = D.statsOf(i)
         local car = ac.getCar(i); if not car then return end
-        if st then
+        if base == nil then
             if baseLevel[i] == nil then
                 local lvl = car.aiLevel
                 baseLevel[i] = (type(lvl) == 'number' and lvl > 0) and lvl or 1.0
             end
-            if paceDirty then recomputeFieldMaxPace() end
-            -- anchor to the fastest driver on the grid: he runs at the slider (baseLevel), everyone else
-            -- is spaced below by how far their pace trails his. Never above the slider.
-            physics.setAILevel(i, clamp(baseLevel[i] - (fieldMaxPace - st.pace) * PACE_SPREAD, 0.70, baseLevel[i]))
-        elseif baseLevel[i] ~= nil then
-            physics.setAILevel(i, baseLevel[i])
-            baseLevel[i] = nil
+            base = baseLevel[i]
         end
+        local lvl = base
+        if st then
+            if paceDirty then recomputeFieldMaxPace() end
+            lvl = clamp(base - (fieldMaxPace - st.pace) * PACE_SPREAD, 0.50, base)
+        end
+        lvl = math.floor(lvl * 1000 + 0.5) / 1000
+        if lastApplied[i] ~= lvl then physics.setAILevel(i, lvl); lastApplied[i] = lvl end   -- only on change (18 cars x 60 Hz otherwise)
     end)
 end
 

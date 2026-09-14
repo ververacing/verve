@@ -58,6 +58,8 @@ local REJOIN_RAMP = 3.0       -- seconds of throttle ramp after a teleport (a ca
 local REJOIN_THROTTLE_CUT = 0.40 -- throttle starts at (1 - this) of full and ramps up over REJOIN_RAMP. Eased from a
                               -- 6 s / 35 % ramp under which cars never got going at all (0 of 30 rejoined)
 local PIT_STUCK_T = 15.0      -- stopped in the pit LANE (not the box) this long -> it's done, let AC retire it
+local BOX_LIMBO_T = 75.0      -- stationary in the BOX this long mid-race (AC damage-pit, never retired) -> retired
+local boxT = {}
 local DANGER_MAX  = 5.0       -- longest a recovering car waits for traffic before it goes anyway (on a busy straight
                               -- "someone's coming" is ALWAYS true -- one car waited 80 s on the line and got parked for it)
 local WHEEL_BITS  = { [0] = 4, [1] = 8, [2] = 16, [3] = 32 }   -- ac.Wheel bit masks: FL, FR, RL, RR (Front = 12 = 4|8)
@@ -584,6 +586,16 @@ function R.update(dt)
                 -- retire it. (Sending it back to its box to try again looped it into the parked cars next
                 -- door for eight minutes.) In the BOX it's doing a stop: leave it alone.
                 local inBox = false; pcall(function() inBox = (car.isInPit == true) end)
+                -- LIMBO IN THE BOX: AC sent a damaged AI car to its box (its own damage-pit teleport) and then never
+                -- retired it -- our protection blocks AC's retirement -- so it sat there "running" for 40 laps
+                -- (Zandvoort + Silverstone GPs, 2026-09-14). A real stop is under a minute; longer than that in
+                -- a race with laps on the board is a retirement: mark it so bookkeeping, feed and reports agree.
+                if inBox and spd < STOP_SPEED and (car.lapCount or 0) >= 1 and car.isAIControlled then
+                    boxT[i] = (boxT[i] or 0) + dt
+                    if boxT[i] > BOX_LIMBO_T then parkInPits(i); boxT[i] = 0 end
+                else
+                    boxT[i] = 0
+                end
                 if not inBox and spd < STOP_SPEED and not terminalDamage(car) then
                     pitStuckT[i] = (pitStuckT[i] or 0) + dt
                     pcall(function() physics.preventAIFromRetiring(i) end)
@@ -929,6 +941,7 @@ function R.update(dt)
 end
 
 function R.reset()
+    boxT = {}
     hasMoved, stuckT, recT = {}, {}, {}
     lastFwd = {}
     fwdVotes, trackFwdSign = 0, 0

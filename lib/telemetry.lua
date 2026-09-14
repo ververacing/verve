@@ -1,0 +1,253 @@
+-- Verve / lib/telemetry.lua  --  OPT-IN anonymous race reports ("Send anonymous race stats to improve Verve").
+--
+-- Off by default. When on, ONE small JSON row is sent at the end of each race session (or, if the session was
+-- quit / restarted / the game crashed, at the next launch with an abort reason). It describes what was run
+-- (track, cars, laps, difficulty, weather, settings), how the field did (finishers, retirements, incidents,
+-- repairs, lap-time spread) and how the human did (positions, laps, incidents) -- and nothing about who: no
+-- names, no gamer tag, no paths, no hardware ids. `install_id` is a random string generated once.
+-- The endpoint accepts inserts only (the key below can neither read nor change anything).
+local T = {}
+T.ENABLED = false
+T.VERSION = '0.0.0'          -- set by Verve.lua from update.lua
+T.UNATTENDED = false         -- harness/autopilot run: flagged so human statistics can exclude it
+
+local URL = 'https://qcdnlochctwfsvslnqxo.supabase.co/rest/v1/race_reports'
+local KEY = 'sb_publishable_eaoWTXUhM7jcbZ8vBRhtYw_bPIcJa8W'
+
+local S = ac.storage({ installId = '', pending = '', sent = 0 })
+if S.installId == '' then
+    local chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+    local id = {}
+    math.randomseed(os.time() + math.floor(os.clock() * 1000))
+    for _ = 1, 20 do local k = math.random(#chars); id[#id + 1] = chars:sub(k, k) end
+    S.installId = table.concat(id)
+end
+
+-- ------------------------------------------------------------------ per-session stats (1 Hz sampling)
+local st = nil
+local lastT = -1e9
+local sentThis = false
+local sessionIdx = nil
+local flagT = 0
+
+local function newStats(sim)
+    local s = { t0 = os.time(), laps = {}, lastPrev = {}, inc = {}, incContact = 0, incSolo = 0, incLap1 = 0,
+                dmgPrev = {}, pits = {}, wasInPit = {}, startPos = {}, leadCar = nil, leadChanges = 0,
+                fps = 0, fpsN = 0, maxDmg = {}, finished = {}, samples = 0 }
+    for i = 0, sim.carsCount - 1 do s.laps[i] = {}; s.inc[i] = 0; s.pits[i] = 0; s.maxDmg[i] = 0 end
+    return s
+end
+
+local function maxDamage(car)
+    local m = 0
+    pcall(function() local d = car.damage; if d then for k = 0, 4 do local v = d[k]; if type(v) == 'number' and v > m then m = v end end end end)
+    return m
+end
+
+local function sample(sim)
+    st.samples = st.samples + 1
+    pcall(function() if sim.fps and sim.fps > 0 then st.fps = st.fps + sim.fps; st.fpsN = st.fpsN + 1 end end)
+    local leader = nil
+    for i = 0, sim.carsCount - 1 do
+        local c = ac.getCar(i)
+        if c then
+            -- laps
+            local prev = c.previousLapTimeMs
+            if type(prev) == 'number' and prev > 0 and prev ~= st.lastPrev[i] then
+                st.lastPrev[i] = prev
+                if prev > 10000 then st.laps[i][#st.laps[i] + 1] = prev / 1000 end
+            end
+            -- start positions (first sample once the race is on)
+            if st.startPos[i] == nil and (c.lapCount or 0) == 0 and sim.isSessionStarted then st.startPos[i] = c.racePosition end
+            -- incidents: damage jumps; contact if another car is within 20 m
+            local dmg = maxDamage(c)
+            local pd = st.dmgPrev[i]
+            if pd ~= nil and dmg - pd >= 8 and not c.isInPitlane then
+                st.inc[i] = st.inc[i] + 1
+                local near = false
+                for j = 0, sim.carsCount - 1 do
+                    if j ~= i then local o = ac.getCar(j); if o and o.position:distance(c.position) < 20 then near = true; break end end
+                end
+                if near then st.incContact = st.incContact + 1 else st.incSolo = st.incSolo + 1 end
+                if (c.lapCount or 0) <= 1 then st.incLap1 = st.incLap1 + 1 end
+            end
+            st.dmgPrev[i] = dmg
+            if dmg > st.maxDmg[i] then st.maxDmg[i] = dmg end
+            -- pit stops (entering the box)
+            local inPit = false; pcall(function() inPit = c.isInPit == true end)
+            if inPit and not st.wasInPit[i] and (c.lapCount or 0) >= 1 then st.pits[i] = st.pits[i] + 1 end
+            st.wasInPit[i] = inPit
+            if c.racePosition == 1 then leader = i end
+            if c.isRaceFinished then st.finished[i] = true end
+        end
+    end
+    if leader ~= nil and st.leadCar ~= nil and leader ~= st.leadCar then st.leadChanges = st.leadChanges + 1 end
+    if leader ~= nil then st.leadCar = leader end
+end
+
+local function median(t)
+    if #t == 0 then return nil end
+    local c = {}; for k, v in ipairs(t) do c[k] = v end; table.sort(c)
+    return c[math.floor((#c + 1) / 2)]
+end
+local function minOf(t) local m = nil; for _, v in ipairs(t) do if m == nil or v < m then m = v end end; return m end
+
+local function jsonEscape(s) return (tostring(s):gsub('[%c"\\]', function(ch) return string.format('\\u%04x', ch:byte()) end)) end
+local function jnum(v) if type(v) ~= 'number' or v ~= v or v == math.huge or v == -math.huge then return 'null' end; return string.format('%.3f', v):gsub('%.?0+$', '') end
+local function jstr(v) if v == nil then return 'null' end; return '"' .. jsonEscape(v) .. '"' end
+local function jbool(v) if v == nil then return 'null' end; return v and 'true' or 'false' end
+
+-- build the report row (a JSON object string) from the current stats + the context Verve hands us
+function T.buildReport(sim, ctx, completed, abortReason)
+    ctx = ctx or {}
+    local n = sim.carsCount
+    local classes, models, detail = {}, {}, {}
+    local running, retired, aiBest, aiMed, meds = 0, 0, nil, {}, {}
+    for i = 0, n - 1 do
+        local c = ac.getCar(i)
+        local model = ''; pcall(function() model = ac.getCarID(i) or '' end)
+        local cls = ctx.classOf and ctx.classOf(i) or 'unknown'
+        classes[cls] = (classes[cls] or 0) + 1
+        models[#models + 1] = jstr(model)
+        local best, med = minOf(st.laps[i]), median(st.laps[i])
+        local ret = c and c.isRetired == true or false
+        local rs = ctx.recState and ctx.recState(i) or {}
+        local parked = rs.parked == true
+        if ret or parked then retired = retired + 1 else running = running + 1 end
+        if i > 0 and best then aiBest = (aiBest == nil or best < aiBest) and best or aiBest end
+        if i > 0 and med then aiMed[#aiMed + 1] = med end
+        if med then meds[#meds + 1] = med end
+        local lvl = ctx.levelOf and ctx.levelOf(i) or nil
+        detail[#detail + 1] = string.format('{"i":%d,"model":%s,"class":%s,"level":%s,"best":%s,"median":%s,"laps":%d,"inc":%d,"pits":%d,"ret":%s,"parked":%s,"maxdmg":%s}',
+            i, jstr(model), jstr(cls), jnum(lvl), jnum(best), jnum(med), #st.laps[i], st.inc[i], st.pits[i], jbool(ret), jbool(parked), jnum(st.maxDmg[i]))
+    end
+    table.sort(meds)
+    local spread = nil
+    if #meds >= 4 and meds[1] > 0 then spread = (meds[math.ceil(#meds * 0.9)] - meds[math.max(1, math.floor(#meds * 0.1))]) / meds[1] * 100 end
+    local clsParts = {}; for k, v in pairs(classes) do clsParts[#clsParts + 1] = string.format('%s:%d', jstr(k), v) end
+    local p = ac.getCar(0)
+    local pBest, pMed = minOf(st.laps[0]), median(st.laps[0])
+    local totalInc, totalPits = 0, 0
+    for i = 0, n - 1 do totalInc = totalInc + st.inc[i]; totalPits = totalPits + st.pits[i] end
+    local track, layout = '', ''
+    pcall(function() track = ac.getTrackID() or ''; layout = ac.getTrackLayout() or '' end)
+    local stype = 'other'
+    pcall(function()
+        local tt = sim.raceSessionType
+        stype = (tt == ac.SessionType.Race and 'race') or (tt == ac.SessionType.Qualify and 'qualify') or (tt == ac.SessionType.Practice and 'practice') or (tt == ac.SessionType.Hotlap and 'hotlap') or 'other'
+    end)
+    local wet = false; pcall(function() wet = (sim.rainIntensity or 0) > 0.05 end)
+    local fields = {
+        '"install_id":' .. jstr(S.installId),
+        '"verve_version":' .. jstr(T.VERSION),
+        '"schema_version":2',
+        '"csp_build":' .. jnum(ctx.cspBuild),
+        '"session_type":' .. jstr(stype),
+        '"unattended":' .. jbool(T.UNATTENDED),
+        '"track":' .. jstr(track), '"layout":' .. jstr(layout),
+        '"track_length_m":' .. jnum(sim.trackLengthM),
+        '"laps":' .. jnum(ctx.laps), '"cars":' .. jnum(n),
+        '"car_classes":{' .. table.concat(clsParts, ',') .. '}',
+        '"car_models":[' .. table.concat(models, ',') .. ']',
+        '"player_car":' .. jstr(ctx.playerModel), '"player_class":' .. jstr(ctx.classOf and ctx.classOf(0) or nil),
+        '"is_wet":' .. jbool(wet),
+        '"ambient_c":' .. jnum(sim.ambientTemperature), '"road_c":' .. jnum(sim.roadTemperature),
+        '"time_of_day":' .. jstr(sim.timeHours and string.format('%02d:00', sim.timeHours) or nil),
+        '"ai_level":' .. jnum(ctx.meter),
+        '"ai_level_applied":' .. (ctx.appliedJson or 'null'),
+        '"is_career":' .. jbool(ctx.isCareer), '"career_event":' .. jstr(ctx.careerEvent),
+        '"running_end":' .. jnum(running), '"retired":' .. jnum(retired),
+        '"retired_by_verve":' .. jnum(ctx.retiredByVerve), '"frozen_cars":' .. jnum(ctx.frozen),
+        '"incidents":' .. jnum(totalInc), '"incidents_contact":' .. jnum(st.incContact), '"incidents_solo":' .. jnum(st.incSolo), '"incidents_lap1":' .. jnum(st.incLap1),
+        '"crash_repairs":' .. jnum(ctx.crashRepairs), '"limp_repairs":' .. jnum(ctx.limpRepairs),
+        '"repositions":' .. jnum(ctx.drops), '"repositions_ok":' .. jnum(ctx.dropsOk),
+        '"lead_changes":' .. jnum(st.leadChanges), '"pit_stops":' .. jnum(totalPits),
+        '"ai_best_lap_s":' .. jnum(aiBest), '"ai_median_lap_s":' .. jnum(median(aiMed)), '"field_spread_pct":' .. jnum(spread),
+        '"player_start_pos":' .. jnum(st.startPos[0]), '"player_finish_pos":' .. jnum(p and p.racePosition or nil),
+        '"player_laps":' .. jnum(#st.laps[0]), '"player_best_lap_s":' .. jnum(pBest), '"player_median_lap_s":' .. jnum(pMed),
+        '"player_incidents":' .. jnum(st.inc[0]), '"player_max_damage":' .. jnum(st.maxDmg[0]), '"player_pit_stops":' .. jnum(st.pits[0]),
+        '"player_finished":' .. jbool(st.finished[0] == true),
+        '"completed":' .. jbool(completed), '"abort_reason":' .. jstr(abortReason),
+        '"duration_s":' .. jnum(os.time() - st.t0),
+        '"profiles_used":' .. jnum(ctx.profilesUsed), '"archetypes_used":' .. jnum(ctx.archetypesUsed),
+        '"trouble_spots":' .. jnum(ctx.troubleSpots),
+        '"fps_avg":' .. jnum(st.fpsN > 0 and st.fps / st.fpsN or nil),
+        '"settings":' .. (ctx.settingsJson or 'null'),
+        '"cars_detail":[' .. table.concat(detail, ',') .. ']',
+    }
+    return '{' .. table.concat(fields, ',') .. '}'
+end
+
+local function post(body, onDone)
+    pcall(function()
+        web.post(URL, { ['apikey'] = KEY, ['Authorization'] = 'Bearer ' .. KEY, ['Content-Type'] = 'application/json', ['Prefer'] = 'return=minimal' }, body,
+            function(err, res)
+                local ok = (not err) and res and res.status and res.status >= 200 and res.status < 300
+                pcall(function() ac.log(string.format('Verve telemetry: %s (%s)', ok and 'sent' or 'failed', tostring(err or (res and res.status)))) end)
+                if onDone then onDone(ok) end
+            end)
+    end)
+end
+
+-- a report that could not be sent right away (quit/crash) waits in storage for the next launch
+local function flushPending()
+    if S.pending ~= '' and T.ENABLED then
+        local body = S.pending
+        S.pending = ''
+        post(body, function(ok) if ok then S.sent = (S.sent or 0) + 1 end end)
+    end
+end
+local flushed = false
+
+-- Verve calls this at session change / app release with the reason; the current race becomes a pending row
+function T.abort(reason, sim, ctx)
+    if not st or sentThis or not T.ENABLED then return end
+    if st.samples < 30 then st = nil; return end           -- nothing worth reporting
+    pcall(function()
+        local body = T.buildReport(sim, ctx, false, reason)
+        sentThis = true
+        S.pending = body
+        post(body, function(ok) if ok then S.pending = ''; S.sent = (S.sent or 0) + 1 end end)
+    end)
+end
+
+function T.reset() st = nil; sentThis = false; flagT = 0; lastT = -1e9 end
+
+function T.update(dt, ctx)
+    if not T.ENABLED then return end
+    local ok, sim = pcall(ac.getSim); if not ok or not sim then return end
+    if not flushed then flushed = true; flushPending() end
+    if sim.isReplayActive then return end
+    local idx = sim.currentSessionIndex or 0
+    if sessionIdx ~= idx then sessionIdx = idx; T.reset() end
+    if not sim.isSessionStarted then return end
+    if st == nil then st = newStats(sim) end
+    local now = os.clock()
+    if now - lastT >= 1.0 then lastT = now; pcall(sample, sim) end
+    if sentThis then return end
+    -- race over: every car finished or is parked and still, for 15 s
+    local isRace = false; pcall(function() isRace = sim.raceSessionType == ac.SessionType.Race end)
+    if not isRace then return end
+    local over = true
+    for i = 0, sim.carsCount - 1 do
+        local c = ac.getCar(i)
+        if c and not c.isRaceFinished and not c.isRetired and not (c.isInPitlane and (c.speedKmh or 0) < 1) then over = false; break end
+    end
+    if over then
+        flagT = flagT + dt
+        if flagT > 15 then
+            sentThis = true
+            pcall(function()
+                local body = T.buildReport(sim, ctx, true, nil)
+                S.pending = body
+                post(body, function(ok2) if ok2 then S.pending = ''; S.sent = (S.sent or 0) + 1 end end)
+            end)
+        end
+    else
+        flagT = 0
+    end
+end
+
+function T.sentCount() return S.sent or 0 end
+
+return T

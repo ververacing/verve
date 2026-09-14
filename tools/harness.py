@@ -289,7 +289,7 @@ def write_harness_lua(arm, ttl_s, ncars=0):
         "profiles": parse_profiles(arm.get("profiles"), ncars),   # fixed grid: {all=key, slots={[i]=key}} (nil = untouched)
         "shutdownAtEnd": True,        # Verve quits AC ~20 s after the flag so the replay autosaves
         # raceFeed is a Verve setting (1-2 Hz feed in Documents/Assetto Corsa/verve_feed): the 8 s diag can't resolve who hit whom
-        "settings": {"raceFeed": True, **arm.get("settings", {})},
+        "settings": {"raceFeed": True, "shareData": True, **arm.get("settings", {})},   # shareData: exercises the opt-in report path; rows are flagged unattended
         "recovery": arm.get("recovery", {}),
         "racecraft": arm.get("racecraft", {}),
     }
