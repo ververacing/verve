@@ -219,7 +219,7 @@ local function slipstream01(i, myCar)
         for j = 0, sim.carsCount - 1 do
             if j ~= i then
                 local oc = ac.getCar(j)
-                if oc and oc.splinePosition and (oc.lapCount or 0) >= (myCar.lapCount or 0) then   -- a lapped car isn't a rival's wake
+                if oc and oc.splinePosition and (oc.lapCount or 0) >= (myCar.lapCount or 0) then   -- a lapped car isn't a rival's wake (AC's count; good enough here)
                     local gap = oc.splinePosition - mySpline
                     if gap < 0 then gap = gap + 1 end
                     if gap > 0 and gap < best then best = gap end

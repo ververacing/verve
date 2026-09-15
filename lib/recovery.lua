@@ -188,6 +188,27 @@ end
 local drops = {}           -- recent repositions being judged: { i, t, ok, spl }
 local dropFailed = {}      -- cars whose last reposition did NOT rejoin: no second drop -- they retire
 R.dropN, R.dropOK = 0, 0   -- session tally (for the UI / diagnostics)
+R.DROP_API = 'ai'          -- 'ai' = physics.setAICarPosition (AI-aware), 'car' = physics.setCarPosition (harness A/B: lap counting)
+
+-- Verve's own lap count: AC drops the lap after a teleport about half the time (2026-09-14: 13 of 24 repositions),
+-- leaving the car "a lap down" in AC's eyes for the rest of the race. Count start-line crossings ourselves while
+-- the car is moving forward, and let racecraft trust this instead of car.lapCount.
+local ownLaps, ownSpline = {}, {}
+local function trackLaps(i, car)
+    local sp = car.splinePosition
+    if type(sp) ~= 'number' then return end
+    local last = ownSpline[i]
+    if last ~= nil and last > 0.9 and sp < 0.1 and (car.speedKmh or 0) > 20 then ownLaps[i] = (ownLaps[i] or 0) + 1 end
+    ownSpline[i] = sp
+    -- never fall below AC's own count (it can only be higher than ours if we missed a crossing)
+    local acLaps = car.lapCount or 0
+    if (ownLaps[i] or 0) < acLaps then ownLaps[i] = acLaps end
+end
+function R.lapsOf(i)
+    local car = ac.getCar(i)
+    if not car then return 0 end
+    return math.max(ownLaps[i] or 0, car.lapCount or 0)
+end
 R.dropsOff = false         -- repositioning switched off for this session (rate too poor)
 
 -- may this car be repositioned automatically right now?
@@ -432,7 +453,9 @@ local function putBackOnLine(sim, i, progress, center, force)
     -- kept as a safety net (and will log if a CSP build ever changes the convention).
     local apiDir = vec3(-fx, -fy, -fz)
     local okp = pcall(function()
-        local moved = pcall(physics.setAICarPosition, i, pos, apiDir)
+        local moved
+        if R.DROP_API == 'car' then moved = pcall(physics.setCarPosition, i, pos, apiDir)
+        else moved = pcall(physics.setAICarPosition, i, pos, apiDir) end
         if not moved then physics.setCarPosition(i, pos, apiDir) end
         if not apiLogged then
             apiLogged = true
@@ -478,6 +501,7 @@ function R.update(dt)
         pcall(function()
             local car = ac.getCar(i)
             if not car then return end
+            trackLaps(i, car)
             -- Record which way EVERY car is racing (incl. a manually-driven player) while it's up to speed,
             -- so a reset -- the unstick button especially -- can face it the right way. Done before the
             -- AI-control gate, because the player's own car isn't AI-controlled while you drive it.
@@ -534,7 +558,7 @@ function R.update(dt)
                         -- attempt 2: the API vector again (a transient); attempt 3: the opposite convention
                         local useDir = (pd.tries == 1) and pd.apiDir or pd.dir
                         pcall(function()
-                            if not pcall(physics.setAICarPosition, i, pd.pos, useDir) then physics.setCarPosition(i, pd.pos, useDir) end
+                            if R.DROP_API == 'car' or not pcall(physics.setAICarPosition, i, pd.pos, useDir) then physics.setCarPosition(i, pd.pos, useDir) end
                             physics.setCarVelocity(i, useDir * 8.0)
                             physics.setAIStopCounter(i, 0)
                         end)
@@ -942,6 +966,7 @@ end
 
 function R.reset()
     boxT = {}
+    ownLaps, ownSpline = {}, {}
     hasMoved, stuckT, recT = {}, {}, {}
     lastFwd = {}
     fwdVotes, trackFwdSign = 0, 0

@@ -94,6 +94,9 @@ def metrics(path):
         "laptime_median_spread_s": (max(meds) - min(meds)) if len(meds) >= 2 else 0,
         "laptime_median_s": statistics.median(meds) if meds else 0,
     }
+    # yield trains: snapshots where 3+ cars were yielding at once (a conga line behind a lapper)
+    trains = sum(1 for r in rows if sum(1 for c in r["grid"] if c.get("yl")) >= 3)
+    out["yield_train_snaps"] = trains
     out.update(tyre_views(rows, n))
     out.update(reality_score(out, hdr))
     return out

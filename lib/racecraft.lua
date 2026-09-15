@@ -113,6 +113,8 @@ local BLOCK_HOLD     = 1.5   -- commit to the avoidance side briefly (don't dart
 local BLOCK_EDGE     = 0.60  -- only sweep around an obstacle THIS central; a car parked well off to the
                              -- side (in the grass/gravel) needs no berth -- just drive past it on the line
 local YIELD_GAP      = 0.010 -- a lapping car this close behind -> start moving aside
+local YIELD_MAX_T    = 4.0   -- a boxed-in car lifts for at most this long per lapper; then it races on
+local yieldT = {}
 local YIELD_OFFSET   = 0.45  -- move this far off-line to let a faster car through. Was 0.58: at speed that put
                              -- yielding cars (damaged ones especially) into the gravel mid-corner -- a car
                              -- width is enough, and it's speed-damped below like every other line change
@@ -299,7 +301,7 @@ function R.evaluate(i, dt)
         local t = TACTICS[classKey] or TACTICS.road
         local crash = Troublespots.crashiness()    -- 0..1: how crash-prone this track has proven
 
-        local myLap = me.lapCount or 0
+        local myLap = Recovery.lapsOf(i)           -- Verve's own count: AC's drops a lap after a teleport
 
         -- nearest ahead / behind (gap, speed, index)
         local gapA, aheadSpd, aheadIdx = 1e9, 0, -1
@@ -332,7 +334,7 @@ function R.evaluate(i, dt)
                         if d > 0 and d < gapA then
                             gapA = d; aheadSpd = ocSpd; aheadIdx = j
                             local L2 = R.last[j]
-                            lappedAhead = (oc.lapCount or 0) < myLap and L2 ~= nil and L2.yield == true
+                            lappedAhead = Recovery.lapsOf(j) < myLap and L2 ~= nil and L2.yield == true
                         end
                         if b > 0 and b < gapB then gapB = b; behindSpd = ocSpd; behindIdx = j end
                         if d < CROWD_GAP or b < CROWD_GAP then crowd = crowd + 1 end
@@ -348,7 +350,7 @@ function R.evaluate(i, dt)
                                 local op = oc.bestLapTimeMs
                                 slowerPace = type(op) == 'number' and op > 0 and myPace > op * PACE_YIELD_RATIO
                             end
-                            if (oc.lapCount or 0) > myLap or (faster and (slowerPace or Classes.keyOf(j) ~= classKey)) then
+                            if Recovery.lapsOf(j) > myLap or (faster and (slowerPace or Classes.keyOf(j) ~= classKey)) then
                                 lapperIdx = j; lapperGap = b
                             end
                         end
@@ -577,19 +579,60 @@ function R.evaluate(i, dt)
 
         -- blue-flag yield -- a car on a higher lap is coming through: concede the line and lift,
         -- rather than racing the leader. Overrides attack/defend; edge-safety below keeps it honest.
+        if lapperIdx < 0 then yieldT[i] = 0 end
         if lapperIdx >= 0 then
             yielding = true
             local lapLat = latOf(ac.getCar(lapperIdx).position)
-            target = ((lapLat >= myLat) and -1 or 1) * YIELD_OFFSET * speedDamp   -- off-line, side the lapper isn't (less at speed)
-            holdSign[i] = (target > 0) and 1 or -1; holdUntil[i] = os.clock() + SIDE_HOLD   -- commit to the move-aside
-            aggr   = math.min(aggr, YIELD_AGGR)
+            local side = (lapLat >= myLat) and -1 or 1                              -- off-line, the side the lapper isn't
+            -- IS THAT SIDE CLEAR? A car being lapped is often mid-fight with cars on its own lap; moving aside into
+            -- one of them made the start-of-race pile-ups (Zandvoort star test, 2026-09-14). If a same-lap car is
+            -- alongside or right behind on that side, hold the line and just lift -- the lapper goes round.
+            local sideClear = true
+            for j = 0, sim.carsCount - 1 do
+                if j ~= i and j ~= lapperIdx then
+                    local oc = ac.getCar(j)
+                    if oc and oc.splinePosition and (oc.speedKmh or 0) > BLOCK_SPEED then
+                        local dd = oc.splinePosition - mySpline; if dd < -0.5 then dd = dd + 1 elseif dd > 0.5 then dd = dd - 1 end
+                        local ol = latNow[j] or 0
+                        if math.abs(dd) < ALONGSIDE_GAP * 1.6 and ((side > 0 and ol > myLat) or (side < 0 and ol < myLat)) then sideClear = false; break end
+                    end
+                end
+            end
+            -- ONLY THE CAR DIRECTLY AHEAD OF THE LAPPER YIELDS. Every car within 45 m used to yield at once, so a
+            -- train of backmarkers all lifted together and nobody got past anybody (the "conga line"). If there's
+            -- another car between me and the lapper, it's that car's job; I keep racing.
+            local nearestToLapper = true
+            for j = 0, sim.carsCount - 1 do
+                if j ~= i and j ~= lapperIdx then
+                    local oc = ac.getCar(j)
+                    if oc and oc.splinePosition and (oc.speedKmh or 0) > BLOCK_SPEED then
+                        local db = mySpline - oc.splinePosition; if db < 0 then db = db + 1 end   -- oc behind me by db
+                        if db > 0 and db < lapperGap then nearestToLapper = false; break end
+                    end
+                end
+            end
+            if not nearestToLapper then
+                yielding = false
+            elseif sideClear then
+                target = side * YIELD_OFFSET * speedDamp
+                holdSign[i] = side; holdUntil[i] = os.clock() + SIDE_HOLD   -- commit to the move-aside
+                yieldT[i] = (yieldT[i] or 0) + dt
+            else
+                -- boxed in: hold the line, lift a touch, and only for a few seconds -- if the lapper hasn't gone by
+                -- in that time it will have to make the move itself (it has attack + free-pass on its side)
+                yieldT[i] = (yieldT[i] or 0) + dt
+                if yieldT[i] > YIELD_MAX_T then yielding = false end
+            end
+            if yielding then aggr = math.min(aggr, YIELD_AGGR) end
             -- A lapped car should EASE aside and keep rolling, NOT crawl. Cap the total caution so the
             -- other back-off terms (crash-damping, anti-rear-end, trouble-spots) can't stack into a near
             -- stop -- that's what makes traffic pile up and rear-end a car being lapped. Lift a touch more
             -- only as the faster car draws right alongside, to wave it by.
             local lift = (lapperGap < YIELD_LIFT_GAP) and YIELD_CAUT * clamp(1 - lapperGap / YIELD_LIFT_GAP, 0, 1) or 0
-            caut = math.min(caut, YIELD_CAUT + tsCaut) + lift   -- (never capped BELOW the corner's own trouble-spot caution)
-            state  = 0
+            if yielding then
+                caut = math.min(caut, YIELD_CAUT + tsCaut) + lift   -- (never capped BELOW the corner's own trouble-spot caution)
+                state  = 0
+            end
         end
 
         -- DAMAGED CAR: a significantly damaged car stops RACING (no attack/defend, eased aggression,

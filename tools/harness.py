@@ -501,6 +501,8 @@ def main():
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--label", default="A")
     ap.add_argument("--settings", help="JSON of Verve global settings to override for the run")
+    ap.add_argument("--recovery", help="JSON of Recovery module fields to override for the run, e.g. {\"DROP_API\":\"car\"}")
+    ap.add_argument("--racecraft", help="JSON of Racecraft module fields to override for the run")
     ap.add_argument("--drivers", choices=["none", "random"], default="none", help="random: assign Verve driver profiles to the whole grid (the Randomize button)")
     ap.add_argument("--profiles", help="fixed profiles: 'all=arch_rookie,last=lewis_hamilton,3=kevin_estre' (slot 0 = the autopilot player car; 'last' = back of the grid)")
     ap.add_argument("--ab", nargs=2, metavar=("A.json", "B.json"), help="two arm files; runs alternate A,B,A,B...")
@@ -515,7 +517,8 @@ def main():
         for i, a in enumerate(arms):
             a.setdefault("label", chr(ord("A") + i))
     else:
-        arms = [{"label": args.label, "settings": json.loads(args.settings) if args.settings else {}, "drivers": args.drivers, "profiles": args.profiles}]
+        arms = [{"label": args.label, "settings": json.loads(args.settings) if args.settings else {}, "drivers": args.drivers, "profiles": args.profiles,
+                 "recovery": json.loads(args.recovery) if args.recovery else {}, "racecraft": json.loads(args.racecraft) if args.racecraft else {}}]
 
     results = []
     for r in range(args.runs):
