@@ -101,6 +101,7 @@ def metrics(path):
     out["gate_moves"] = last.get("gateN", 0)
     out["mv_attempts"] = last.get("mvN", 0)
     out["mv_ok"] = last.get("mvOK", 0)
+    out["mv_types"] = last.get("mvT", "")
     out.update(tyre_views(rows, n))
     out.update(reality_score(out, hdr))
     return out

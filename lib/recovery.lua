@@ -198,13 +198,17 @@ local GATE_MARGIN = 0.006  -- how far before the split to drop (~25 m on a 4 km 
 -- drops counted, every drop before a split did, whichever teleport API was used). So: past the last split ->
 -- drop just before it. A few seconds of road instead of a lost lap. Splits come from sim.lapSplits (CSP).
 local function gateSafe(sim, progress)
-    local splits = sim.lapSplits
-    if type(splits) ~= 'table' then return progress, false end
+    -- (sim.lapSplits is a C array: 0-based, `#` gives the count; it is NOT a Lua table -- a type() check skipped it
+    -- and the 2026-09-14 19:26 verification race gated nothing)
     local lastGate = 0
-    for k = 0, #splits do
-        local s = splits[k]
-        if type(s) == 'number' and s > 0.02 and s < 0.98 and s > lastGate then lastGate = s end
-    end
+    pcall(function()
+        local splits = sim.lapSplits
+        local n = #splits
+        for k = 0, n - 1 do
+            local s = splits[k]
+            if type(s) == 'number' and s > 0.02 and s < 0.98 and s > lastGate then lastGate = s end
+        end
+    end)
     if lastGate <= 0 or progress < lastGate - GATE_MARGIN * 0.5 then return progress, false end   -- a split still ahead: fine
     return lastGate - GATE_MARGIN, true
 end

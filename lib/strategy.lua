@@ -118,7 +118,7 @@ local function start(i, name, fields)
     for k, v in pairs(fields) do p[k] = v end
     pcall(function() local c = ac.getCar(i); p.pos0 = c and c.racePosition or 0 end)
     plan[i] = p
-    S.attempts = S.attempts + 1
+    if name ~= 'setup' then S.attempts = S.attempts + 1 end     -- set-up is the patient phase before a move, not a move
     S.byType[name] = (S.byType[name] or 0) + 1
     return p
 end
@@ -253,6 +253,12 @@ end
 function S.clear(i)
     if plan[i] then plan[i] = nil end
     S.last[i] = 0
+end
+
+function S.byTypeString()
+    local parts = {}
+    for _, k in ipairs({ 'lunge', 'switchback', 'slingshot', 'setup' }) do if S.byType[k] then parts[#parts + 1] = k .. ':' .. S.byType[k] end end
+    return table.concat(parts, ' ')
 end
 
 function S.describe(i)
