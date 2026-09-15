@@ -81,8 +81,8 @@ local PACK_STRETCH   = 0.14  -- small pace stretch (less caution) for a car lead
 -- adaptive crash damping: the crashier a track has proven (from its learned trouble-spot history), the
 -- calmer the WHOLE field runs -- more caution, less aggression, a bigger opening-lap ease, and the pace
 -- stretch pulled back. Self-calibrating: a nasty track (Zandvoort) settles down, a clean one stays racy.
-local CRASH_CAUT     = 0.20  -- extra field-wide caution at a fully crash-prone track (was 0.35 -- see CAUT_MAX)
-local CRASH_AGGR     = 0.35  -- aggression trimmed by up to this fraction at a fully crash-prone track
+R.CRASH_CAUT = 0.20          -- extra field-wide caution at a fully crash-prone track (was 0.35 -- see CAUT_MAX); harness A/B field
+R.CRASH_AGGR = 0.35          -- aggression trimmed by up to this fraction at a fully crash-prone track; harness A/B field
 -- The back-off terms (hot corner, crash damping, cold tyres, anti-rear-end, pounce, leave-room...) are each
 -- sensible alone but they STACK: a train reached caution 1.9 into a corner and its front cars crawled
 -- through at 76 km/h while the tail arrived at 170. Different speeds in one corner is what actually
@@ -116,6 +116,14 @@ local BLOCK_HOLD     = 1.5   -- commit to the avoidance side briefly (don't dart
 local BLOCK_EDGE     = 0.60  -- only sweep around an obstacle THIS central; a car parked well off to the
                              -- side (in the grass/gravel) needs no berth -- just drive past it on the line
 local YIELD_GAP      = 0.010 -- a lapping car this close behind -> start moving aside
+-- OPENING-LAP CONVOY (harness A/B: R.CONVOY_ON): lap 0, first CONVOY_END of the lap, a car within CONVOY_GAP of the car
+-- ahead on a similar line is capped at that car's speed + CONVOY_MARGIN. Stops the nose-to-tail hits into turn one
+-- and the pile-ups they start (41% + 46% of opening-lap incidents in the 2026-09-15 feeds); racing resumes after.
+R.CONVOY_ON = true
+local CONVOY_END    = 0.45   -- fraction of lap 0 the convoy rule covers
+local CONVOY_GAP    = 0.006  -- (metres via scaleToTrack) behind the car ahead
+local CONVOY_LAT    = 0.35   -- same line = lateral difference under this
+local CONVOY_MARGIN = 6.0    -- km/h a follower may exceed the car ahead by
 local YIELD_GAP_FAR  = 0.027 -- ...but a car on a HIGHER LAP or a faster CLASS gets its blue flag from this far (real blue
                              -- flags come at 1-2 s; a prototype closing only on the straights never got inside 45 m of a GT3
                              -- before the next corner at Spa, so the GT3 never yielded: 88-104 s lap-arounds, 2026-09-15)
@@ -206,6 +214,7 @@ local function scaleToTrack(len)
     GROOVE_RANGE  = m(90);   ISOLATED_GAP = m(135);  PACK_LEAD_GAP = m(54);   REAREND_GAP   = m(22.5)
     BLOCK_GAP     = m(27);   YIELD_GAP    = m(45);   YIELD_LIFT_GAP = m(18);  ALONGSIDE_GAP = m(11)
     YIELD_GAP_FAR = m(120)
+    CONVOY_GAP = m(25)
     ATTACK_GAP    = m(36);   PASS_GAP     = m(16);   DEFEND_GAP   = m(22.5);  CROWD_GAP     = m(27)
     SAMPLE_D      = m(18);   GRID_FADE_END = m(225); GRID_CAPTURE = m(90)
 end
@@ -383,6 +392,12 @@ function R.evaluate(i, dt)
             -- a CRAWLING obstacle (a car just set back on the road, getting going) is passed at moderate speed,
             -- not matched: two repositioned cars capping each other crawled at 50 km/h for 30 s (Silverstone)
             if yellowSpd > 15 then cap = math.max(cap, yellowSpd + 40) end
+        end
+        if R.CONVOY_ON and myLap == 0 and mySpline < CONVOY_END and aheadIdx >= 0 and gapA < CONVOY_GAP and crowd >= 1 then
+            local aCar = ac.getCar(aheadIdx)
+            if aCar and math.abs(latOf(aCar.position) - latOf(me.position)) < CONVOY_LAT then
+                cap = math.min(cap, math.max(aheadSpd + CONVOY_MARGIN, 40))
+            end
         end
         pcall(function() cap = math.min(cap, Recovery.rampCap(i)) end)
         pcall(function() physics.setAITopSpeed(i, cap) end)
@@ -579,8 +594,8 @@ function R.evaluate(i, dt)
         -- adaptive crash damping: on a track that keeps wrecking cars, calm the whole field (more caution,
         -- less aggression) so the crash RATE falls, not just the after-the-fact repairs.
         if crash > 0 then
-            caut = caut + CRASH_CAUT * crash
-            aggr = aggr * (1 - CRASH_AGGR * crash)
+            caut = caut + R.CRASH_CAUT * crash
+            aggr = aggr * (1 - R.CRASH_AGGR * crash)
         end
         -- anti rear-end: closing fast, right behind, and still ON the same line (not pulling out to
         -- pass) -> ease the approach. Risk lowers how much a driver backs off, but never to nothing.
