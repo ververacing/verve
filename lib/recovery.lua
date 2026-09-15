@@ -190,7 +190,14 @@ local dropFailed = {}      -- cars whose last reposition did NOT rejoin: no seco
 R.dropN, R.dropOK = 0, 0   -- session tally (for the UI / diagnostics)
 R.DROP_API = 'car'         -- 'car' = physics.setCarPosition, 'ai' = physics.setAICarPosition (A/B 2026-09-14: same lap counting; 'car' rejoined cleaner)
 R.gateMoves = 0            -- drops moved back before the last timing split so AC counts the lap (see gateSafe)
+R.GATE_MODE = 'back'       -- 'back' = drop on a straight just before the last split; 'twostep' = touch down before the split for a
+                           -- few physics frames, then drop at the crash spot as usual (harness A/B: does the jump count as
+                           -- crossing the split?); 'off' = no gating (the lap is lost past the last split)
 local GATE_MARGIN = 0.006  -- how far before the split to drop (~25 m on a 4 km track): the car must CROSS it
+local GATE_BACK_MAX = 0.03 -- ...looking up to this far before it for a STRAIGHT bit of road (a fixed mid-corner drop
+                           -- point wrecked the 2026-09-14 19:59 race: 41 drops, 38 incidents, all landing on one spot)
+local GATE_TURN = 0.004    -- (1 - dot) between racing-line tangents that still counts as "straight"
+local gateStage = {}       -- twostep: cars parked before the split, waiting for their real drop { progress, center, force, t }
 
 -- LAP-COUNT SAFE DROP. AC's lap counter needs the car to pass at least one timing split after a teleport; a car
 -- dropped past the last split of the lap never does, and the next line crossing starts a lap instead of
@@ -210,7 +217,25 @@ local function gateSafe(sim, progress)
         end
     end)
     if lastGate <= 0 or progress < lastGate - GATE_MARGIN * 0.5 then return progress, false end   -- a split still ahead: fine
-    return lastGate - GATE_MARGIN, true
+    -- the nearest straight-ish spot before the split (so the dropped car isn't set down mid-corner in the path of
+    -- the next arrival): walk back from the margin in small steps, take the first that's straight and clear
+    local best = lastGate - GATE_MARGIN
+    for d = GATE_MARGIN, GATE_BACK_MAX, 0.004 do
+        local pr = lastGate - d
+        if pr < 0 then break end
+        local straight = false
+        pcall(function()
+            local p0 = ac.trackProgressToWorldCoordinate((pr - 0.004) % 1, false)
+            local p1 = ac.trackProgressToWorldCoordinate(pr % 1, false)
+            local p2 = ac.trackProgressToWorldCoordinate((pr + 0.004) % 1, false)
+            if not (p0 and p1 and p2) then return end
+            local v1 = (p1 - p0):normalize()
+            local v2 = (p2 - p1):normalize()
+            straight = (1 - v1:dot(v2)) < GATE_TURN
+        end)
+        if straight then best = pr; break end
+    end
+    return best, true
 end
 
 -- Verve's own lap count: AC drops the lap after a teleport about half the time (2026-09-14: 13 of 24 repositions),
@@ -414,16 +439,24 @@ end
 -- Put an OFF-TRACK (beached) car back on the racing line at its own progress, facing forward, just
 -- off to the roomier side. A beached car can't drive itself across the gravel, so this is what actually
 -- gets it to REJOIN. Gated by dropSafe unless `force` (a last-resort so a car is never abandoned).
-local function putBackOnLine(sim, i, progress, center, force)
+local function putBackOnLine(sim, i, progress, center, force, skipGate)
     if not center then return false end
-    local gated
-    progress, gated = gateSafe(sim, progress)
-    if gated then
-        center = ac.trackProgressToWorldCoordinate(progress, false)
-        if not center then return false end
-        R.gateMoves = R.gateMoves + 1
+    local gated = false
+    if R.GATE_MODE ~= 'off' and not skipGate then
+        local gp
+        gp, gated = gateSafe(sim, progress)
+        if gated then
+            if R.GATE_MODE == 'twostep' then
+                -- touch down just before the split for a few physics frames, then the real drop follows (R.update)
+                gateStage[i] = { progress = progress, center = center, force = force, t = os.clock() }
+            end
+            progress = gp
+            center = ac.trackProgressToWorldCoordinate(progress, false)
+            if not center then gateStage[i] = nil; return false end
+        end
     end
-    if not force and not dropSafe(sim, i, progress) then return false end
+    if not force and not dropSafe(sim, i, progress) then gateStage[i] = nil; return false end
+    if gated then R.gateMoves = R.gateMoves + 1 end     -- (counted once the drop actually goes ahead)
     -- forward direction from a CENTRED sample (a point behind -> a point ahead), which is far steadier
     -- than a tiny forward-only step and always points along the racing direction.
     local pB = ac.trackProgressToWorldCoordinate((progress - TANGENT_STEP) % 1, false)
@@ -532,6 +565,11 @@ function R.update(dt)
             local car = ac.getCar(i)
             if not car then return end
             trackLaps(i, car)
+            local gs = gateStage[i]
+            if gs and os.clock() - gs.t > 0.25 then            -- a few physics frames after the touch-down before the split
+                gateStage[i] = nil
+                putBackOnLine(sim, i, gs.progress, gs.center, true, true)
+            end
             -- Record which way EVERY car is racing (incl. a manually-driven player) while it's up to speed,
             -- so a reset -- the unstick button especially -- can face it the right way. Done before the
             -- AI-control gate, because the player's own car isn't AI-controlled while you drive it.
@@ -1024,6 +1062,7 @@ function R.reset()
     for i in pairs(overriding) do releaseControls(i) end   -- hand every car's controls back at a session change
     drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}
     R.dropN, R.dropOK, R.dropsOff, R.dropFlips, R.gateMoves = 0, 0, false, 0, 0
+    gateStage = {}
     scaled = false
     R.count = 0; R.repairedCount = 0; R.limpCount = 0; R.retiredCount = 0
 end
