@@ -114,6 +114,9 @@ local BLOCK_HOLD     = 1.5   -- commit to the avoidance side briefly (don't dart
 local BLOCK_EDGE     = 0.60  -- only sweep around an obstacle THIS central; a car parked well off to the
                              -- side (in the grass/gravel) needs no berth -- just drive past it on the line
 local YIELD_GAP      = 0.010 -- a lapping car this close behind -> start moving aside
+local YIELD_GAP_FAR  = 0.027 -- ...but a car on a HIGHER LAP or a faster CLASS gets its blue flag from this far (real blue
+                             -- flags come at 1-2 s; a prototype closing only on the straights never got inside 45 m of a GT3
+                             -- before the next corner at Spa, so the GT3 never yielded: 88-104 s lap-arounds, 2026-09-15)
 local YIELD_MAX_T    = 4.0   -- a boxed-in car lifts for at most this long per lapper; then it races on
 local yieldT = {}
 local YIELD_OFFSET   = 0.45  -- move this far off-line to let a faster car through. Was 0.58: at speed that put
@@ -200,6 +203,7 @@ local function scaleToTrack(len)
     local function m(x) return x / trackLen end
     GROOVE_RANGE  = m(90);   ISOLATED_GAP = m(135);  PACK_LEAD_GAP = m(54);   REAREND_GAP   = m(22.5)
     BLOCK_GAP     = m(27);   YIELD_GAP    = m(45);   YIELD_LIFT_GAP = m(18);  ALONGSIDE_GAP = m(11)
+    YIELD_GAP_FAR = m(120)
     ATTACK_GAP    = m(36);   PASS_GAP     = m(16);   DEFEND_GAP   = m(22.5);  CROWD_GAP     = m(27)
     SAMPLE_D      = m(18);   GRID_FADE_END = m(225); GRID_CAPTURE = m(90)
 end
@@ -350,15 +354,18 @@ function R.evaluate(i, dt)
                         -- a car on a higher lap (blue flag) -- or, in a MIXED field, a faster CLASS closing on me:
                         -- multi-class racing lets the prototypes through rather than fighting them corner by corner.
                         -- (Same class = a rival, however fast: that's racing.)
-                        if b < YIELD_GAP and b < lapperGap then
+                        if b < YIELD_GAP_FAR and b < lapperGap then
                             local faster = ocSpd > spd + math.max(CLASS_YIELD_MIN, spd * CLASS_YIELD_FRAC)
                             local slowerPace = false
                             if faster and myPace then
                                 local op = oc.bestLapTimeMs
                                 slowerPace = type(op) == 'number' and op > 0 and myPace > op * PACE_YIELD_RATIO
                             end
-                            if Recovery.lapsOf(j) > myLap or (faster and (slowerPace or Classes.keyOf(j) ~= classKey)) then
-                                lapperIdx = j; lapperGap = b
+                            local otherClass = Classes.keyOf(j) ~= classKey
+                            if Recovery.lapsOf(j) > myLap or (faster and otherClass) then
+                                lapperIdx = j; lapperGap = b                                   -- blue flag from YIELD_GAP_FAR
+                            elseif b < YIELD_GAP and faster and slowerPace then
+                                lapperIdx = j; lapperGap = b                                   -- same class, clearly quicker: short range
                             end
                         end
                     end
@@ -653,7 +660,7 @@ function R.evaluate(i, dt)
             -- only as the faster car draws right alongside, to wave it by.
             local lift = (lapperGap < YIELD_LIFT_GAP) and YIELD_CAUT * clamp(1 - lapperGap / YIELD_LIFT_GAP, 0, 1) or 0
             -- the proper lift: yielded long enough, lapper still on the tail, on a straight, not done yet for this lapper
-            if yielding and not letbyDone[i] and (yieldT[i] or 0) > LETBY_AFTER_T and lapperGap < YIELD_LIFT_GAP * 1.5 then
+            if yielding and not letbyDone[i] and (yieldT[i] or 0) > LETBY_AFTER_T and lapperGap < YIELD_GAP then
                 if letbyT[i] == nil then
                     local isCornerY = cornerAhead(mySpline)
                     if not isCornerY then letbyT[i] = os.clock() end
