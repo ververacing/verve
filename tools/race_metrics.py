@@ -129,7 +129,16 @@ def lapping_views(rows, n):
     for r in rows:
         g = r["grid"]
         by = {c["i"]: c for c in g}
-        seen = set()
+        # open episodes first: resolved (B now behind L), abandoned (L fell back, or either car pitted/retired)
+        for key in list(open_ep):
+            L, B = by.get(key[0]), by.get(key[1])
+            if not L or not B or L["pit"] or L["ret"] or B["pit"] or B["ret"]:
+                open_ep.pop(key); continue
+            d = (B["spline"] / 1000.0 - L["spline"] / 1000.0) % 1.0
+            if d > 0.5:
+                episodes.append(r["t"] - open_ep.pop(key))          # past it: the pass is done
+            elif d >= 0.02:
+                open_ep.pop(key)                                     # dropped back out of range: not a pass
         for L in g:
             if L["spd"] < 30 or L["pit"] or L["ret"]:
                 continue
@@ -140,17 +149,11 @@ def lapping_views(rows, n):
                 d = (B["spline"] / 1000.0 - spL) % 1.0
                 key = (L["i"], B["i"])
                 if 0 < d < 0.02:
-                    seen.add(key)
                     if key not in open_ep:
                         open_ep[key] = r["t"]
                     ref = clear.get((L["i"], int(spL / BIN)))
                     if ref and len(ref) >= 2:
                         losses.append(statistics.median(ref) - L["spd"])
-                elif key in open_ep and d > 0.5:          # B is now behind L: the pass is done
-                    episodes.append(r["t"] - open_ep.pop(key))
-        for key in list(open_ep):
-            if key not in seen and by.get(key[0]) is None:
-                open_ep.pop(key)
     return {
         "lap_pass_n": len(episodes),
         "lap_pass_median_s": round(statistics.median(episodes), 1) if episodes else 0,

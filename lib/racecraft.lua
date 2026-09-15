@@ -130,6 +130,12 @@ local dmgSeen, dmgLap = {}, {}   -- per car: worst damage reading seen, and the 
 local YIELD_AGGR     = 0.45  -- ease off only slightly while being lapped -- you're still racing
 local YIELD_LIFT_GAP = 0.004 -- only actually lift once the lapper is THIS close (else keep racing pace)
 local YIELD_CAUT     = 0.18  -- small lift as the faster car draws right up (was a big early slowdown)
+-- DECISIVE LET-BY: yielding for this long with the lapper still right behind (equal pace) -> one proper lift on a
+-- straight for LETBY_T seconds, then back to racing. Not in corners, once per lapper.
+local LETBY_AFTER_T  = 6.0   -- s of yielding before the proper lift
+local LETBY_T        = 3.0   -- s the proper lift lasts
+local LETBY_CAUT     = 0.55  -- how much it lifts (on top of the small lift)
+local letbyT, letbyDone, letbyFor = {}, {}, {}
 local ALONGSIDE_GAP  = 0.0025-- on-track gap counting as "alongside" (overlap)
 local ALONGSIDE_LAT  = 0.45  -- lateral separation under which two cars overlap
 local LEAVEROOM_CAUT = 0.20  -- lift when overlapping and not the car with the corner
@@ -592,7 +598,8 @@ function R.evaluate(i, dt)
 
         -- blue-flag yield -- a car on a higher lap is coming through: concede the line and lift,
         -- rather than racing the leader. Overrides attack/defend; edge-safety below keeps it honest.
-        if lapperIdx < 0 then yieldT[i] = 0 end
+        if lapperIdx < 0 then yieldT[i] = 0; letbyDone[i] = nil; letbyFor[i] = nil; letbyT[i] = nil end
+        if lapperIdx >= 0 and letbyFor[i] ~= lapperIdx then letbyFor[i] = lapperIdx; letbyDone[i] = nil; letbyT[i] = nil; yieldT[i] = 0 end
         if lapperIdx >= 0 then
             yielding = true
             local lapLat = latOf(ac.getCar(lapperIdx).position)
@@ -634,7 +641,10 @@ function R.evaluate(i, dt)
                 -- boxed in: hold the line, lift a touch, and only for a few seconds -- if the lapper hasn't gone by
                 -- in that time it will have to make the move itself (it has attack + free-pass on its side)
                 yieldT[i] = (yieldT[i] or 0) + dt
-                if yieldT[i] > YIELD_MAX_T then yielding = false end
+                -- the boxed-in cutoff is for a SAME-class lapper (equal pace: nothing more the yielder can do). A faster
+                -- CLASS coming through keeps its blue flag: the rivals boxing this car in are about to be lapped too.
+                -- (Spa 2026-09-15: prototypes sat 48-72 s behind GT3s that had yielded for 4 s and raced on.)
+                if yieldT[i] > YIELD_MAX_T and Classes.keyOf(lapperIdx) == classKey then yielding = false end
             end
             if yielding then aggr = math.min(aggr, YIELD_AGGR) end
             -- A lapped car should EASE aside and keep rolling, NOT crawl. Cap the total caution so the
@@ -642,6 +652,17 @@ function R.evaluate(i, dt)
             -- stop -- that's what makes traffic pile up and rear-end a car being lapped. Lift a touch more
             -- only as the faster car draws right alongside, to wave it by.
             local lift = (lapperGap < YIELD_LIFT_GAP) and YIELD_CAUT * clamp(1 - lapperGap / YIELD_LIFT_GAP, 0, 1) or 0
+            -- the proper lift: yielded long enough, lapper still on the tail, on a straight, not done yet for this lapper
+            if yielding and not letbyDone[i] and (yieldT[i] or 0) > LETBY_AFTER_T and lapperGap < YIELD_LIFT_GAP * 1.5 then
+                if letbyT[i] == nil then
+                    local isCornerY = cornerAhead(mySpline)
+                    if not isCornerY then letbyT[i] = os.clock() end
+                end
+            end
+            if letbyT[i] then
+                if os.clock() - letbyT[i] < LETBY_T then lift = lift + LETBY_CAUT
+                else letbyDone[i] = true; letbyT[i] = nil end
+            end
             if yielding then
                 caut = math.min(caut, YIELD_CAUT + tsCaut) + lift   -- (never capped BELOW the corner's own trouble-spot caution)
                 state  = 0
@@ -775,6 +796,7 @@ end
 function R.reset()
     dmgSeen, dmgLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
+    letbyT, letbyDone, letbyFor = {}, {}, {}
     R.last = {}
     pcall(Strategy.reset)
     scaled = false

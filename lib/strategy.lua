@@ -36,17 +36,20 @@ local TURN     = 0.01   -- (1 - dot) between tangents that counts as "turning"
 
 -- the playbook: which manoeuvres a class uses and how readily (weight 0 = never). Set-up corners = how many
 -- corners a driver sits in the tow behind a NEW car before going for it (formula cars need the straight anyway).
+-- Weights re-fitted 2026-09-15 from an overnight class set (completed/attempted): lunges convert in touring (27%),
+-- kart (22%), GT3 (18%) and vintage, hardly at all in Formula Abarth (3%), prototypes (7%) and GT1 (5%);
+-- switchbacks ~9% overall, best in the low-downforce single-seaters (17%).
 local BOOK = {
-    formula    = { setup = 1.0, lunge = 0.6, switchback = 0.7, setupCorners = 2 },
-    formula_jr = { setup = 0.7, lunge = 0.9, switchback = 0.9, setupCorners = 1 },
-    prototype  = { setup = 1.0, lunge = 0.5, switchback = 0.7, setupCorners = 2 },
-    hypercar   = { setup = 0.9, lunge = 0.6, switchback = 0.8, setupCorners = 2 },
-    gt         = { setup = 0.5, lunge = 1.0, switchback = 1.0, setupCorners = 1 },
-    touring    = { setup = 0.3, lunge = 1.2, switchback = 0.9, setupCorners = 1 },
-    road       = { setup = 0.5, lunge = 0.8, switchback = 0.9, setupCorners = 1 },
-    vintage    = { setup = 0.7, lunge = 0.4, switchback = 1.0, setupCorners = 1 },
-    kart       = { setup = 0.2, lunge = 1.2, switchback = 1.0, setupCorners = 0 },
-    rally      = { setup = 0.4, lunge = 0.9, switchback = 0.8, setupCorners = 1 },
+    formula    = { setup = 1.0, lunge = 0.5, switchback = 0.6, setupCorners = 2 },
+    formula_jr = { setup = 0.7, lunge = 0.3, switchback = 0.9, setupCorners = 1 },
+    prototype  = { setup = 1.0, lunge = 0.25, switchback = 0.5, setupCorners = 2 },
+    hypercar   = { setup = 0.9, lunge = 0.4, switchback = 0.6, setupCorners = 2 },
+    gt         = { setup = 0.5, lunge = 0.8, switchback = 0.6, setupCorners = 1 },
+    touring    = { setup = 0.3, lunge = 1.2, switchback = 0.6, setupCorners = 1 },
+    road       = { setup = 0.5, lunge = 0.6, switchback = 0.4, setupCorners = 1 },
+    vintage    = { setup = 0.7, lunge = 0.5, switchback = 0.6, setupCorners = 1 },
+    kart       = { setup = 0.2, lunge = 1.2, switchback = 0.4, setupCorners = 0 },
+    rally      = { setup = 0.4, lunge = 0.7, switchback = 0.6, setupCorners = 1 },
     nascar     = { setup = 0.6, slingshot = 1.2, setupCorners = 0 },
     drift      = {},
 }
