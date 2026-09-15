@@ -487,7 +487,7 @@ function R.evaluate(i, dt)
             -- reactive pass above. Skill- and difficulty-gated inside; nil = no opinion.
             local ov = Strategy.evaluate(i, { dt = dt, gapA = gapA, spd = spd, aheadSpd = aheadSpd, aheadIdx = aheadIdx,
                 prog = progZ, dLat = dLat, myLat = myLat, wide = wide, baseA = baseA, prof = prof, classKey = classKey,
-                off = off, passGap = PASS_GAP, attackGap = attackGap, isOval = R.isOval })
+                off = off, passGap = PASS_GAP, attackGap = attackGap, isOval = R.isOval, lap = myLap, crowd = crowd })
             if ov then
                 if ov.target ~= nil then target = ov.target end
                 caut = caut + (ov.caut or 0)

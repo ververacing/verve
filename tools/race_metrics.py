@@ -103,8 +103,61 @@ def metrics(path):
     out["mv_ok"] = last.get("mvOK", 0)
     out["mv_types"] = last.get("mvT", "")
     out.update(tyre_views(rows, n))
+    out.update(lapping_views(rows, n))
     out.update(reality_score(out, hdr))
     return out
+
+
+# ---------------------------------------------------------------------------------------------
+# LAPPING: a car on a higher lap closing on a backmarker -- how long to get by, and how much speed it loses queued
+# behind it (vs its own clear-road speed at that part of the track). Conga lines show up in yield_train_snaps.
+def lapping_views(rows, n):
+    if not rows:
+        return {}
+    BIN = 0.02
+    clear = {}     # (car, bin) -> [speeds] with no car within 0.03 ahead
+    for r in rows:
+        g = r["grid"]
+        for c in g:
+            if c["spd"] < 30 or c["pit"] or c["ret"]:
+                continue
+            sp = c["spline"] / 1000.0
+            ahead = min(((o["spline"] / 1000.0 - sp) % 1.0) for o in g if o["i"] != c["i"] and not o["ret"] and o["spd"] > 5) if len(g) > 1 else 1.0
+            if ahead > 0.03:
+                clear.setdefault((c["i"], int(sp / BIN)), []).append(c["spd"])
+    losses, episodes, open_ep = [], [], {}
+    for r in rows:
+        g = r["grid"]
+        by = {c["i"]: c for c in g}
+        seen = set()
+        for L in g:
+            if L["spd"] < 30 or L["pit"] or L["ret"]:
+                continue
+            spL = L["spline"] / 1000.0
+            for B in g:
+                if B["i"] == L["i"] or B["ret"] or B["pit"] or B["lap"] >= L["lap"] or B["spd"] < 20:
+                    continue
+                d = (B["spline"] / 1000.0 - spL) % 1.0
+                key = (L["i"], B["i"])
+                if 0 < d < 0.02:
+                    seen.add(key)
+                    if key not in open_ep:
+                        open_ep[key] = r["t"]
+                    ref = clear.get((L["i"], int(spL / BIN)))
+                    if ref and len(ref) >= 2:
+                        losses.append(statistics.median(ref) - L["spd"])
+                elif key in open_ep and d > 0.5:          # B is now behind L: the pass is done
+                    episodes.append(r["t"] - open_ep.pop(key))
+        for key in list(open_ep):
+            if key not in seen and by.get(key[0]) is None:
+                open_ep.pop(key)
+    return {
+        "lap_pass_n": len(episodes),
+        "lap_pass_median_s": round(statistics.median(episodes), 1) if episodes else 0,
+        "lap_pass_slow_n": sum(1 for e in episodes if e > 40),
+        "lapper_speed_loss_kmh": round(statistics.median(losses), 1) if losses else 0,
+        "lapper_queued_snaps": len(losses),
+    }
 
 
 # ---------------------------------------------------------------------------------------------

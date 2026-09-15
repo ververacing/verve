@@ -23,10 +23,14 @@ S.last         = {}     -- per car: manoeuvre code this frame (diagnostics): 0 n
 S.attempts     = 0      -- session tally (UI / diagnostics)
 S.ok           = 0      -- ...of which gained a place within 8 s of finishing (judged in S.tick)
 S.byType       = {}     -- name -> attempts
-local pending  = {}     -- finished manoeuvres waiting for their 8 s verdict: { i, pos0, at }
+S.byTypeOK     = {}     -- name -> attempts that completed the pass
+local pending  = {}     -- finished manoeuvres waiting for their verdict: { i, target, pos0, at, name }
+local VERDICT_T = 20.0  -- s after the move to judge it: ahead of the car we attacked (or a place gained) = success
 local CODE = { switchback = 1, lunge = 2, setup = 3, slingshot = 4 }
 local MIN_TIER = { setup = 1, lunge = 1, slingshot = 1, switchback = 2 }
-local COOLDOWN = 7.0    -- s after a manoeuvre before the same car plans another
+local COOLDOWN = 12.0   -- s after a manoeuvre before the same car plans another (7 -> 12: one move per car per lap was too many)
+local EAGER_SCALE = 0.5 -- attempt-rate scale (GT3 A/B 2026-09-14: +83% overtaking but +80% incidents at 1.0)
+local PACK_MAX = 3      -- no planned moves inside a pack this big (the opening-lap melee is where the extra incidents were)
 local SAMPLE_D = 0.004  -- spline fraction between racing-line samples (matches racecraft)
 local TURN     = 0.01   -- (1 - dot) between tangents that counts as "turning"
 
@@ -124,7 +128,9 @@ local function start(i, name, fields)
 end
 local function finish(i)
     local p = plan[i]
-    if p and p.name ~= 'setup' and (p.pos0 or 0) > 0 then pending[#pending + 1] = { i = i, pos0 = p.pos0, at = os.clock() + 8.0 } end
+    if p and p.name ~= 'setup' and (p.pos0 or 0) > 0 then
+        pending[#pending + 1] = { i = i, target = p.car, pos0 = p.pos0, at = os.clock() + VERDICT_T, name = p.name }
+    end
     plan[i] = nil
     cool[i] = os.clock() + COOLDOWN
 end
@@ -136,7 +142,17 @@ function S.tick()
     while k <= #pending do
         local q = pending[k]
         if now >= q.at then
-            pcall(function() local c = ac.getCar(q.i); if c and (c.racePosition or 99) < q.pos0 then S.ok = S.ok + 1 end end)
+            pcall(function()
+                local c = ac.getCar(q.i)
+                if not c then return end
+                local myPos = c.racePosition or 99
+                local won = myPos < q.pos0
+                if not won and type(q.target) == 'number' and q.target >= 0 then
+                    local tc = ac.getCar(q.target)
+                    if tc and not tc.isRetired and (tc.racePosition or 0) > myPos then won = true end   -- we are past the car we attacked
+                end
+                if won then S.ok = S.ok + 1; S.byTypeOK[q.name] = (S.byTypeOK[q.name] or 0) + 1 end
+            end)
             table.remove(pending, k)
         else k = k + 1 end
     end
@@ -210,11 +226,14 @@ function S.evaluate(i, c)
     if cool[i] and now < cool[i] then return nil end
 
     -- plan something? Aggressive drivers try more; a driver's RISK rating feeds the lunge (the risky move).
+    -- not on the opening lap, not in a pack: those are where a planned dive turns into a pile-up
+    if (c.lap or 1) == 0 or (c.crowd or 0) >= PACK_MAX then return nil end
     local risk = c.prof and c.prof.risk or 0.35
-    local eager = 0.35 + 0.65 * c.baseA
+    local eager = (0.35 + 0.65 * c.baseA) * EAGER_SCALE
     local roll = hash01(i * 13 + st.corners * 7 + math.floor(st.t0))   -- one roll per car-and-corner, not per frame
     local closeIn = c.gapA < c.passGap * 1.5
     local keepingUp = c.spd >= c.aheadSpd - 3
+    local closing = c.spd >= c.aheadSpd + 2          -- a lunge needs a genuine run, not a parity dive
 
     -- SET-UP: a NEW car ahead, and this class serves a corner or two in the tow first
     if (book.setup or 0) > 0 and tier >= MIN_TIER.setup and st.corners < (book.setupCorners or 0) and closeIn and now - st.t0 < 0.5 then
@@ -237,7 +256,7 @@ function S.evaluate(i, c)
 
     if g.phase == 'entry' and g.inside ~= 0 and closeIn and keepingUp then
         local insideOpen = c.dLat * g.inside < 0.3
-        if insideOpen and (book.lunge or 0) > 0 and tier >= MIN_TIER.lunge and roll < eager * (0.4 + 0.6 * risk) * book.lunge then
+        if insideOpen and closing and (book.lunge or 0) > 0 and tier >= MIN_TIER.lunge and roll < eager * (0.4 + 0.6 * risk) * book.lunge then
             start(i, 'lunge', { car = c.aheadIdx, side = g.inside })
             S.last[i] = CODE.lunge
             return { target = g.inside * c.off * 1.4, caut = -0.5 * book.lunge, aggr = 0.2, hold = 1.0, code = CODE.lunge }
@@ -257,7 +276,9 @@ end
 
 function S.byTypeString()
     local parts = {}
-    for _, k in ipairs({ 'lunge', 'switchback', 'slingshot', 'setup' }) do if S.byType[k] then parts[#parts + 1] = k .. ':' .. S.byType[k] end end
+    for _, k in ipairs({ 'lunge', 'switchback', 'slingshot', 'setup' }) do
+        if S.byType[k] then parts[#parts + 1] = k .. ':' .. S.byType[k] .. (k ~= 'setup' and ('/' .. (S.byTypeOK[k] or 0)) or '') end
+    end
     return table.concat(parts, ' ')
 end
 
@@ -271,7 +292,7 @@ function S.reset()
     plan, cool, stalk, tierCache, tierAt = {}, {}, {}, {}, {}
     pending = {}
     S.last = {}
-    S.attempts, S.ok, S.byType = 0, 0, {}
+    S.attempts, S.ok, S.byType, S.byTypeOK = 0, 0, {}, {}
 end
 
 return S
