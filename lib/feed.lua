@@ -234,7 +234,9 @@ function F.update(dt, stats)
                 for j = k, pk - 1 do
                     local over = prevOrder[j]
                     if over and curPos[over] and curPos[over] > k and (prev[over] and prev[over].spd or 0) > 30 then
-                        event(t, 'overtake', string.format('"car":%d,"over":%d,"pos":%d,"spline":%.4f', i, over, k, running[k].spline))
+                        if (gapAhead[i] or 9) < 2.5 or (gapAhead[over] or 9) < 2.5 then
+                            event(t, 'overtake', string.format('"car":%d,"over":%d,"pos":%d,"spline":%.4f', i, over, k, running[k].spline))
+                        end
                         if k == 1 then event(t, 'lead_change', string.format('"car":%d,"over":%d', i, over)) end
                     end
                 end
