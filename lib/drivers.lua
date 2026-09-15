@@ -490,7 +490,9 @@ local function applyName(i)
     pcall(function()
         if origName[i] == nil then origName[i] = ac.getDriverName(i) or '' end
         local key = assigned[i]
-        local name = key and D.nameOf(key) or origName[i]
+        local d = key and BY_KEY[key] or nil
+        -- archetypes are types, not people: the car keeps AC's own driver name (a grid of 17 "Rookie"s otherwise)
+        local name = (d and d.bucket ~= 'archetype') and d.name or origName[i]
         if name and #name > 0 then physics.setAIDriverName(i, name) end
     end)
 end
