@@ -58,10 +58,12 @@ local COMMIT_RELEASE = 1.5   -- gap must grow past threshold*this to drop the co
 --   Leave room -- when genuinely alongside (overlapping) and NOT the car with the corner, don't
 --     pinch into them; ease off and lift. Pure contact-reducer.
 -- All are applied AFTER the racecraft-intensity scale, so the safety holds even at low intensity.
-local OPENLAP_CAUT   = 0.38  -- extra caution at the very start of a race (eased a touch: starts felt over-cautious)
-local OPENLAP_AGGR   = 0.35  -- aggression trimmed by up to this fraction at the start
+local OPENLAP_CAUT   = 0.45  -- extra caution at the very start of a race (0.38 -> 0.45, 2026-09-15: half the grid took contact on lap 1)
+local OPENLAP_AGGR   = 0.45  -- aggression trimmed by up to this fraction at the start
 local OPENLAP_OFFSET = 0.55  -- line-changes trimmed by up to this fraction at the start
-local OPENLAP_FADE   = 0.50  -- opening-lap effect gone by this fraction into lap 1 (releases sooner)
+local OPENLAP_FLOOR  = 0.30  -- the effect never drops below this during lap 0 (it used to be gone by half distance)
+local OPENLAP_TAIL   = 0.40  -- ...and fades out over this fraction of lap 1 (a fifth of the contacts were on lap 1)
+local OPENLAP_ATTACK = 0.60  -- attack-mode caution relief is scaled back by this much while the opening lap is in force
 -- grid funnel: off the line, hold each car near its own starting lane and let it merge onto the
 -- racing line GRADUALLY over the run to turn 1, instead of all 22 diving for the line at once.
 local GRID_FADE_END  = 0.05  -- lane-hold fades to the racing line over this fraction of lap 1
@@ -552,10 +554,15 @@ function R.evaluate(i, dt)
 
         -- RACE AWARENESS (added after the intensity scale, so safety terms hold at any intensity):
         -- opening-lap caution -- calmer + more spacing off the line, fading across the first lap.
-        local openingLap = (myLap == 0 and crowd >= 1) and clamp(1 - mySpline / OPENLAP_FADE, 0, 1) or 0
+        local openingLap = 0
+        if crowd >= 1 then
+            if myLap == 0 then openingLap = clamp(1 - mySpline * (1 - OPENLAP_FLOOR), OPENLAP_FLOOR, 1)        -- 1.0 at the lights -> 0.3 at the line
+            elseif myLap == 1 then openingLap = OPENLAP_FLOOR * clamp(1 - mySpline / OPENLAP_TAIL, 0, 1) end   -- tail into lap 1
+        end
         if openingLap > 0 then
             caut = caut + OPENLAP_CAUT * openingLap * (1 + crash)   -- crashy tracks get extra start caution (kills the opening-lap pile-ups)
             aggr = aggr * (1 - OPENLAP_AGGR * openingLap)
+            if state == 1 and caut < 0 then caut = caut * (1 - OPENLAP_ATTACK * openingLap) end   -- still attacking, just not diving in
         end
         -- bring-it-home -- clear track both ways: nothing to race, so ease off a touch.
         if gapA > ISOLATED_GAP and gapB > ISOLATED_GAP then
