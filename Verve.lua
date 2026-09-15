@@ -12,7 +12,8 @@ local Troublespots = require('lib.troublespots')
 local Feed      = require('lib.feed')
 local Career    = require('lib.career')       -- recognises AC career events; reads the launcher's difficulty numbers
 local Difficulty = require('lib.difficulty')  -- makes those numbers real (AC ignores them on some installs)
-local Telemetry = require('lib.telemetry')    -- opt-in anonymous race reports         -- structured race feed (opt-in; consumed by Verve Booth / Race Engineer)
+local Telemetry = require('lib.telemetry')
+local Strategy  = require('lib.strategy')     -- planned manoeuvres (racecraft drives it; Verve owns the toggle + status)    -- opt-in anonymous race reports         -- structured race feed (opt-in; consumed by Verve Booth / Race Engineer)
 local Diag = nil; pcall(function() Diag = require('diag') end)   -- LOCAL dev diagnostics; absent in the shipped build
 -- LOCAL test harness (tools/harness.py writes harness.lua right before launching a run, and it self-expires):
 -- can put the player's car on autopilot, override settings for the run, and label the diagnostics file.
@@ -35,7 +36,7 @@ local DEFAULTS = {
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
     crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
-    careerCurve = true, shareData = false,
+    careerCurve = true, shareData = false, strategy = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
@@ -46,7 +47,7 @@ local S = ac.storage({
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
     crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
-    careerCurve = true, shareData = false,
+    careerCurve = true, shareData = false, strategy = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     autosave = true, schema = 1,
 })
@@ -231,6 +232,7 @@ function script.update(dt)
     Human.HUMAN_ERRORS  = G.humanErrors
     Human.CLASS_PHYSICS = G.classPhys
     Racecraft.ENABLED     = G.racecraft
+    Strategy.ENABLED      = G.strategy ~= false
     Racecraft.INTENSITY   = G.rcIntensity
     Racecraft.VARIABILITY = G.intensity     -- spreads per-driver aggression across the field
     Overrides.autosave    = S.autosave
@@ -297,6 +299,7 @@ function script.update(dt)
             peak = Troublespots.peakHeat(), storeLen = Troublespots.storeLen, saveOk = Troublespots.lastSaveOk,
             per = diagPer, rc = Racecraft.last, recState = Recovery.stateOf,
             recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, dropsOff = Recovery.dropsOff,
+            mvN = Strategy.attempts, mvOK = Strategy.ok, gateN = Recovery.gateMoves,
             fwdSign = (Recovery.fwdSign and Recovery.fwdSign() or 0), dropFlips = Recovery.dropFlips,
         })
     end) end
@@ -511,6 +514,7 @@ function script.windowMain()
     ui.text('Options')
     toggle('Human errors', 'humanErrors', 'Occasional gentle bobbles on forgiving cars. Never on Formula/Prototype/Hypercar. Grip-slewed so it will not spin cars.')
     toggle('Career: scale difficulty across the series', 'careerCurve', 'In AC career events the difficulty meter picks a pace band and each event moves you through it: soft first series, a real fight at the end, never leaving the band. Off = every career event at the meter\'s flat level. (Outside career the meter always applies as set.)')
+    toggle('Tactics: set-up passes, late-brake lunges, switchbacks', 'strategy', 'Planned manoeuvres on top of the reactive racecraft, per class (a GT driver out-brakes, a formula driver sets it up on the straight, a stock car slingshots). Unlocked from 90 on the difficulty meter; a driver\'s pace rating decides how much of the playbook they use (a Rookie never switchbacks, a Veteran does).')
     toggle('Send anonymous race stats to improve Verve', 'shareData', 'After each race, send one small anonymous summary (track, cars, laps, difficulty, finishers, incidents, repairs, your positions and lap times). No names, no gamer tag, no paths, no hardware ids. Off by default.')
     toggle('Formula DRS discipline', 'drsDiscipline', 'On Formula cars, close DRS when the game says it is not available (outside a DRS zone or not within range). In-zone DRS is left to the game.')
     if ui.checkbox('Advanced', G.showAdvanced) then setG('showAdvanced', not G.showAdvanced) end
@@ -564,6 +568,7 @@ function script.windowMain()
         if G.racecraft then
             ui.text(string.format('Attacking: %d   Defending: %d', Racecraft.attacking or 0, Racecraft.defending or 0))
             ui.text('Track read as: ' .. (Racecraft.isOval and 'Oval / speedway (groove racing on)' or 'Road course'))
+            if G.strategy ~= false then ui.text(string.format('Planned manoeuvres: %d (%d gained a place)', Strategy.attempts or 0, Strategy.ok or 0)) end
         end
         if G.troubleSpots then
             ui.text(string.format('Trouble spots learned on this track: %d', Troublespots.hotCount()))

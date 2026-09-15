@@ -21,6 +21,7 @@ local Classes   = require('lib.classes')
 local Drivers   = require('lib.drivers')
 local Troublespots = require('lib.troublespots')
 local Recovery  = require('lib.recovery')     -- for damage-since-repair (recovery never requires racecraft: no cycle)
+local Strategy  = require('lib.strategy')     -- planned manoeuvres on top of attack mode (set-up, lunge, switchback, slingshot)
 
 local R = {}
 R.ENABLED     = true
@@ -458,12 +459,12 @@ function R.evaluate(i, dt)
             -- everywhere). Still needs a real closing-speed advantage, so it isn't a constant weave.
             local runAdv = spd - aheadSpd
             local passActive = (gapA < PASS_GAP) or (gapA < attackGap and runAdv > OUTSIDE_MIN_ADV * 0.6)
+            local myTc = ac.worldCoordinateToTrack(me.position)
+            local progZ = myTc and myTc.z or mySpline
+            local dLat = aheadIdx >= 0 and latOf(ac.getCar(aheadIdx).position) or 0
+            local off = ATTACK_OFFSET * t.offset
             if passActive then
-                local myTc = ac.worldCoordinateToTrack(me.position)
-                local progZ = myTc and myTc.z or mySpline
                 local isCorner, inside = cornerAhead(progZ)
-                local dLat = aheadIdx >= 0 and latOf(ac.getCar(aheadIdx).position) or 0
-                local off = ATTACK_OFFSET * t.offset
                 -- a genuine exit-speed run earns extra width -- and how readily a car takes it scales
                 -- with AGGRESSION (the driver profile's aggr, or the Quick Race slider, via baseA): an
                 -- aggressive driver pounces on a smaller advantage AND commits harder to it; a cautious
@@ -482,6 +483,17 @@ function R.evaluate(i, dt)
                     target = inside * off * 0.5
                 end
             end
+            -- STRATEGY: a planned manoeuvre (set-up, late-brake lunge, switchback, slingshot) overrides the
+            -- reactive pass above. Skill- and difficulty-gated inside; nil = no opinion.
+            local ov = Strategy.evaluate(i, { dt = dt, gapA = gapA, spd = spd, aheadSpd = aheadSpd, aheadIdx = aheadIdx,
+                prog = progZ, dLat = dLat, myLat = myLat, wide = wide, baseA = baseA, prof = prof, classKey = classKey,
+                off = off, passGap = PASS_GAP, attackGap = attackGap, isOval = R.isOval })
+            if ov then
+                if ov.target ~= nil then target = ov.target end
+                caut = caut + (ov.caut or 0)
+                aggr = math.min(1, aggr + (ov.aggr or 0))
+                if ov.hold and sgn(target) ~= 0 then holdSign[i] = sgn(target); holdUntil[i] = os.clock() + ov.hold end
+            end
         elseif state == 2 then
             aggr = math.min(1, baseA + DEFEND_AGGR_ADD)
             caut = CAUTION_DEFEND
@@ -499,6 +511,7 @@ function R.evaluate(i, dt)
             end
         end
 
+        if state ~= 1 then Strategy.clear(i) end
         local eff = R.INTENSITY
 
         -- pounce: after following a car, stay eager to fill the space for a moment (fixes the
@@ -735,6 +748,7 @@ function R.evaluate(i, dt)
         -- what we actually applied this frame, for the diagnostics log (reused table: no per-frame garbage)
         local L = R.last[i] or {}
         L.off, L.aggr, L.caut, L.state, L.yield, L.block, L.dmg = cur, aggr, caut, state, yielding, blockSide, myDmg
+        L.mv = Strategy.last[i] or 0
         R.last[i] = L
     end)
     if state == 1 then R.attacking = R.attacking + 1
@@ -745,6 +759,7 @@ end
 R.last = {}                 -- per-car applied values (offset/aggr/caution/state) -- diagnostics only
 function R.beginFrame()
     R.attacking = 0; R.defending = 0
+    pcall(Strategy.tick)
     pcall(function()
         local s = ac.getSim()
         for j = 0, s.carsCount - 1 do
@@ -761,6 +776,7 @@ function R.reset()
     dmgSeen, dmgLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     R.last = {}
+    pcall(Strategy.reset)
     scaled = false
     R.isOval = detectOval()     -- classify the track once per session (oval vs road course)
 end

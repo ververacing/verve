@@ -188,7 +188,26 @@ end
 local drops = {}           -- recent repositions being judged: { i, t, ok, spl }
 local dropFailed = {}      -- cars whose last reposition did NOT rejoin: no second drop -- they retire
 R.dropN, R.dropOK = 0, 0   -- session tally (for the UI / diagnostics)
-R.DROP_API = 'ai'          -- 'ai' = physics.setAICarPosition (AI-aware), 'car' = physics.setCarPosition (harness A/B: lap counting)
+R.DROP_API = 'car'         -- 'car' = physics.setCarPosition, 'ai' = physics.setAICarPosition (A/B 2026-09-14: same lap counting; 'car' rejoined cleaner)
+R.gateMoves = 0            -- drops moved back before the last timing split so AC counts the lap (see gateSafe)
+local GATE_MARGIN = 0.006  -- how far before the split to drop (~25 m on a 4 km track): the car must CROSS it
+
+-- LAP-COUNT SAFE DROP. AC's lap counter needs the car to pass at least one timing split after a teleport; a car
+-- dropped past the last split of the lap never does, and the next line crossing starts a lap instead of
+-- completing one -- the car reads a lap down for the rest of the race (Zandvoort A/B 2026-09-14: 0 of 15 such
+-- drops counted, every drop before a split did, whichever teleport API was used). So: past the last split ->
+-- drop just before it. A few seconds of road instead of a lost lap. Splits come from sim.lapSplits (CSP).
+local function gateSafe(sim, progress)
+    local splits = sim.lapSplits
+    if type(splits) ~= 'table' then return progress, false end
+    local lastGate = 0
+    for k = 0, #splits do
+        local s = splits[k]
+        if type(s) == 'number' and s > 0.02 and s < 0.98 and s > lastGate then lastGate = s end
+    end
+    if lastGate <= 0 or progress < lastGate - GATE_MARGIN * 0.5 then return progress, false end   -- a split still ahead: fine
+    return lastGate - GATE_MARGIN, true
+end
 
 -- Verve's own lap count: AC drops the lap after a teleport about half the time (2026-09-14: 13 of 24 repositions),
 -- leaving the car "a lap down" in AC's eyes for the rest of the race. Count start-line crossings ourselves while
@@ -393,6 +412,13 @@ end
 -- gets it to REJOIN. Gated by dropSafe unless `force` (a last-resort so a car is never abandoned).
 local function putBackOnLine(sim, i, progress, center, force)
     if not center then return false end
+    local gated
+    progress, gated = gateSafe(sim, progress)
+    if gated then
+        center = ac.trackProgressToWorldCoordinate(progress, false)
+        if not center then return false end
+        R.gateMoves = R.gateMoves + 1
+    end
     if not force and not dropSafe(sim, i, progress) then return false end
     -- forward direction from a CENTRED sample (a point behind -> a point ahead), which is far steadier
     -- than a tiny forward-only step and always points along the racing direction.
@@ -993,7 +1019,7 @@ function R.reset()
     lastRepairT = {}
     for i in pairs(overriding) do releaseControls(i) end   -- hand every car's controls back at a session change
     drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}
-    R.dropN, R.dropOK, R.dropsOff, R.dropFlips = 0, 0, false, 0
+    R.dropN, R.dropOK, R.dropsOff, R.dropFlips, R.gateMoves = 0, 0, false, 0, 0
     scaled = false
     R.count = 0; R.repairedCount = 0; R.limpCount = 0; R.retiredCount = 0
 end

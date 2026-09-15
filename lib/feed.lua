@@ -121,7 +121,7 @@ function F.update(dt, stats)
             local e = {
                 i = i, lap = c.lapCount or 0, pos = c.racePosition or 0, spline = c.splinePosition or 0, spd = c.speedKmh or 0,
                 pit = c.isInPitlane == true, ret = c.isRetired == true, dmg = dmg, lat = lat01(c.position),
-                st = r.state or 0, yl = r.yield == true, bl = (r.block or 0) ~= 0, rec = st.rec == true, park = st.parked == true,
+                st = r.state or 0, yl = r.yield == true, bl = (r.block or 0) ~= 0, rec = st.rec == true, park = st.parked == true, mv = r.mv or 0,
                 tyre = (c.wheels and c.wheels[0] and c.wheels[0].tyreCoreTemperature) or 0,
             }
             cars[#cars + 1] = e
@@ -206,6 +206,12 @@ function F.update(dt, stats)
             if c.st == 2 and p.st ~= 2 then event(t, 'verve', string.format('"car":%d,"decision":"defend","detail":"covering the inside line"', i)) end
             if c.st == 1 and p.st ~= 1 and (gapAhead[i] or 9) < 1.5 then event(t, 'verve', string.format('"car":%d,"decision":"attack","detail":"closing in, looking for a way past"', i)) end
             if c.yl and not p.yl then event(t, 'verve', string.format('"car":%d,"decision":"yield","detail":"moving aside for a faster car"', i)) end
+            if c.mv ~= 0 and c.mv ~= p.mv then
+                local MV = { [1] = { 'switchback', 'wide in, cutting back underneath on the exit' }, [2] = { 'lunge', 'braking late, diving for the inside' },
+                             [3] = { 'setup', 'sitting in the tow, setting up the pass' }, [4] = { 'slingshot', 'in the draft, pulling out at the last moment' } }
+                local m = MV[c.mv]
+                if m then event(t, 'verve', string.format('"car":%d,"decision":"%s","detail":"%s"', i, m[1], m[2])) end
+            end
             if c.bl and not p.bl then event(t, 'verve', string.format('"car":%d,"decision":"go_around","detail":"swerving around a stopped car"', i)) end
             if c.rec and not p.rec then event(t, 'verve', string.format('"car":%d,"decision":"crash_repair","detail":"Verve is getting the car going again"', i)) end
         else

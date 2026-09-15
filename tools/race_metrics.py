@@ -97,6 +97,10 @@ def metrics(path):
     # yield trains: snapshots where 3+ cars were yielding at once (a conga line behind a lapper)
     trains = sum(1 for r in rows if sum(1 for c in r["grid"] if c.get("yl")) >= 3)
     out["yield_train_snaps"] = trains
+    # planned manoeuvres (diag >= 2026-09-14 "mvN"/"mvOK" session tallies from lib/strategy.lua)
+    out["gate_moves"] = last.get("gateN", 0)
+    out["mv_attempts"] = last.get("mvN", 0)
+    out["mv_ok"] = last.get("mvOK", 0)
     out.update(tyre_views(rows, n))
     out.update(reality_score(out, hdr))
     return out
