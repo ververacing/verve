@@ -119,11 +119,22 @@ local YIELD_GAP      = 0.010 -- a lapping car this close behind -> start moving 
 -- OPENING-LAP CONVOY (harness A/B: R.CONVOY_ON): lap 0, first CONVOY_END of the lap, a car within CONVOY_GAP of the car
 -- ahead on a similar line is capped at that car's speed + CONVOY_MARGIN. Stops the nose-to-tail hits into turn one
 -- and the pile-ups they start (41% + 46% of opening-lap incidents in the 2026-09-15 feeds); racing resumes after.
-R.CONVOY_ON = true
+R.CONVOY_ON = false          -- v1 speed cap: OFF (halved lap-1 contact at Barcelona, 16-of-18 pile-up at Spa); kept for experiments
 local CONVOY_END    = 0.45   -- fraction of lap 0 the convoy rule covers
 local CONVOY_GAP    = 0.006  -- (metres via scaleToTrack) behind the car ahead
 local CONVOY_LAT    = 0.35   -- same line = lateral difference under this
 local CONVOY_MARGIN = 6.0    -- km/h a follower may exceed the car ahead by
+-- CONVOY v2 (harness A/B: R.CONVOY2_ON): throttle, never a speed cap. A follower closing on the car ahead on the
+-- same line loses throttle in proportion to the gap; the field is released from the lights row by row.
+R.CONVOY2_ON = false
+local CONVOY_NEAR_M   = 8.0   -- gap (m) at which the follower is down to CONVOY_THR_MIN
+local CONVOY_GAP_M    = 25.0  -- gap (m) at which the limit starts (full throttle beyond)
+local CONVOY_THR_MIN  = 0.35  -- throttle floor while closing nose-to-tail
+local CONVOY_CLOSING  = 2.0   -- km/h faster than the car ahead before the limit applies
+local START_ROW_M     = 8.0   -- one grid row of distance behind the front car...
+local START_ROW_T     = 0.12  -- ...holds the release this much longer (row 10 leaves ~1.1 s after row 1)
+local START_THR       = 0.35  -- throttle while held
+local startClock, startBack, thrSet = nil, {}, {}
 local YIELD_GAP_FAR  = 0.027 -- ...but a car on a HIGHER LAP or a faster CLASS gets its blue flag from this far (real blue
                              -- flags come at 1-2 s; a prototype closing only on the straights never got inside 45 m of a GT3
                              -- before the next corner at Spa, so the GT3 never yielded: 88-104 s lap-arounds, 2026-09-15)
@@ -401,6 +412,22 @@ function R.evaluate(i, dt)
         end
         pcall(function() cap = math.min(cap, Recovery.rampCap(i)) end)
         pcall(function() physics.setAITopSpeed(i, cap) end)
+        -- CONVOY v2: throttle only (see the constants). Left alone for a car recovery is driving (its own throttle ramp).
+        local thr = 1.0
+        if R.CONVOY2_ON and myLap == 0 and crowd >= 1 and not (Recovery.stateOf(i) or {}).rec then
+            if startClock and startBack[i] and os.clock() - startClock < START_ROW_T * (startBack[i] / START_ROW_M) then
+                thr = math.min(thr, START_THR)                                      -- staggered release from the lights
+            end
+            if mySpline < CONVOY_END and aheadIdx >= 0 and gapA * trackLen < CONVOY_GAP_M and spd > aheadSpd + CONVOY_CLOSING then
+                local aCar = ac.getCar(aheadIdx)
+                if aCar and math.abs(latOf(aCar.position) - latOf(me.position)) < CONVOY_LAT then
+                    local gm = gapA * trackLen
+                    thr = math.min(thr, clamp(CONVOY_THR_MIN + (1 - CONVOY_THR_MIN) * (gm - CONVOY_NEAR_M) / (CONVOY_GAP_M - CONVOY_NEAR_M), CONVOY_THR_MIN, 1))
+                end
+            end
+        end
+        if thr < 1.0 then thrSet[i] = true; pcall(physics.setAIThrottleLimit, i, thr)
+        elseif thrSet[i] then thrSet[i] = nil; pcall(physics.setAIThrottleLimit, i, 1.0) end
 
         local attackGap = ATTACK_GAP * t.gap
         local defendGap = DEFEND_GAP
@@ -810,6 +837,26 @@ R.last = {}                 -- per-car applied values (offset/aggr/caution/state
 function R.beginFrame()
     R.attacking = 0; R.defending = 0
     pcall(Strategy.tick)
+    -- lights out: the first frame an AI car on lap 0 is moving. Record how far behind the front car everyone started
+    -- (spline with the wrap undone: a grid that straddles the line has its back rows at 0.99), for the staggered release.
+    if R.CONVOY2_ON and not startClock then
+        pcall(function()
+            local s = ac.getSim()
+            local moving, front, sp = false, -1e9, {}
+            for j = 0, s.carsCount - 1 do
+                local c = ac.getCar(j)
+                if c and c.splinePosition then
+                    local x = c.splinePosition; if x > 0.5 then x = x - 1 end
+                    sp[j] = x; if x > front then front = x end
+                    if c.isAIControlled and (c.lapCount or 0) == 0 and (c.speedKmh or 0) > 20 then moving = true end
+                end
+            end
+            if moving then
+                startClock = os.clock()
+                for j, x in pairs(sp) do startBack[j] = math.max(0, (front - x) * trackLen) end
+            end
+        end)
+    end
     pcall(function()
         local s = ac.getSim()
         for j = 0, s.carsCount - 1 do
@@ -826,6 +873,7 @@ function R.reset()
     dmgSeen, dmgLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     letbyT, letbyDone, letbyFor = {}, {}, {}
+    startClock, startBack, thrSet = nil, {}, {}
     R.last = {}
     pcall(Strategy.reset)
     scaled = false
