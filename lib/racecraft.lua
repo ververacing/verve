@@ -123,11 +123,15 @@ R.CONVOY_ON = false          -- v1 speed cap: OFF (halved lap-1 contact at Barce
 -- (one table: LuaJIT allows a function 120 upvalues and R.evaluate's closure was over the limit -- Verve then fails to load)
 local CV = { END = 0.45, GAP = 0.006, LAT = 0.35, MARGIN = 6.0,          -- v1: lap fraction covered, gap (m via scaleToTrack), same-line lat, km/h margin
              NEAR_M = 8.0, GAP_M = 25.0, THR_MIN = 0.35, CLOSING = 2.0,  -- v2 throttle convoy: gap at the floor, gap where it starts, floor, closing km/h
-             ROW_M = 8.0, ROW_T = 0.12, THR = 0.35 }                     -- v2 staggered release: one row of distance, extra hold per row, throttle while held
+             ROW_M = 8.0, ROW_T = 0.12, THR = 0.35,                      -- v2 staggered release: one row of distance, extra hold per row, throttle while held
+             ROWCAUT = 0.35, ROWCAUT_M = 90.0,                           -- brake-earlier-from-the-back: full extra caution this far behind the front car
+             SPIN_FRAC = 0.55, SPIN_DOT = 0.55 }                         -- opening-lap yellow: car ahead under this fraction of my speed, or nose off its travel by this much
 local cv2 = { clock = nil, back = {}, thr = {} }                          -- v2 state: lights-out clock, distance behind the front car, cars we throttled
 -- CONVOY v2 (harness A/B: R.CONVOY2_ON): throttle, never a speed cap. A follower closing on the car ahead on the
 -- same line loses throttle in proportion to the gap; the field is released from the lights row by row.
 R.CONVOY2_ON = false
+R.OL_ROWCAUT = false          -- opening lap: brake earlier the further back you started (harness A/B)
+R.OL_SPINYELLOW = false       -- opening lap: a sideways / much slower car ahead is a yellow, not just a stopped one (harness A/B)
 local YIELD_GAP_FAR  = 0.027 -- ...but a car on a HIGHER LAP or a faster CLASS gets its blue flag from this far (real blue
                              -- flags come at 1-2 s; a prototype closing only on the straights never got inside 45 m of a GT3
                              -- before the next corner at Spa, so the GT3 never yielded: 88-104 s lap-arounds, 2026-09-15)
@@ -350,7 +354,19 @@ function R.evaluate(i, dt)
                     local b = mySpline - oc.splinePosition; if b < 0 then b = b + 1 end
                     local ocLat = latNow[j] or 0
                     -- a stopped (or crawling) car ON the road ahead is a yellow flag, not a rival
-                    if d > 0 and d < yellowRange and ocSpd < BLOCK_SPEED and math.abs(ocLat) < YELLOW_LAT and d < yellowD then
+                    local hazard = ocSpd < BLOCK_SPEED
+                    if not hazard and R.OL_SPINYELLOW and myLap == 0 and d > 0 and d < yellowRange and math.abs(ocLat) < YELLOW_LAT then
+                        -- lap 0: a car ahead going sideways, or far slower than me, is about to be hit by the next arrivals
+                        if ocSpd < spd * CV.SPIN_FRAC and spd > 60 then hazard = true
+                        else
+                            local v, lk = oc.velocity, oc.look
+                            if v and lk and ocSpd > 30 then
+                                local vl = math.sqrt(v.x * v.x + v.z * v.z)
+                                if vl > 1 and (v.x * lk.x + v.z * lk.z) / vl < CV.SPIN_DOT then hazard = true end
+                            end
+                        end
+                    end
+                    if d > 0 and d < yellowRange and hazard and math.abs(ocLat) < YELLOW_LAT and d < yellowD then
                         yellowD = d; yellowSpd = ocSpd
                     end
                     -- stopped or off-track cars aren't rivals to attack/defend against (the blockage scan and
@@ -596,6 +612,9 @@ function R.evaluate(i, dt)
         end
         if openingLap > 0 then
             caut = caut + OPENLAP_CAUT * openingLap * (1 + crash)   -- crashy tracks get extra start caution (kills the opening-lap pile-ups)
+            if R.OL_ROWCAUT and myLap == 0 and cv2.back[i] then    -- row ten brakes on the lights of the car ahead: earlier the further back
+                caut = caut + CV.ROWCAUT * clamp(cv2.back[i] / CV.ROWCAUT_M, 0, 1) * openingLap
+            end
             aggr = aggr * (1 - OPENLAP_AGGR * openingLap)
             if state == 1 and caut < 0 then caut = caut * (1 - OPENLAP_ATTACK * openingLap) end   -- still attacking, just not diving in
         end
@@ -832,7 +851,7 @@ function R.beginFrame()
     pcall(Strategy.tick)
     -- lights out: the first frame an AI car on lap 0 is moving. Record how far behind the front car everyone started
     -- (spline with the wrap undone: a grid that straddles the line has its back rows at 0.99), for the staggered release.
-    if R.CONVOY2_ON and not cv2.clock then
+    if (R.CONVOY2_ON or R.OL_ROWCAUT) and not cv2.clock then
         pcall(function()
             local s = ac.getSim()
             local moving, front, sp = false, -1e9, {}
