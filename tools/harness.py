@@ -377,6 +377,17 @@ def run_once(args, arm, run_idx):
 
     t_launch = time.time()
     proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
+    # AC occasionally dies at load (a crash box, or an exit within a minute); one relaunch after a pause fixes it
+    for attempt in range(2):
+        time.sleep(45)
+        if proc.poll() is None:
+            break
+        if acs_running():
+            break                                   # someone else's game: handled below
+        print(f"  !! acs.exe exited {time.time() - t_launch:.0f}s after launch (attempt {attempt + 1}); relaunching")
+        time.sleep(15)
+        t_launch = time.time()
+        proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
     finished = False
     ours = True
     try:

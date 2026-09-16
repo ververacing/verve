@@ -64,6 +64,7 @@ with open(log_path, "a", encoding="utf-8") as log:
                 continue
         log.write(f"=== step {n}/{len(lines)} {time.strftime('%H:%M:%S')}: harness.py {args}\n"); log.flush()
         subprocess.run([sys.executable, os.path.join(here, "harness.py")] + args.split(), cwd=root, stdout=log, stderr=subprocess.STDOUT)
+        time.sleep(15)      # let AC release its window/audio/GPU before the next launch: back-to-back launches crashed at load (2026-09-15)
         log.flush()
         time.sleep(5)
     log.write(f"=== batch done {time.strftime('%H:%M:%S')}\n")
