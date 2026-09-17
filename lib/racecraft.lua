@@ -171,6 +171,8 @@ R.LONE_FRAC = 0               -- >0: with nobody within CV.LONE_M either way, th
 R.OL_STAR_CONVOY = false      -- a top-tier driver is exempt from the convoy's gap-based throttle limit (the staggered release and the
                               -- reaction time stay: he launches with his row, then may close on the car ahead)
 R.OL_STAR_AGGR = 0            -- >0: a top-tier driver keeps this fraction of the opening-lap aggression trim (0.5 = half of it)
+R.SHIFT_UP = 0                -- >0: AI shift-up threshold handed to physics.setAIShiftingThresholds (units per CSP; probe first). Harness A/B
+R.SHIFT_DOWN = 0.5            -- ...and the shift-down threshold that goes with it
 R.RS_OL_METER = 95            -- laps 0-1: road space is allowed for a TOP-TIER driver (profile pace >= 0.75, the manoeuvre layer's tier 2)
                               -- when the difficulty meter is at or above this (0 = never). The pack stays gated; a star may go
                               -- round from the lights (owner 2026-09-16: 'Max behind a slow car with 75% of the track open')

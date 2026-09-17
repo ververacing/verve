@@ -25,6 +25,7 @@ S.ok           = 0      -- ...of which gained a place within 8 s of finishing (j
 S.byType       = {}     -- name -> attempts
 S.byTypeOK     = {}     -- name -> attempts that completed the pass
 local pending  = {}     -- finished manoeuvres waiting for their verdict: { i, target, pos0, at, name }
+S.episodes     = {}     -- judged manoeuvres for the diagnostics log (drained by diag): { i, name, dur, pos0, pos1, won, target, phases }
 local VERDICT_T = 20.0  -- s after the move to judge it: ahead of the car we attacked (or a place gained) = success
 local CODE = { switchback = 1, lunge = 2, setup = 3, slingshot = 4 }
 local MIN_TIER = { setup = 1, lunge = 1, slingshot = 1, switchback = 2 }
@@ -132,7 +133,7 @@ end
 local function finish(i)
     local p = plan[i]
     if p and p.name ~= 'setup' and (p.pos0 or 0) > 0 then
-        pending[#pending + 1] = { i = i, target = p.car, pos0 = p.pos0, at = os.clock() + VERDICT_T, name = p.name }
+        pending[#pending + 1] = { i = i, target = p.car, pos0 = p.pos0, at = os.clock() + VERDICT_T, name = p.name, dur = os.clock() - p.t0, phases = p.log or '' }
     end
     plan[i] = nil
     cool[i] = os.clock() + COOLDOWN
@@ -155,6 +156,7 @@ function S.tick()
                     if tc and not tc.isRetired and (tc.racePosition or 0) > myPos then won = true end   -- we are past the car we attacked
                 end
                 if won then S.ok = S.ok + 1; S.byTypeOK[q.name] = (S.byTypeOK[q.name] or 0) + 1 end
+                S.episodes[#S.episodes + 1] = { i = q.i, name = q.name, dur = q.dur or 0, pos0 = q.pos0, pos1 = myPos, won = won, target = q.target or -1, phases = q.phases or '' }
             end)
             table.remove(pending, k)
         else k = k + 1 end
@@ -165,7 +167,18 @@ end
 local function run(i, p, c, g, book)
     local now = os.clock()
     local age = now - p.t0
-    if c.gapA > c.attackGap or c.aheadIdx ~= p.car then finish(i); return nil end   -- they got away / a different car
+    -- episode log: phase / corner phase / gap (m) / their lateral offset, sampled when something changes (diag reads it after the verdict)
+    local tag = string.format('%s:%s:%d:%d', tostring(p.phase or '-'), g.phase, math.floor((c.gapA or 0) * 100000), math.floor((c.dLat or 0) * 100))
+    if tag ~= p.lastTag then p.lastTag = tag; p.log = (p.log or '') .. string.format('%.1f ', age) .. tag .. ' ' end
+    -- abort if the TARGET got away or we are past it -- measured on the target itself, not on whoever is 'ahead on my line'
+    -- now: a switchback moves wide on purpose, which changed aheadIdx and killed every switchback 0.6-1.8 s in (Monza 12 laps
+    -- 2026-09-17: 31 episodes logged, no switchback ever reached its cross phase)
+    local tgtGap = c.gapA
+    if type(p.car) == 'number' and p.car >= 0 then
+        local tc = ac.getCar(p.car)
+        if tc and tc.splinePosition then tgtGap = (tc.splinePosition - (c.prog % 1)) % 1 end
+    end
+    if tgtGap > c.attackGap * 1.5 or tgtGap > 0.5 then finish(i); return nil end   -- got away (or we are past it: gap wraps to ~1)
     if p.name == 'lunge' then
         if age < 1.3 then
             return { target = p.side * c.off * 1.4, caut = -0.5 * (book.lunge or 1), aggr = 0.2, hold = 1.0, code = CODE.lunge }
@@ -302,6 +315,7 @@ end
 function S.reset()
     plan, cool, stalk, tierCache, tierAt = {}, {}, {}, {}, {}
     pending = {}
+    S.episodes = {}
     S.last = {}
     S.attempts, S.ok, S.byType, S.byTypeOK = 0, 0, {}, {}
 end

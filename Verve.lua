@@ -26,6 +26,7 @@ pcall(function()
     if Harness and type(Harness.troublespots) == 'table' then for k, v in pairs(Harness.troublespots) do Troublespots[k] = v end end
 end)
 local harnessApplied, autopilotArmed, harnessT = false, false, 0
+local shiftSet = {}                              -- per car: shift thresholds applied (see Racecraft.SHIFT_UP)
 local harnessStartT, harnessStarted = 0, false   -- "press Drive" on AC's pre-session screen (ac.tryToStart)
 local harnessEndT = 0                            -- seconds a timed session (practice/quali) has been over
 local harnessDoneT, harnessQuit = 0, false       -- race-over timer / already asked AC to quit
@@ -95,6 +96,7 @@ local function sessionReset(restart)
     pcall(Classes.reset)
     pcall(Human.reset)            -- per-track distances
     pcall(Racecraft.reset)
+    shiftSet = {}
     -- driver profiles are session-only: wipe every race. NOT on a restart: the picks should survive it, and
     -- the AI-level overrides persist in physics across a restart, so the remembered base levels stay valid
     if not restart then pcall(Drivers.reset) end
@@ -253,6 +255,8 @@ function script.update(dt)
             if not car or not car.isAIControlled then return end
             if car.isInPitlane then return end          -- never touch a car doing a pit stop (player or AI)
             Drivers.applyPace(i, Difficulty.levelFor(i)) -- configured/career difficulty, then the driver profile's pace on top
+            -- shift-point study (harness A/B): R.SHIFT_UP > 0 sets the AI's shift thresholds once per car (stops CSP's own dynamic logic)
+            if Racecraft.SHIFT_UP > 0 and not shiftSet[i] then shiftSet[i] = true; pcall(physics.setAIShiftingThresholds, i, Racecraft.SHIFT_UP, Racecraft.SHIFT_DOWN) end
             local gOff, cOff = Human.getModifiers(i)
             local gripApplied = nil
             if G.controlGrip then
@@ -301,7 +305,7 @@ function script.update(dt)
             limpRepairs = Recovery.limpCount, retired = Recovery.retiredCount,
             hotSpots = Troublespots.hotCount(), crashRisk = Troublespots.crashiness(), isOval = Racecraft.isOval,
             peak = Troublespots.peakHeat(), storeLen = Troublespots.storeLen, saveOk = Troublespots.lastSaveOk,
-            per = diagPer, rc = Racecraft.last, recState = Recovery.stateOf, cv2 = Racecraft.cv2,
+            per = diagPer, rc = Racecraft.last, recState = Recovery.stateOf, cv2 = Racecraft.cv2, episodes = Strategy.episodes,
             recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, dropsOff = Recovery.dropsOff,
             mvN = Strategy.attempts, mvOK = Strategy.ok, mvT = Strategy.byTypeString(), gateN = Recovery.gateMoves,
             fwdSign = (Recovery.fwdSign and Recovery.fwdSign() or 0), dropFlips = Recovery.dropFlips,
