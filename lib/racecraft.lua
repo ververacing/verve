@@ -130,7 +130,8 @@ local CV = { END = 0.45, GAP = 0.006, LAT = 0.35, MARGIN = 6.0,          -- v1: 
              SIDE_M = 6.0, SIDE_LAT = 0.2, SIDE_LAT_MAX = 0.7, SIDE_THR = 0.55, SIDE_SPACE = 0.18,
              REACT_MIN = 0.15, REACT_THR = 0.05, PROX_NEAR = 15.0, PROX_FAR = 60.0, PRIO_OUT = 0.5,     -- reaction floor (s), caution-by-gap band (m), corner-priority outside line  -- side yield: their nose ahead of mine by less than this (m), lateral band that counts as alongside, throttle while tucking in
              RS_EDGE = 0.80, RS_MARGIN_M = 0.8, RS_CARW_M = 1.9, RS_BACK_M = 12.0, RS_FWD_M = 10.0, RS_REAREND = 0.35, RS_ADV = 0.5,
-             ISO_REACH_M = 300.0, LONE_M = 50.0 }   -- alone-on-track: a car ahead within this is 'catchable' for a top-tier driver; nobody within this either way = lone   -- road space: usable edge (track units), margin + fallback car width (m), scan window behind me / past the car ahead (m), rear-end ease left while pulling out, run needed (x the aggression-scaled minimum)
+             ISO_REACH_M = 300.0, LONE_M = 50.0,
+             LANE_OFF = 0.45, LANE_APEX_M = 40.0, LANE_SCAN_M = 20.0, LANE_MAX_M = 900.0 }   -- turn-1 lanes: offset, hold this far past the apex, corner-scan step, give up looking this far out   -- alone-on-track: a car ahead within this is 'catchable' for a top-tier driver; nobody within this either way = lone   -- road space: usable edge (track units), margin + fallback car width (m), scan window behind me / past the car ahead (m), rear-end ease left while pulling out, run needed (x the aggression-scaled minimum)
 local cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {} }      -- v2 state: lights-out clock, distance behind the front car, cars we throttled, guard applied, base brake hints
 R.cv2 = cv2                                                               -- (read by diag's contact trace)
 -- CONVOY v2 (harness A/B: R.CONVOY2_ON): throttle, never a speed cap. A follower closing on the car ahead on the
@@ -145,6 +146,7 @@ R.OL_AGGR_FORMULA = 0         -- laps 0-1: extra aggression trim (0..1) for form
 R.OL_REACT_MAX = 0            -- lights: per-driver reaction time up to this many s (0 = off; harness A/B)
 R.OL_CAUT_PROX = false        -- opening caution scaled by the gap ahead (leaders brake normally) (harness A/B)
 R.OL_CORNER_PRIO = false      -- laps 0-1: alongside a car whose nose is ahead, corner coming -> take the outside line (harness A/B)
+R.BG_T = 0                    -- >0: the guard's reach is closing speed x this many seconds (min CV.BG_M) and a much slower car ahead counts as braking (A/B)
 R.OL_BRAKEGUARD = true        -- opening lap: brake earlier when the car ahead on my line is already braking inside CV.BG_M (harness A/B)
 R.BG_ALL = 0                  -- >0: every AI car's brake hint x this all race (direction test only; 0 = off)
 -- ROAD SPACE (harness A/B: R.ROADSPACE): "use the whole road". The reactive pass aims a fixed small nudge off the racing
@@ -174,6 +176,17 @@ R.OL_STAR_CONVOY = false      -- a top-tier driver is exempt from the convoy's g
 R.OL_STAR_AGGR = 0            -- >0: a top-tier driver keeps this fraction of the opening-lap aggression trim (0.5 = half of it)
 R.SHIFT_UP = 0                -- >0: AI shift-up threshold handed to physics.setAIShiftingThresholds (units per CSP; probe first). Harness A/B
 R.SHIFT_DOWN = 0.5            -- ...and the shift-down threshold that goes with it
+-- TURN-1 LANE DISCIPLINE (harness A/B: R.OL_LANES): from the lights to just past the first apex, odd rows hold the INSIDE
+-- lane of turn 1 and even rows the OUTSIDE, then the normal grid funnel takes over. Nobody moves sideways in the pack --
+-- each car only holds a lane (every lateral rule that MOVED cars in the pack made F1 opening laps worse). Real F1 starts
+-- look like this for the first 300 m. Owner's pick 2026-09-17.
+R.OL_LANES = false
+R.CONCEDE = 0                 -- >0: a defender concedes the line to a tier-2 driver behind whose pace rating beats his by this much (A/B)
+R.ATTACK_CAUT_X = 1.0         -- multiplier on the attack's negative caution (A/B; applied caution while attacking was 1.11 vs AC's 1.0)
+R.PC_TS = 1.0                 -- trouble-spot + crash caution multiplier for a committed passer (PASS_COMMIT; A/B)
+R.PASS_COMMIT = 0             -- >0: a driver this much quicker (pace rating) than the car ahead commits to the pass from ATTACK_GAP (A/B)
+R.RS_OL_REAREND = 0.35        -- rear-end guard trim for a road-space pass on laps 0-1 (CV.RS_REAREND from lap 2); 1.0 = no trim (A/B)
+R.RS_OL_CROWD = 99            -- the star exemption below applies only with at most this many cars close by (A/B)
 R.RS_OL_METER = 95            -- laps 0-1: road space is allowed for a TOP-TIER driver (profile pace >= 0.75, the manoeuvre layer's tier 2)
                               -- when the difficulty meter is at or above this (0 = never). The pack stays gated; a star may go
                               -- round from the lights (owner 2026-09-16: 'Max behind a slow car with 75% of the track open')
@@ -341,6 +354,7 @@ local function detectOval()
     return oval
 end
 
+local function LANE_APEX_M_frac(len) return 40.0 / (len or 4500) end   -- turn-1 lane hold: metres past the apex, as a lap fraction
 local function cornerAhead(prog)
     local isCorner, insideSign = false, 0
     pcall(function()
@@ -502,6 +516,8 @@ function R.evaluate(i, dt)
             -- six of nine lap-0 contacts). The car behind by a nose eases and tucks in.
             if R.OL_SIDEYIELD and sideBy and cornerAhead(mySpline) then thr = math.min(thr, CV.SIDE_THR) end
         end
+        local pc = R.penCap and R.penCap[i]                 -- serving a penalty (lib/fault.lua): throttle cap until it's paid
+        if pc and os.clock() < pc.till then thr = math.min(thr, pc.cap) end
         if thr < 1.0 then cv2.thr[i] = true; pcall(physics.setAIThrottleLimit, i, thr)
         elseif cv2.thr[i] then cv2.thr[i] = nil; pcall(physics.setAIThrottleLimit, i, 1.0) end
         -- BRAKE-ZONE GUARD (lap 0): the car ahead on my line is on the brakes and I'm inside CV.BG_M -> raise my brake
@@ -514,13 +530,16 @@ function R.evaluate(i, dt)
             local mul = R.BG_ALL > 0 and R.BG_ALL or 1.0
             if R.OL_BRAKEGUARD and myLap <= 1 and aheadIdx >= 0 and not (Recovery.stateOf(i) or {}).rec then
                 local gm = gapA * trackLen
-                if gm < CV.BG_M then
+                local reach = CV.BG_M
+                if R.BG_T > 0 then reach = math.max(reach, (spd - aheadSpd) / 3.6 * R.BG_T) end
+                if gm < reach then
                     local aCar = ac.getCar(aheadIdx)
-                    if aCar and (aCar.brake or 0) > CV.BG_BRAKE and math.abs(latOf(aCar.position) - latOf(me.position)) < CV.LAT then
+                    if aCar and ((aCar.brake or 0) > CV.BG_BRAKE or (R.BG_T > 0 and spd - aheadSpd > CV.BG_CLOSE))
+                       and math.abs(latOf(aCar.position) - latOf(me.position)) < CV.LAT then
                         -- LOWER hint = earlier braking (x1.5 field-wide: 18/18 lap-1 contact, 101 repairs, 2026-09-16).
                         -- The cut scales with how fast I'm closing on a braking car and how close it already is.
                         local closing = clamp((spd - aheadSpd) / CV.BG_CLOSE, 0, 1)
-                        mul = mul * (1 - CV.BG_HINT * closing * clamp(1 - gm / CV.BG_M, 0, 1))
+                        mul = mul * (1 - CV.BG_HINT * closing * clamp(1 - gm / reach, 0, 1))
                     end
                 end
             end
@@ -585,6 +604,7 @@ function R.evaluate(i, dt)
         end
         local yielding = false   -- set when we're being lapped (blue flag) -- suppresses obstacle-swerving
         local rsPass = false     -- set when the road-space rule picked a side this frame (R.ROADSPACE)
+        local paceEdge = false   -- R.PASS_COMMIT: I am the clearly quicker driver and I'm committing to the pass
 
         -- raw instantaneous reads: is there a fight on right now?
         local rawAttack = (gapA < attackGap and spd >= aheadSpd - FASTER_MARGIN)
@@ -609,13 +629,17 @@ function R.evaluate(i, dt)
 
         if state == 1 then
             aggr = math.min(1, baseA + ATTACK_AGGR_ADD)
-            caut = CAUTION_ATTACK * clamp(1 - gapA / attackGap, 0, 1) * (t.follow or 1.0)   -- aero cars keep more distance
+            caut = CAUTION_ATTACK * R.ATTACK_CAUT_X * clamp(1 - gapA / attackGap, 0, 1) * (t.follow or 1.0)   -- aero cars keep more distance
             -- Start MOVING for the pass earlier when there's a genuine speed run on the car ahead -- not
             -- only when almost touching. Fixes a fast car sitting in the slipstream too long before it
             -- commits to the open space beside a slower car (most visible off the start, but present
             -- everywhere). Still needs a real closing-speed advantage, so it isn't a constant weave.
             local runAdv = spd - aheadSpd
-            local passActive = (gapA < PASS_GAP) or (gapA < attackGap and runAdv > OUTSIDE_MIN_ADV * 0.6)
+            if R.PASS_COMMIT > 0 and prof and aheadIdx >= 0 and (myLap >= 2 or (myLap == 1 and mySpline >= OPENLAP_TAIL)) then   -- not in the opening-lap pack (14/18 in contact with it on, Monza)
+                local ap = Drivers.statsOf(aheadIdx)
+                if ap and prof.pace - ap.pace >= R.PASS_COMMIT then paceEdge = true end
+            end
+            local passActive = (gapA < PASS_GAP) or (gapA < attackGap and runAdv > OUTSIDE_MIN_ADV * 0.6) or (paceEdge and gapA < attackGap)
             local myTc = ac.worldCoordinateToTrack(me.position)
             local progZ = myTc and myTc.z or mySpline
             local dLat = aheadIdx >= 0 and latOf(ac.getCar(aheadIdx).position) or 0
@@ -637,8 +661,10 @@ function R.evaluate(i, dt)
                     end
                 elseif math.abs(dLat) > 0.15 then        -- straight/exit: pass where the defender isn't, wider with a run
                     target = -sgn(dLat) * off * (1 + 1.5 * wide)
-                elseif inside ~= 0 then                  -- straight: pre-position for the next corner's inside
-                    target = inside * off * 0.5
+                elseif inside ~= 0 then                  -- straight: pre-position for the next corner's inside (fully, when committed)
+                    target = inside * off * (paceEdge and 1.0 or 0.5)
+                elseif paceEdge then                     -- committed, long straight, no corner in sight: the side the defender isn't
+                    target = ((dLat >= 0) and -1 or 1) * off
                 end
             end
             -- STRATEGY: a planned manoeuvre (set-up, late-brake lunge, switchback, slingshot) overrides the
@@ -659,7 +685,7 @@ function R.evaluate(i, dt)
             -- for a gap on lap 1). Once the field has strung out it is neutral-to-better on contact.
             if R.ROADSPACE and ov == nil and passActive and aheadIdx >= 0
                and (myLap >= 2 or (myLap == 1 and mySpline >= OPENLAP_TAIL)
-                    or (R.RS_OL_METER > 0 and Strategy.tierOf(i) >= 2 and Strategy.meterOK(R.RS_OL_METER)))
+                    or (R.RS_OL_METER > 0 and crowd <= R.RS_OL_CROWD and Strategy.tierOf(i) >= 2 and Strategy.meterOK(R.RS_OL_METER)))
                and runAdv > OUTSIDE_MIN_ADV * (1.4 - baseA) * CV.RS_ADV then
                 local half = 6.0                                          -- half track width here (m): track units per metre
                 pcall(function() local sd = ac.getTrackAISplineSides(mySpline); if sd then half = math.max(3.0, (sd.x + sd.y) * 0.5) end end)
@@ -694,7 +720,15 @@ function R.evaluate(i, dt)
         elseif state == 2 then
             aggr = math.min(1, baseA + DEFEND_AGGR_ADD)
             caut = CAUTION_DEFEND
-            if gapA >= PACK_LEAD_GAP then
+            local concede = false
+            if R.CONCEDE > 0 and behindIdx >= 0 and Strategy.tierOf(behindIdx) >= 2 then
+                local bp = Drivers.statsOf(behindIdx)
+                if bp and bp.pace >= ((prof and prof.pace) or 0.6) + R.CONCEDE then concede = true end
+            end
+            if concede then
+                -- a clearly faster star behind: stay on the racing line, no extra aggression, no elbows (owner: Max takes the space)
+                aggr = baseA; caut = 0; target = 0; state = 3   -- state 3 = conceding, visible in the diag 'st' field
+            elseif gapA >= PACK_LEAD_GAP then
                 -- clear road ahead: don't defend a slow line -- just drive away on the racing line.
                 target = 0
             else
@@ -772,11 +806,12 @@ function R.evaluate(i, dt)
         -- trouble-spot learning: a bit more caution approaching a corner this class keeps crashing at.
         local tsCaut = Troublespots.cautionAt(mySpline, classKey)
         local lone = (R.LONE_FRAC > 0 and nearGap * trackLen > CV.LONE_M) and R.LONE_FRAC or 1.0   -- nobody near: a fraction
-        caut = caut + tsCaut * lone
+        local pcx = (paceEdge and state == 1) and R.PC_TS or 1.0   -- a committed passer carries less of the 'careful here' margin
+        caut = caut + tsCaut * lone * pcx
         -- adaptive crash damping: on a track that keeps wrecking cars, calm the whole field (more caution,
         -- less aggression) so the crash RATE falls, not just the after-the-fact repairs.
         if crash > 0 then
-            caut = caut + R.CRASH_CAUT * crash * lone
+            caut = caut + R.CRASH_CAUT * crash * lone * pcx
             aggr = aggr * (1 - R.CRASH_AGGR * crash)
         end
         -- anti rear-end: closing fast, right behind, and still ON the same line (not pulling out to
@@ -786,7 +821,9 @@ function R.evaluate(i, dt)
             if closing > REAREND_CLOSE and math.abs(myLat - latOf(ac.getCar(aheadIdx).position)) < REAREND_LAT then
                 local urgency = clamp((closing - REAREND_CLOSE) / REAREND_RANGE, 0, 1) * clamp(1 - gapA / REAREND_GAP, 0, 1)
                 local riskF = prof and clamp(1.0 - 0.6 * prof.risk, 0.4, 1.0) or 0.8
-                if rsPass then urgency = urgency * CV.RS_REAREND end   -- pulling out to pass: don't kill the run first
+                if rsPass or (paceEdge and math.abs(target) > 0.25) then   -- pulling out to pass: don't kill the run first
+                    urgency = urgency * ((myLap >= 2) and CV.RS_REAREND or R.RS_OL_REAREND)
+                end
                 caut = caut + REAREND_CAUT * urgency * riskF
             end
         end
@@ -945,7 +982,19 @@ function R.evaluate(i, dt)
         -- racing line gradually over the run to turn 1, so the field funnels down instead of all
         -- converging at once. Overrides the racecraft offset here (after the deadzone) so the fade
         -- stays smooth. Gated to a packed field (crowd) so it never fires on a lone practice lap.
-        if myLap == 0 and crowd >= 1 and olS < GRID_FADE_END * R.GRID_FADE_X then
+        local laneHeld = false
+        if R.OL_LANES and myLap == 0 and crowd >= 1 and cv2.lane and cv2.back[i] and olS < cv2.lane.endS
+           and not (R.RS_OL_METER > 0 and Strategy.tierOf(i) >= 2 and Strategy.meterOK(R.RS_OL_METER)) then   -- stars shoot the gaps (owner)
+            -- hold the side you STARTED on (your grid column), at a full lane's offset, until past the first apex. By column, not
+            -- by row: assigning a row's two cars the same side sent them into each other off the line (Barcelona 2026-09-17,
+            -- 13/18 in contact). A car that started dead centre takes the side its row parity gives it.
+            local side = cv2.lane.side and cv2.lane.side[i] or 0     -- fixed at the lights from the grid box, not from a moving car
+            if side == 0 then side = (math.floor(cv2.back[i] / CV.ROW_M + 0.5) % 2 == 0) and cv2.lane.inside or -cv2.lane.inside end
+            target = side * CV.LANE_OFF
+            holdSign[i] = side; holdUntil[i] = os.clock() + SIDE_HOLD
+            laneHeld = true
+        end
+        if not laneHeld and myLap == 0 and crowd >= 1 and olS < GRID_FADE_END * R.GRID_FADE_X then
             if gridLat[i] == nil and olS < GRID_CAPTURE then gridLat[i] = myLat end
             if gridLat[i] then
                 target = clamp(gridLat[i] * GRID_HOLD * clamp(1 - math.max(0, olS) / (GRID_FADE_END * R.GRID_FADE_X), 0, 1), -1, 1)
@@ -1022,6 +1071,26 @@ function R.beginFrame()
             end
             if moving then
                 cv2.clock = os.clock()
+                -- turn 1: scan forward from the front row for the first corner; remember its inside sign and where it is
+                cv2.lane = nil
+                if R.OL_LANES then
+                    -- the grid's median lateral: 'left or right' is judged against the grid itself. Judged against the AI line,
+                    -- Barcelona (line along one edge of the straight) put all 18 cars in the same lane (2026-09-17)
+                    local lats = {}
+                    for j in pairs(sp) do lats[#lats + 1] = latNow[j] or 0 end
+                    table.sort(lats)
+                    local n = #lats
+                    local mid = 0
+                    if n > 0 then mid = (n % 2 == 0) and (lats[n / 2] + lats[n / 2 + 1]) / 2 or lats[(n + 1) / 2] end   -- true midpoint of a two-column grid
+                    local side = {}
+                    for j in pairs(sp) do side[j] = sgn((latNow[j] or 0) - mid) end
+                    local x = front
+                    while x < front + CV.LANE_MAX_M / trackLen do
+                        local isC, ins = cornerAhead(x % 1)
+                        if isC and ins ~= 0 then cv2.lane = { inside = ins, mid = mid, side = side, endS = x + 2 * SAMPLE_D + LANE_APEX_M_frac(trackLen) }; break end
+                        x = x + CV.LANE_SCAN_M / trackLen
+                    end
+                end
                 for j, x in pairs(sp) do
                     cv2.back[j] = math.max(0, (front - x) * trackLen)
                     -- reaction time at the lights: a human grid never launches as one
@@ -1046,7 +1115,7 @@ function R.reset()
     dmgSeen, dmgLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     letbyT, letbyDone, letbyFor = {}, {}, {}
-    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {} }; R.cv2 = cv2
+    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil }; R.cv2 = cv2
     R.last = {}
     pcall(Strategy.reset)
     scaled = false

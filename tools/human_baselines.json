@@ -1,0 +1,12 @@
+{
+  "_note": "Human hotlap baselines (RSR LiveTiming boards, checked 2026-09) in seconds: fastest / median / top10. race_allow_s: what to add to a hotlap to get honest race pace. Keep in step with verve_desk/racecraft/reality.md.",
+  "spa|ks_ferrari_488_gt3":            {"fastest": 134.3, "median": 142.4, "top10": 138.1, "race_allow_s": 2.5},
+  "spa|ks_ferrari_sf70h":              {"fastest": 100.8, "median": 111.7, "top10": 105.5, "race_allow_s": 4.0},
+  "monza|ks_ferrari_488_gt3":          {"fastest": 105.7, "median": 112.1, "top10": 108.6, "race_allow_s": 2.5},
+  "ks_barcelona|ks_ferrari_488_gt3":   {"fastest": 101.8, "median": 110.1, "top10": 106.4, "race_allow_s": 2.5},
+  "ks_barcelona|ks_ferrari_sf70h":     {"fastest":  76.5, "median":  84.0, "top10":  79.8, "race_allow_s": 4.0},
+  "ks_silverstone|ks_ferrari_488_gt3": {"fastest": 118.1, "median": 124.7, "top10": 121.0, "race_allow_s": 2.5},
+  "ks_brands_hatch|ks_ferrari_488_gt3":{"fastest":  80.9, "median":  87.4, "top10":  83.6, "race_allow_s": 2.5},
+  "ks_zandvoort|ks_ferrari_488_gt3":   {"fastest":  95.5, "median": 100.4, "top10":  97.6, "race_allow_s": 2.5},
+  "ks_nurburgring|ks_ferrari_488_gt3": {"fastest": 113.7, "median": 120.9, "top10": 116.5, "race_allow_s": 2.5}
+}

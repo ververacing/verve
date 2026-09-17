@@ -762,6 +762,8 @@ function R.update(dt)
                 limpT[i] = 0
             end
 
+            R.suspLimp(i, car, spd, dt)
+
             local isActive = (recT[i] or 0) > 0
             if not isActive then
                 if spd > STOP_SPEED then stuckT[i] = 0; return end
@@ -1043,7 +1045,35 @@ function R.update(dt)
     R.count = active
 end
 
+-- SUSPENSION LIMPER (harness A/B: R.SUSP_LIMP > 0 = the suspension damage, 0..1, that counts). Re-bodying never fixes
+-- suspension, so a car with a broken corner crawls at 30 km/h on the racing line for the rest of the race (Barcelona
+-- F1, 3 of 12 sprints on 2026-09-17, one for 344 s). A real driver limps to the pits for repairs or parks it: after
+-- SUSP_LIMP_T seconds below SUSP_LIMP_SPD with that damage, ask AC for a pit stop (AC repairs it there and it rejoins);
+-- still crawling on track SUSP_PIT_T later, retire it as a suspension DNF. Everything lives on R (R.update is at the
+-- upvalue limit).
+R.SUSP_LIMP = 0; R.SUSP_LIMP_T = 20.0; R.SUSP_LIMP_SPD = 60.0; R.SUSP_PIT_T = 90.0
+R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0
+function R.suspLimp(i, car, spd, dt)
+    if R.SUSP_LIMP <= 0 or parked[i] then return end
+    if car.isInPitlane then R.suspT[i] = 0; return end
+    if maxSusp(car) >= R.SUSP_LIMP and spd > STOP_SPEED and spd < R.SUSP_LIMP_SPD then
+        R.suspT[i] = (R.suspT[i] or 0) + dt
+    elseif spd >= R.SUSP_LIMP_SPD + 20 then
+        R.suspT[i] = 0
+    end
+    local t = R.suspT[i] or 0
+    if not R.suspPit[i] and t > R.SUSP_LIMP_T then
+        R.suspPit[i] = os.clock(); R.suspPitCount = (R.suspPitCount or 0) + 1
+        pcall(physics.setAIPitStopRequest, i, true)
+        pcall(function() ac.log(string.format('Verve: car %d suspension %.2f, crawling %.0f s: to the pits for repairs', i, maxSusp(car), t)) end)
+    elseif R.suspPit[i] and t > R.SUSP_LIMP_T and os.clock() - R.suspPit[i] > R.SUSP_PIT_T then
+        pcall(function() ac.log(string.format('Verve: car %d never made the pits on broken suspension: retired', i)) end)
+        parkInPits(i)
+    end
+end
+
 function R.reset()
+    R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0
     boxT = {}
     ownLaps, ownSpline = {}, {}
     hasMoved, stuckT, recT = {}, {}, {}

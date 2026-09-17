@@ -13,7 +13,10 @@ local Feed      = require('lib.feed')
 local Career    = require('lib.career')       -- recognises AC career events; reads the launcher's difficulty numbers
 local Difficulty = require('lib.difficulty')  -- makes those numbers real (AC ignores them on some installs)
 local Telemetry = require('lib.telemetry')
+local Fault     = require('lib.fault')        -- who caused each contact, and the time penalty it costs (owner's ask 2026-09-17)
 local Strategy  = require('lib.strategy')     -- planned manoeuvres (racecraft drives it; Verve owns the toggle + status)    -- opt-in anonymous race reports         -- structured race feed (opt-in; consumed by Verve Booth / Race Engineer)
+Racecraft.penCap = Fault.penCap            -- penalty throttle caps, read by racecraft's throttle setter (shared table)
+Fault.attach(Recovery.recentDrops, Feed.event)
 local Diag = nil; pcall(function() Diag = require('diag') end)   -- LOCAL dev diagnostics; absent in the shipped build
 -- LOCAL test harness (tools/harness.py writes harness.lua right before launching a run, and it self-expires):
 -- can put the player's car on autopilot, override settings for the run, and label the diagnostics file.
@@ -97,6 +100,7 @@ local function sessionReset(restart)
     pcall(Human.reset)            -- per-track distances
     pcall(Racecraft.reset)
     shiftSet = {}
+    pcall(Fault.reset)
     -- driver profiles are session-only: wipe every race. NOT on a restart: the picks should survive it, and
     -- the AI-level overrides persist in physics across a restart, so the remembered base levels stay valid
     if not restart then pcall(Drivers.reset) end
@@ -139,6 +143,7 @@ function script.update(dt)
             end
             if type(Harness.recovery) == 'table' then for k, v in pairs(Harness.recovery) do Recovery[k] = v end end
             if type(Harness.racecraft) == 'table' then for k, v in pairs(Harness.racecraft) do Racecraft[k] = v end end
+            if type(Harness.fault) == 'table' then for k, v in pairs(Harness.fault) do Fault[k] = v end end
             if Diag and Harness.label then Diag.label = tostring(Harness.label) end
         end
         -- AC loads to a pre-session screen and waits for the Drive button; nothing (not even the AI grid)
@@ -256,7 +261,14 @@ function script.update(dt)
             if car.isInPitlane then return end          -- never touch a car doing a pit stop (player or AI)
             Drivers.applyPace(i, Difficulty.levelFor(i)) -- configured/career difficulty, then the driver profile's pace on top
             -- shift-point study (harness A/B): R.SHIFT_UP > 0 sets the AI's shift thresholds once per car (stops CSP's own dynamic logic)
-            if Racecraft.SHIFT_UP > 0 and not shiftSet[i] then shiftSet[i] = true; pcall(physics.setAIShiftingThresholds, i, Racecraft.SHIFT_UP, Racecraft.SHIFT_DOWN) end
+            if Racecraft.SHIFT_UP > 0 and not shiftSet[i] and (car.rpmLimiter or 0) > 0 then
+                shiftSet[i] = true
+                -- a value <= 1.5 is a fraction of THIS car's limiter (0.90 as a raw number short-shifted four models to half revs, 2026-09-17)
+                local up, down = Racecraft.SHIFT_UP, Racecraft.SHIFT_DOWN
+                if up <= 1.5 then up = up * car.rpmLimiter end
+                if down <= 1.5 then down = down * car.rpmLimiter end
+                pcall(physics.setAIShiftingThresholds, i, up, down)
+            end
             local gOff, cOff = Human.getModifiers(i)
             local gripApplied = nil
             if G.controlGrip then
@@ -313,6 +325,7 @@ function script.update(dt)
     end) end
     Feed.ENABLED = G.raceFeed
     if G.raceFeed then pcall(Feed.update, dt, { rc = Racecraft.last, recState = Recovery.stateOf, recentDrops = Recovery.recentDrops }) end
+    pcall(Fault.update, dt)
     Telemetry.ENABLED = G.shareData == true
     Telemetry.VERSION = Update.LOCAL_VERSION or '0.0.0'
     Telemetry.UNATTENDED = Harness ~= nil and Harness.autopilot == true
@@ -333,8 +346,9 @@ telemetryCtx = function()
         classOf = Classes.keyOf, recState = Recovery.stateOf, levelOf = Difficulty.levelFor,
         meter = Career.meter, isCareer = Career.active, careerEvent = Career.active and (Career.series .. '/' .. Career.event) or nil,
         laps = Career.laps, playerModel = playerModel, cspBuild = cspBuild,
-        retiredByVerve = Recovery.retiredCount, crashRepairs = Recovery.repairedCount, limpRepairs = Recovery.limpCount,
+        retiredByVerve = Recovery.retiredCount, crashRepairs = Recovery.repairedCount, limpRepairs = Recovery.limpCount, suspPits = Recovery.suspPitCount,
         drops = Recovery.dropN, dropsOk = Recovery.dropOK, troubleSpots = Troublespots.hotCount(),
+        faults = Fault.count, penalties = Fault.penCount,
         profilesUsed = pu, archetypesUsed = au,
         appliedJson = string.format('{"meter":%d,"career":%s,"curve":%s,"ramp":%.2f}', Career.meter or 100, tostring(Career.active), tostring(G.careerCurve == true), Career.ramp or 0),
         settingsJson = '{' .. table.concat(settings, ',') .. '}',
@@ -460,14 +474,14 @@ end
 
 function script.windowMain()
     ui.pushFont(ui.Font.Title)
-    ui.text('Verve')
+    ui.textColored('Verve', rgbm(0.98, 0.85, 0.02, 1))   -- brand yellow (#FBDA06 on near-black)
     ui.popFont()
     ui.sameLine()
     ui.textColored('AI that feels human', rgbm(0.6, 0.6, 0.6, 1))
 
     Update.check()
     if Update.latest then
-        ui.textColored('Update available: v' .. Update.latest .. (Update.summary and ('  -  ' .. Update.summary) or ''), rgbm(0.4, 0.8, 1, 1))
+        ui.textColored('Update available: v' .. Update.latest .. (Update.summary and ('  -  ' .. Update.summary) or ''), rgbm(0.98, 0.85, 0.02, 1))
         if Update.downloadUrl then
             if ui.button('Get the update##upd') then pcall(function() os.openURL(Update.downloadUrl) end) end
             ui.sameLine(); ui.textColored(Update.downloadUrl, rgbm(0.5, 0.5, 0.5, 1))

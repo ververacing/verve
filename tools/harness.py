@@ -293,6 +293,7 @@ def write_harness_lua(arm, ttl_s, ncars=0):
         "recovery": arm.get("recovery", {}),
         "racecraft": arm.get("racecraft", {}),
         "troublespots": arm.get("troublespots", {}),   # e.g. {"FRESH": true}: this run neither loads nor saves the learned map
+        "fault": arm.get("fault", {}),                 # lib/fault.lua switches, e.g. {"ENABLED": true, "ENFORCE": false}
     }
     with open(HARNESS_LUA, "w", encoding="utf-8") as f:
         f.write("-- written by tools/harness.py; self-expiring; never shipped\nreturn " + lua_literal(body) + "\n")
@@ -475,7 +476,7 @@ def run_once(args, arm, run_idx):
     m["player_best_lap_s"] = round(best[0], 2) if 0 in best else ""
     if best:
         shutil.copy2(RACE_OUT, os.path.join(RESULTS_DIR, f"race_out_{time.strftime('%Y%m%d_%H%M%S')}_{label}.json"))
-    m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots")}, sort_keys=True)
+    m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots", "fault")}, sort_keys=True)
     csv_path = os.path.join(RESULTS_DIR, "results.csv")
     new = not os.path.exists(csv_path)
     if not new:   # the columns changed (2026-09-13: ai_level + exact lap times): rotate the old file rather than misalign rows
@@ -516,6 +517,7 @@ def main():
     ap.add_argument("--recovery", help="JSON of Recovery module fields to override for the run, e.g. {\"DROP_API\":\"car\"}")
     ap.add_argument("--racecraft", help="JSON of Racecraft module fields to override for the run")
     ap.add_argument("--troublespots", help="JSON of Troublespots module fields, e.g. {\"FRESH\":true} = clean learned map for this run")
+    ap.add_argument("--fault", help="JSON of Fault module fields (penalties), e.g. {\"ENABLED\":true,\"ENFORCE\":false}")
     ap.add_argument("--drivers", choices=["none", "random"], default="none", help="random: assign Verve driver profiles to the whole grid (the Randomize button)")
     ap.add_argument("--profiles", help="fixed profiles: 'all=arch_rookie,last=lewis_hamilton,3=kevin_estre' (slot 0 = the autopilot player car; 'last' = back of the grid)")
     ap.add_argument("--ab", nargs=2, metavar=("A.json", "B.json"), help="two arm files; runs alternate A,B,A,B...")
@@ -532,7 +534,7 @@ def main():
     else:
         arms = [{"label": args.label, "settings": json.loads(args.settings) if args.settings else {}, "drivers": args.drivers, "profiles": args.profiles,
                  "recovery": json.loads(args.recovery) if args.recovery else {}, "racecraft": json.loads(args.racecraft) if args.racecraft else {},
-                 "troublespots": json.loads(args.troublespots) if args.troublespots else {}}]
+                 "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}}]
 
     results = []
     for r in range(args.runs):

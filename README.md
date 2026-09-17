@@ -1,3 +1,5 @@
+<img src="icon.png" width="96" align="left" alt="Verve">
+
 # Verve — AI that feels human
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ververacing)

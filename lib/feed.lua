@@ -310,4 +310,7 @@ function F.finish()
     flush()
 end
 
+-- other modules' events (lib/fault.lua penalties): typed like the built-in ones, same clock
+function F.event(typ, fields) if F.ENABLED then event(now(), typ, fields) end end
+
 return F
