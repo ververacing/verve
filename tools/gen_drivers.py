@@ -4,6 +4,14 @@ import csv, re, sys
 
 CSV = sys.argv[1]
 OUT = sys.argv[2]
+# optional third argument: the public-names CSV (roster, driver, newname, say_it (phonetic)); kept on the desk, not in
+# the repo. Every generated entry whose real name is in it gets name=<newname> and say='<phonetic>'. Stats are untouched.
+NAMES = {}
+if len(sys.argv) > 3:
+    with open(sys.argv[3], newline='', encoding='utf-8-sig') as _f:
+        for _r in csv.DictReader(_f):
+            if (_r.get('driver') or '').strip() and (_r.get('newname') or '').strip():
+                NAMES[_r['driver'].strip()] = ((_r.get('newname') or '').strip(), (_r.get('say_it (phonetic)') or _r.get('say') or '').strip())
 
 ROSTER_BUCKET = {
     'F1-modern':'f1', 'F1-classic':'f1', 'Formula-Indy':'f1', 'Vintage':'vintage',
@@ -350,8 +358,10 @@ cur=None
 for key,name,bucket,p,a,rk,c,rost in entries:
     if rost!=cur:
         lines.append(f'    -- {rost}\n'); cur=rost
-    nm=name.replace("'","\\'")
-    lines.append(f"    {{ key='{key}', name='{nm}', bucket='{bucket}', pace={p:.2f}, aggr={a:.2f}, risk={rk:.2f}, cons={c:.2f} }},\n")
+    pub, say = NAMES.get(name, (name, None))
+    nm=pub.replace("'","\'")
+    sayf = ", say='" + say.replace("'","\'") + "'" if say else ''
+    lines.append(f"    {{ key='{key}', name='{nm}'{sayf}, bucket='{bucket}', pace={p:.2f}, aggr={a:.2f}, risk={rk:.2f}, cons={c:.2f} }},\n")
 lines.append('\n')
 lines.append(ARCHETYPES)
 lines.append(FOOTER)

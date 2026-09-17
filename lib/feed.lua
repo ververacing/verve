@@ -174,15 +174,27 @@ function F.update(dt, stats)
             local dd = c.dmg - p.dmg
             if dd >= INCIDENT_MIN and not c.pit then
                 local contact = {}
+                -- WHO HAD THE CORNER: the closest other car by on-track gap in the second BEFORE the hit (the previous
+                -- state), its nose ahead of mine or not, its lateral offset from me (+ = to my right) and my closing
+                -- speed on it. A first "steward's call" for the broadcast; the 4 Hz traces stay in the diag files.
+                local other, otherGap, otherSd = -1, 1e9, 0
                 for _, o in ipairs(cars) do
                     local po = prev[o.i]
                     if o.i ~= i and po then
-                        local d = math.abs(((o.spline - p.spline + 0.5) % 1) - 0.5) * trackLen
+                        local sd = ((po.spline - p.spline + 0.5) % 1) - 0.5      -- signed: + = they were ahead of me
+                        local d = math.abs(sd) * trackLen
                         if (o.dmg - po.dmg >= INCIDENT_MIN and d < 50) or d < 15 then contact[#contact + 1] = tostring(o.i) end
+                        if d < otherGap and d < 30 and not po.ret then other, otherGap, otherSd = o.i, d, sd end
                     end
                 end
-                event(t, 'incident', string.format('"car":%d,"spline":%.4f,"severity":%d,"contact":[%s],"solo":%s,"speed":%d',
-                    i, p.spline, math.floor(dd), table.concat(contact, ','), tostring(#contact == 0), math.floor(p.spd)))
+                local who = ''
+                if other >= 0 then
+                    local po = prev[other]
+                    who = string.format(',"other":%d,"noseAhead":%s,"dLat":%.2f,"closing":%d',
+                        other, tostring(otherSd > 0), po.lat - p.lat, math.floor(p.spd - po.spd))
+                end
+                event(t, 'incident', string.format('"car":%d,"spline":%.4f,"severity":%d,"contact":[%s],"solo":%s,"speed":%d%s',
+                    i, p.spline, math.floor(dd), table.concat(contact, ','), tostring(#contact == 0), math.floor(p.spd), who))
             end
             if math.abs(c.lat) > 1.3 and math.abs(p.lat) <= 1.3 and not c.pit then
                 event(t, 'off_track', string.format('"car":%d,"spline":%.4f', i, c.spline))

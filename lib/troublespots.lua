@@ -12,6 +12,8 @@
 
 local T = {}
 T.ENABLED = false
+T.FRESH = false      -- harness: this session neither loads nor saves the persisted map (learns within the race only), so an
+                     -- A/B measures the rule under test, not the heat a day of sprints left behind (Spa maxed out 2026-09-16)
 
 -- bins are sized in METRES, not a fixed count, so resolution is ~constant on every track (a long
 -- track gets more bins, a short one fewer -- a "corner" is the same size in metres everywhere).
@@ -91,6 +93,7 @@ local function loadAll()
 end
 
 function T.save(force)
+    if T.FRESH then return end
     if not force and not dirtyStore then return end
     pcall(function()
         for _, bins in pairs(data) do pruneClass(bins) end    -- hard-bound each class before writing
@@ -124,10 +127,10 @@ function T.reset()
     lookaheadFrac = clamp(LOOKAHEAD_M / len, 0.001, 0.05)
     data = {}
     recent = 0
-    pcall(function()
+    if not T.FRESH then pcall(function()
         local td = loadAll()[trackKey]
         if type(td) == 'table' then data = td end
-    end)
+    end) end
     refreshPeaks()
     -- Seed the field's guard from the track's history, DECAYING: a known-nasty track starts the race
     -- cautious (that's what kept the opening-lap pile-ups down -- removing it cost 9 lap-0 incidents in

@@ -168,9 +168,9 @@ local function run(i, p, c, g, book)
     if c.gapA > c.attackGap or c.aheadIdx ~= p.car then finish(i); return nil end   -- they got away / a different car
     if p.name == 'lunge' then
         if age < 1.3 then
-            return { target = p.side * c.off * 1.4, caut = -0.5 * (book.lunge or 1), aggr = 0.2, hold = 1.0, code = CODE.lunge }
+            return { target = p.side * c.off * 1.4, geo = p.side, caut = -0.5 * (book.lunge or 1), aggr = 0.2, hold = 1.0, code = CODE.lunge }
         elseif age < 2.2 then                                -- gather it up: brake a touch more, hold the inside
-            return { target = p.side * c.off * 0.7, caut = 0.3, aggr = 0, code = CODE.lunge }
+            return { target = p.side * c.off * 0.7, geo = p.side, caut = 0.3, aggr = 0, code = CODE.lunge }
         end
         finish(i); return nil
     elseif p.name == 'switchback' then
@@ -178,10 +178,10 @@ local function run(i, p, c, g, book)
             if g.phase == 'exit' or (g.phase == 'straight' and age > 1.0) then p.phase = 'cross'; p.tCross = now
             elseif age > 6.0 then finish(i); return nil end
             -- wide in, no extra risk on entry (the whole point is the exit)
-            return { target = -p.side * c.off * 0.9, caut = 0.05, aggr = 0, hold = 0.8, code = CODE.switchback }
+            return { target = -p.side * c.off * 0.9, geo = -p.side, caut = 0.05, aggr = 0, hold = 0.8, code = CODE.switchback }
         else
             if now - p.tCross < 1.8 then
-                return { target = p.side * c.off * 1.3, caut = -0.45 * (book.switchback or 1), aggr = 0.2, hold = 1.6, code = CODE.switchback }
+                return { target = p.side * c.off * 1.3, geo = p.side, caut = -0.45 * (book.switchback or 1), aggr = 0.2, hold = 1.6, code = CODE.switchback }
             end
             finish(i); return nil
         end
@@ -195,7 +195,7 @@ local function run(i, p, c, g, book)
             return { target = 0, caut = -0.5 * (book.slingshot or 1), aggr = 0.1, code = CODE.slingshot }
         else
             if now - p.tSwing < 2.0 then
-                return { target = p.side * c.off * 1.4, caut = -0.3, aggr = 0.2, hold = 2.0, code = CODE.slingshot }
+                return { target = p.side * c.off * 1.4, geo = p.side, caut = -0.3, aggr = 0.2, hold = 2.0, code = CODE.slingshot }
             end
             finish(i); return nil
         end
@@ -204,7 +204,8 @@ local function run(i, p, c, g, book)
 end
 
 -- c = { dt, gapA, spd, aheadSpd, aheadIdx, prog, dLat, myLat, wide, baseA, prof, classKey, off, passGap, attackGap, isOval }
--- Called by racecraft while a car is in ATTACK. Returns nil (no opinion) or { target, caut, aggr, hold, code }.
+-- Called by racecraft while a car is in ATTACK. Returns nil (no opinion) or { target, caut, aggr, hold, code, geo }: `geo` is the
+-- side the move wants (+1 right); with R.MV_GEO on, racecraft resolves it to a point clear of the target car (target = fallback).
 function S.evaluate(i, c)
     S.last[i] = 0
     local tier = S.tierOf(i)
@@ -262,14 +263,22 @@ function S.evaluate(i, c)
         if insideOpen and closing and (book.lunge or 0) > 0 and tier >= MIN_TIER.lunge and roll < eager * (0.4 + 0.6 * risk) * book.lunge then
             start(i, 'lunge', { car = c.aheadIdx, side = g.inside })
             S.last[i] = CODE.lunge
-            return { target = g.inside * c.off * 1.4, caut = -0.5 * book.lunge, aggr = 0.2, hold = 1.0, code = CODE.lunge }
+            return { target = g.inside * c.off * 1.4, geo = g.inside, caut = -0.5 * book.lunge, aggr = 0.2, hold = 1.0, code = CODE.lunge }
         elseif not insideOpen and (book.switchback or 0) > 0 and tier >= MIN_TIER.switchback and roll < eager * book.switchback then
             start(i, 'switchback', { car = c.aheadIdx, side = g.inside, phase = 'wide' })
             S.last[i] = CODE.switchback
-            return { target = -g.inside * c.off * 0.9, caut = 0.05, aggr = 0, hold = 0.8, code = CODE.switchback }
+            return { target = -g.inside * c.off * 0.9, geo = -g.inside, caut = 0.05, aggr = 0, hold = 0.8, code = CODE.switchback }
         end
     end
     return nil
+end
+
+-- the launcher / quick-race meter is at or above `minMeter` (racecraft's opening-lap road-space gate reuses it, so the
+-- difficulty number stays the one place these unlocks are read from)
+function S.meterOK(minMeter)
+    local ok = false
+    pcall(function() ok = (Career.meter or 100) >= minMeter end)
+    return ok
 end
 
 function S.clear(i)

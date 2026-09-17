@@ -22,6 +22,8 @@ local Harness = nil
 pcall(function()
     local h = require('harness')
     if type(h) == 'table' and type(h.expires) == 'number' and h.expires > os.time() then Harness = h end
+    -- trouble-spot overrides apply at LOAD: the session reset (which loads the learned map) can run before the first update
+    if Harness and type(Harness.troublespots) == 'table' then for k, v in pairs(Harness.troublespots) do Troublespots[k] = v end end
 end)
 local harnessApplied, autopilotArmed, harnessT = false, false, 0
 local harnessStartT, harnessStarted = 0, false   -- "press Drive" on AC's pre-session screen (ac.tryToStart)
@@ -183,7 +185,9 @@ function script.update(dt)
             end
         end
         if Harness.autopilot and not autopilotArmed then
-            if okS and simH and simH.isSessionStarted then
+            -- armed 2 s after the Drive press (the countdown), not after the session starts: armed at the green
+            -- light the player car sat driverless for 2 s and the car behind ran into it (2026-09-16)
+            if okS and simH and (harnessStarted or simH.isSessionStarted) then
                 harnessT = harnessT + dt
                 if harnessT > 2.0 then
                     autopilotArmed = true
@@ -297,7 +301,7 @@ function script.update(dt)
             limpRepairs = Recovery.limpCount, retired = Recovery.retiredCount,
             hotSpots = Troublespots.hotCount(), crashRisk = Troublespots.crashiness(), isOval = Racecraft.isOval,
             peak = Troublespots.peakHeat(), storeLen = Troublespots.storeLen, saveOk = Troublespots.lastSaveOk,
-            per = diagPer, rc = Racecraft.last, recState = Recovery.stateOf,
+            per = diagPer, rc = Racecraft.last, recState = Recovery.stateOf, cv2 = Racecraft.cv2,
             recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, dropsOff = Recovery.dropsOff,
             mvN = Strategy.attempts, mvOK = Strategy.ok, mvT = Strategy.byTypeString(), gateN = Recovery.gateMoves,
             fwdSign = (Recovery.fwdSign and Recovery.fwdSign() or 0), dropFlips = Recovery.dropFlips,

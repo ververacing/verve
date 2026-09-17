@@ -241,13 +241,20 @@ end
 -- Verve's own lap count: AC drops the lap after a teleport about half the time (2026-09-14: 13 of 24 repositions),
 -- leaving the car "a lap down" in AC's eyes for the rest of the race. Count start-line crossings ourselves while
 -- the car is moving forward, and let racecraft trust this instead of car.lapCount.
-local ownLaps, ownSpline = {}, {}
+local ownLaps, ownSpline = {}, {}   -- ownSpline[i] = { sp = last spline, d = forward distance travelled (lap fractions, teleport jumps excluded) }
 local function trackLaps(i, car)
     local sp = car.splinePosition
     if type(sp) ~= 'number' then return end
-    local last = ownSpline[i]
-    if last ~= nil and last > 0.9 and sp < 0.1 and (car.speedKmh or 0) > 20 then ownLaps[i] = (ownLaps[i] or 0) + 1 end
-    ownSpline[i] = sp
+    local o = ownSpline[i]
+    if o == nil then o = { sp = sp, d = 0 }; ownSpline[i] = o end
+    local last = o.sp
+    local step = sp - last; if step < -0.5 then step = step + 1 end
+    if step > 0 and step < 0.05 then o.d = o.d + step end     -- (a reposition's jump is not distance driven)
+    -- a crossing counts only after at least half a lap of real travel: a grid that STRADDLES the timing line puts the
+    -- back rows at 0.99, and their crossing 20 m after the lights read as "lap 1" -- which switched off the row caution,
+    -- the convoy and most of the opening-lap easing for exactly the cars that should brake earliest (Spa, 2026-09-16)
+    if last > 0.9 and sp < 0.1 and (car.speedKmh or 0) > 20 and o.d > 0.5 then ownLaps[i] = (ownLaps[i] or 0) + 1; o.d = 0 end
+    o.sp = sp
     -- never fall below AC's own count (it can only be higher than ours if we missed a crossing)
     local acLaps = car.lapCount or 0
     if (ownLaps[i] or 0) < acLaps then ownLaps[i] = acLaps end
@@ -688,7 +695,10 @@ function R.update(dt)
                 else
                     boxT[i] = 0
                 end
-                if not inBox and spd < STOP_SPEED and not terminalDamage(car) then
+                -- (hasMoved: the grid slots by the pit wall count as "in the pit lane" -- a car waiting for the lights
+                -- is not stuck. Zandvoort 2026-09-16: two healthy cars parked at the pit entry at the end of lap 0
+                -- because this timer had filled up on the grid.)
+                if not inBox and spd < STOP_SPEED and not terminalDamage(car) and hasMoved[i] then
                     pitStuckT[i] = (pitStuckT[i] or 0) + dt
                     pcall(function() physics.preventAIFromRetiring(i) end)
                     if pitStuckT[i] > PIT_STUCK_T then
@@ -714,6 +724,7 @@ function R.update(dt)
                 end
                 return
             end
+            pitStuckT[i] = 0                           -- not in the pit lane: the stuck-in-the-lane clock starts over
             if not hasMoved[i] then return end
 
             -- STOPPED ANYWHERE (a jam, a post-incident wait): AC retires an AI car that hasn't moved for

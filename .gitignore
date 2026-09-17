@@ -14,3 +14,7 @@ diag_race_*.jsonl
 harness.lua
 tools/harness_results/
 __pycache__/
+
+# agent instructions and local docs -- never shipped or committed
+CLAUDE.md
+docs/
