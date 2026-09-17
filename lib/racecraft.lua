@@ -137,9 +137,6 @@ R.cv2 = cv2                                                               -- (re
 -- same line loses throttle in proportion to the gap; the field is released from the lights row by row.
 R.CONVOY2_ON = true 
 R.OL_ROWCAUT = true           -- opening lap: brake earlier the further back you started (harness A/B)
-R.OL_ROWCAUT_AGGR = 0         -- >0: the row caution is scaled by (1 + this - baseA): an aggressive star (0.76) gets less of it, a
-                              -- rookie (0.5) keeps most (0.3: star x0.54, rookie x0.80). A star from last sat 100 s at P15 with
-                              -- caution pinned at the cap on the opening laps (Monza/Spa 2026-09-16). Harness A/B; 0 = off
 R.OL_SPINYELLOW = false       -- opening lap: a sideways / much slower car ahead is a yellow, not just a stopped one (harness A/B)
 R.OL_SIDEYIELD = false        -- opening lap: alongside a car whose nose is ahead, corner coming -> tuck in behind it (harness A/B)
 R.OL_SIDESPACE = false        -- laps 0-1: alongside a car -> move the lateral target away from it, leave a car's width (harness A/B)
@@ -156,22 +153,24 @@ R.BG_ALL = 0                  -- >0: every AI car's brake hint x this all race (
 -- samples under 0.10 off-line, the star's offset 0 while sat in attack for 40 s). With this on, an attacker with a real
 -- run aims at a POINT ON THE ROAD: a car's width (+ margin) clear of the car ahead, on the inside of the next corner if
 -- that fits, else the roomier side -- bounded by the edges and by every other car around the pair. Geometry, so it skips
--- the eagerness multipliers. Off on lap 0 unless RS_LAP0 (every lateral rule so far made F1 opening laps worse).
-R.ROADSPACE = false
-R.RS_LAP0 = false
+-- the eagerness multipliers. DEFAULT since 2026-09-16: star from last Spa 10th -> won both, Monza 4th -> 2nd, star road use
+-- 5 -> 24 %, field 6 -> 17 %, re-passes down, contacts equal; regression suite not worse on any gate; Monza manoeuvre
+-- conversion 1/52 -> 8/60. Off on laps 0-1 for the pack (ungated it started pile-ups: 13/18 x2 vs 7-11); a top-tier
+-- driver is exempt above RS_OL_METER.
+R.ROADSPACE = true
 -- ALONE ON TRACK (owner 2026-09-16: a lone star crawled through the Bus Stop with a car 140 m ahead). Two switches:
 R.ISO_PACE = false            -- bring-it-home is pace-aware: a top-tier driver (tier 2) with a car within CV.ISO_REACH_M ahead does
                               -- not ease off -- that car is a target, not clear track (harness A/B)
 R.LONE_FRAC = 0               -- >0: with nobody within CV.LONE_M either way, the trouble-spot and crash-damping caution apply at
                               -- this fraction -- they exist to stop cars hitting each other (harness A/B; 0 = off)
--- MANOEUVRES ON THE ROAD-SPACE GEOMETRY (harness A/B: R.MV_GEO): a lunge / switchback / slingshot asks for a SIDE and the
--- target is resolved here to a point a car's width clear of the target car on that side -- only if it fits -- skipping
--- the eagerness multipliers. Before: 1.4x the same small base offset the reactive pass used, then damped: a quarter-lane
--- 'dive' (Monza 12 laps 2026-09-16: 43 lunges -> 1 pass, 9 switchbacks -> 0).
-R.MV_GEO = false
-R.RS_STAR_CAP = 0             -- >0: laps 0-1, a top-tier driver who has committed to a gap (road space fired) has the stacked
-                              -- caution capped here instead of CAUT_MAX (0.80): he pulled into the space and then braked like a
-                              -- rookie, alongside at 14 m and back again (Spa 2026-09-16). Harness A/B; 0 = off
+-- (tried and dropped 2026-09-16: manoeuvres resolved on this geometry -- conversion unchanged at 13 %, fewer overtakes; a
+-- lower caution cap for a committed star on laps 0-1 -- no gain. Both A/B'd, both removed.)
+-- STAR ON THE OPENING LAP (harness A/B, 2026-09-16 night): room (the exemption) and a lower caution cap did not move a star
+-- from last (16-17th at the end of lap 1 either way); the traces show him alongside and then losing the corner. What still
+-- treats him like a rookie on lap 0: the convoy throttle limit and the opening-lap aggression trim.
+R.OL_STAR_CONVOY = false      -- a top-tier driver is exempt from the convoy's gap-based throttle limit (the staggered release and the
+                              -- reaction time stay: he launches with his row, then may close on the car ahead)
+R.OL_STAR_AGGR = 0            -- >0: a top-tier driver keeps this fraction of the opening-lap aggression trim (0.5 = half of it)
 R.RS_OL_METER = 95            -- laps 0-1: road space is allowed for a TOP-TIER driver (profile pace >= 0.75, the manoeuvre layer's tier 2)
                               -- when the difficulty meter is at or above this (0 = never). The pack stays gated; a star may go
                               -- round from the lights (owner 2026-09-16: 'Max behind a slow car with 75% of the track open')
@@ -488,7 +487,8 @@ function R.evaluate(i, dt)
                 if tl0 < (cv2.react[i] or 0) then thr = math.min(thr, CV.REACT_THR)   -- reaction time: not on the gas yet
                 elseif tl0 < (cv2.react[i] or 0) + CV.ROW_T * (cv2.back[i] / CV.ROW_M) then thr = math.min(thr, CV.THR) end   -- staggered release
             end
-            if olS < CV.END and aheadIdx >= 0 and gapA * trackLen < CV.GAP_M and spd > aheadSpd + CV.CLOSING then
+            if olS < CV.END and aheadIdx >= 0 and gapA * trackLen < CV.GAP_M and spd > aheadSpd + CV.CLOSING
+               and not (R.OL_STAR_CONVOY and Strategy.tierOf(i) >= 2) then
                 local aCar = ac.getCar(aheadIdx)
                 if aCar and math.abs(latOf(aCar.position) - latOf(me.position)) < CV.LAT then
                     local gm = gapA * trackLen
@@ -654,12 +654,10 @@ function R.evaluate(i, dt)
             -- Not while the opening-lap easing is in force (lap 0, and lap 1 until OPENLAP_TAIL): in the pack it started
             -- pile-ups (Spa sprint 2026-09-16: 13/18 in contact x2 vs 7-11 baseline, both chains begun by a car aiming
             -- for a gap on lap 1). Once the field has strung out it is neutral-to-better on contact.
-            local rsSide = 0                                              -- a manoeuvre's requested side (R.MV_GEO); 0 = road space picks
-            if R.MV_GEO and ov and ov.geo and ov.geo ~= 0 and aheadIdx >= 0 then rsSide = ov.geo end
-            if rsSide ~= 0 or (R.ROADSPACE and ov == nil and passActive and aheadIdx >= 0
-               and (R.RS_LAP0 or myLap >= 2 or (myLap == 1 and mySpline >= OPENLAP_TAIL)
+            if R.ROADSPACE and ov == nil and passActive and aheadIdx >= 0
+               and (myLap >= 2 or (myLap == 1 and mySpline >= OPENLAP_TAIL)
                     or (R.RS_OL_METER > 0 and Strategy.tierOf(i) >= 2 and Strategy.meterOK(R.RS_OL_METER)))
-               and runAdv > OUTSIDE_MIN_ADV * (1.4 - baseA) * CV.RS_ADV) then
+               and runAdv > OUTSIDE_MIN_ADV * (1.4 - baseA) * CV.RS_ADV then
                 local half = 6.0                                          -- half track width here (m): track units per metre
                 pcall(function() local sd = ac.getTrackAISplineSides(mySpline); if sd then half = math.max(3.0, (sd.x + sd.y) * 0.5) end end)
                 local carW = CV.RS_CARW_M
@@ -682,9 +680,7 @@ function R.evaluate(i, dt)
                     end
                 end
                 local side = 0
-                if rsSide ~= 0 then
-                    if room[rsSide] >= need then side = rsSide end                                    -- the manoeuvre's side, only if a car fits
-                elseif isCorner and inside ~= 0 and room[inside] >= need then side = inside          -- the inside fits: take it
+                if isCorner and inside ~= 0 and room[inside] >= need then side = inside              -- the inside fits: take it
                 elseif room[1] >= need or room[-1] >= need then side = (room[1] >= room[-1]) and 1 or -1   -- else the roomier side
                 end
                 if side ~= 0 then
@@ -749,10 +745,12 @@ function R.evaluate(i, dt)
             if R.OL_CAUT_PROX then prox = clamp((CV.PROX_FAR - gapA * trackLen) / (CV.PROX_FAR - CV.PROX_NEAR), 0, 1) end
             caut = caut + OPENLAP_CAUT * openingLap * (1 + crash) * prox   -- crashy tracks get extra start caution (kills the opening-lap pile-ups)
             if R.OL_ROWCAUT and myLap == 0 and cv2.back[i] then    -- row ten brakes on the lights of the car ahead: earlier the further back
-                local rowScale = (R.OL_ROWCAUT_AGGR > 0) and clamp(1 + R.OL_ROWCAUT_AGGR - baseA, 0.3, 1.0) or 1.0
-                caut = caut + CV.ROWCAUT * clamp(cv2.back[i] / CV.ROWCAUT_M, 0, 1) * openingLap * prox * rowScale
+                -- (scaling this by aggression was tried 2026-09-16: the star went off the road at 127 km/h; it protects him)
+                caut = caut + CV.ROWCAUT * clamp(cv2.back[i] / CV.ROWCAUT_M, 0, 1) * openingLap * prox
             end
-            aggr = aggr * (1 - OPENLAP_AGGR * openingLap)
+            local olAggr = OPENLAP_AGGR
+            if R.OL_STAR_AGGR > 0 and Strategy.tierOf(i) >= 2 then olAggr = OPENLAP_AGGR * R.OL_STAR_AGGR end
+            aggr = aggr * (1 - olAggr * openingLap)
             if R.OL_AGGR_FORMULA > 0 and (classKey == 'formula' or classKey == 'formula_jr') then
                 aggr = aggr * (1 - R.OL_AGGR_FORMULA * openingLap)   -- open-wheelers: no bodywork to lean on
             end
@@ -977,9 +975,7 @@ function R.evaluate(i, dt)
         -- 6-13 km/h under their own pace behind yielding backmarkers (Zandvoort 72-lap GP, 2026-09-14).
         if lappedAhead then caut = caut - FREEPASS_CAUT; if state == 0 then state = 1 end end
         -- cap the stacked back-off (see CAUT_MAX); the attack/defend NEGATIVE caution is left alone
-        local cmax = CAUT_MAX
-        if R.RS_STAR_CAP > 0 and rsPass and myLap <= 1 and Strategy.tierOf(i) >= 2 then cmax = R.RS_STAR_CAP end
-        if caut > cmax then caut = cmax end
+        if caut > CAUT_MAX then caut = CAUT_MAX end
 
         -- slew the offset (anti-dart)
         local cur = curOffset[i] or 0
