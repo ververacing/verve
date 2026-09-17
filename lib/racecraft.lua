@@ -159,10 +159,11 @@ R.BG_ALL = 0                  -- >0: every AI car's brake hint x this all race (
 -- driver is exempt above RS_OL_METER.
 R.ROADSPACE = true
 -- ALONE ON TRACK (owner 2026-09-16: a lone star crawled through the Bus Stop with a car 140 m ahead). Two switches:
-R.ISO_PACE = false            -- bring-it-home is pace-aware: a top-tier driver (tier 2) with a car within CV.ISO_REACH_M ahead does
-                              -- not ease off -- that car is a target, not clear track (harness A/B)
-R.LONE_FRAC = 0               -- >0: with nobody within CV.LONE_M either way, the trouble-spot and crash-damping caution apply at
-                              -- this fraction -- they exist to stop cars hitting each other (harness A/B; 0 = off)
+R.ISO_PACE = true             -- bring-it-home is pace-aware: a top-tier driver (tier 2) with a car within CV.ISO_REACH_M ahead does
+                              -- not ease off -- that car is a target, not clear track. DEFAULT 2026-09-17 (owner): star from last
+                              -- 10/8/6 vs lap-down/8/lap-down, passes 11.3 vs 6.3, field incidents 7 vs 15 (3 runs each, clean map)
+R.LONE_FRAC = 0.4             -- with nobody within CV.LONE_M either way, the trouble-spot and crash-damping caution apply at this
+                              -- fraction -- they exist to stop cars hitting each other. DEFAULT 2026-09-17 with ISO_PACE (0 = off)
 -- (tried and dropped 2026-09-16: manoeuvres resolved on this geometry -- conversion unchanged at 13 %, fewer overtakes; a
 -- lower caution cap for a committed star on laps 0-1 -- no gain. Both A/B'd, both removed.)
 -- STAR ON THE OPENING LAP (harness A/B, 2026-09-16 night): room (the exemption) and a lower caution cap did not move a star
