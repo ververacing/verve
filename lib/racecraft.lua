@@ -144,7 +144,7 @@ R.OL_SIDESPACE = false        -- laps 0-1: alongside a car -> move the lateral t
 R.GRID_FADE_X = 1.0           -- multiplier on the grid-lane hold's fade distance (225 m x this; harness A/B)
 R.OL_AGGR_FORMULA = 0         -- laps 0-1: extra aggression trim (0..1) for formula / formula_jr (harness A/B)
 R.OL_REACT_MAX = 0            -- lights: per-driver reaction time up to this many s (0 = off; harness A/B)
-R.OL_CAUT_PROX = false        -- opening caution scaled by the gap ahead (leaders brake normally) (harness A/B)
+R.OL_CAUT_PROX = true         -- opening caution scaled by the gap ahead (leaders brake normally). DEFAULT 2026-09-18 (owner): F1 8.7 -> 5.8 in contact over 5 runs; with lanes Spa 7.0 vs 9.7
 R.OL_CORNER_PRIO = false      -- laps 0-1: alongside a car whose nose is ahead, corner coming -> take the outside line (harness A/B)
 R.BG_T = 0                    -- >0: the guard's reach is closing speed x this many seconds (min CV.BG_M) and a much slower car ahead counts as braking (A/B)
 R.OL_BRAKEGUARD = true        -- opening lap: brake earlier when the car ahead on my line is already braking inside CV.BG_M (harness A/B)
@@ -180,7 +180,7 @@ R.SHIFT_DOWN = 0.5            -- ...and the shift-down threshold that goes with 
 -- lane of turn 1 and even rows the OUTSIDE, then the normal grid funnel takes over. Nobody moves sideways in the pack --
 -- each car only holds a lane (every lateral rule that MOVED cars in the pack made F1 opening laps worse). Real F1 starts
 -- look like this for the first 300 m. Owner's pick 2026-09-17.
-R.OL_LANES = false
+R.OL_LANES = true             -- DEFAULT 2026-09-18 (owner): regression suite passed (Spa 8.7 vs 9.7, Barcelona 8.3 vs 8.7, Monza 12 laps not worse); stars at meter >= RS_OL_METER exempt
 R.CONCEDE = 0                 -- >0: a defender concedes the line to a tier-2 driver behind whose pace rating beats his by this much (A/B)
 R.ACX_LAP = 0                 -- ATTACK_CAUT_X applies from this lap on (0 = always; 2 = keep the opening laps as they are) (A/B)
 R.ATTACK_CAUT_X = 1.0         -- multiplier on the attack's negative caution (A/B; applied caution while attacking was 1.11 vs AC's 1.0)
