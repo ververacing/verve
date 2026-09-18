@@ -378,6 +378,49 @@ def best_laps_from_race_out(t_launch):
     return best
 
 
+CSP_USER_CFG = os.path.join(CFG, "extension")
+
+
+def apply_csp_overrides(spec):
+    """--csp JSON {"module": {"SECTION": {"KEY": value}}} -> Documents/Assetto Corsa/cfg/extension/<module>.ini (CSP's per-user
+    overrides, read at game start). Any existing user file is backed up and restored after the run, so a test setting never
+    outlives its race. Returns the list of (path, backup-or-None) to restore."""
+    restore = []
+    if not spec:
+        return restore
+    os.makedirs(CSP_USER_CFG, exist_ok=True)
+    for module, sections in spec.items():
+        path = os.path.join(CSP_USER_CFG, f"{module}.ini")
+        bak = path + ".harness-backup"
+        if os.path.exists(path):
+            shutil.copy2(path, bak)
+            restore.append((path, bak))
+        else:
+            restore.append((path, None))
+        ini = configparser.RawConfigParser(); ini.optionxform = str
+        if os.path.exists(path):
+            ini.read(path, encoding="utf-8")
+        for sec, kv in sections.items():
+            if not ini.has_section(sec):
+                ini.add_section(sec)
+            for k, v in kv.items():
+                ini.set(sec, k, str(int(v)) if isinstance(v, bool) else str(v))
+        with open(path, "w", encoding="utf-8") as f:
+            ini.write(f, space_around_delimiters=False)
+    return restore
+
+
+def restore_csp_overrides(restore):
+    for path, bak in restore:
+        try:
+            if bak and os.path.exists(bak):
+                os.replace(bak, path)
+            elif os.path.exists(path):
+                os.remove(path)
+        except OSError as e:
+            print("  (csp override not restored:", e, ")")
+
+
 def run_once(args, arm, run_idx):
     if acs_running():
         raise SystemExit("acs.exe is already running -- close the game first (a run must own it)")
@@ -393,6 +436,7 @@ def run_once(args, arm, run_idx):
     label = arm.get("label", "A")
     print(f"[{label} #{run_idx}] {ini.get('RACE', 'TRACK')} x{args.laps} laps, {ncars} cars, budget {budget:.0f}s")
 
+    csp_restore = apply_csp_overrides(arm.get("csp") or {})
     t_launch = time.time()
     proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
     # AC occasionally dies at load (a crash box, or an exit within a minute); one relaunch after a pause fixes it
@@ -445,6 +489,7 @@ def run_once(args, arm, run_idx):
                     time.sleep(5)
                 break
     finally:
+        restore_csp_overrides(csp_restore)
         if ours:
             subprocess.run(["taskkill", "/IM", "acs.exe", "/F"], capture_output=True)
         if os.path.exists(HARNESS_LUA):
@@ -492,7 +537,7 @@ def run_once(args, arm, run_idx):
     m["player_best_lap_s"] = round(best[0], 2) if 0 in best else ""
     if best:
         shutil.copy2(RACE_OUT, os.path.join(RESULTS_DIR, f"race_out_{time.strftime('%Y%m%d_%H%M%S')}_{label}.json"))
-    m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots", "fault")}, sort_keys=True)
+    m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots", "fault", "csp")}, sort_keys=True)
     m["weather"] = args.weather or ""
     csv_path = os.path.join(RESULTS_DIR, "results.csv")
     new = not os.path.exists(csv_path)
@@ -535,6 +580,7 @@ def main():
     ap.add_argument("--recovery", help="JSON of Recovery module fields to override for the run, e.g. {\"DROP_API\":\"car\"}")
     ap.add_argument("--racecraft", help="JSON of Racecraft module fields to override for the run")
     ap.add_argument("--troublespots", help="JSON of Troublespots module fields, e.g. {\"FRESH\":true} = clean learned map for this run")
+    ap.add_argument("--csp", help="JSON of CSP per-user config overrides for this run only, e.g. {\"new_behaviour\":{\"AI_RACE_RUBBERBANDING\":{\"ENABLED\":1}}}")
     ap.add_argument("--fault", help="JSON of Fault module fields (penalties), e.g. {\"ENABLED\":true,\"ENFORCE\":false}")
     ap.add_argument("--drivers", choices=["none", "random"], default="none", help="random: assign Verve driver profiles to the whole grid (the Randomize button)")
     ap.add_argument("--profiles", help="fixed profiles: 'all=arch_rookie,last=lewis_hamilton,3=kevin_estre' (slot 0 = the autopilot player car; 'last' = back of the grid)")
@@ -552,7 +598,7 @@ def main():
     else:
         arms = [{"label": args.label, "settings": json.loads(args.settings) if args.settings else {}, "drivers": args.drivers, "profiles": args.profiles,
                  "recovery": json.loads(args.recovery) if args.recovery else {}, "racecraft": json.loads(args.racecraft) if args.racecraft else {},
-                 "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}}]
+                 "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}}]
 
     results = []
     for r in range(args.runs):
