@@ -182,6 +182,7 @@ R.SHIFT_DOWN = 0.5            -- ...and the shift-down threshold that goes with 
 -- look like this for the first 300 m. Owner's pick 2026-09-17.
 R.OL_LANES = false
 R.CONCEDE = 0                 -- >0: a defender concedes the line to a tier-2 driver behind whose pace rating beats his by this much (A/B)
+R.ACX_LAP = 0                 -- ATTACK_CAUT_X applies from this lap on (0 = always; 2 = keep the opening laps as they are) (A/B)
 R.ATTACK_CAUT_X = 1.0         -- multiplier on the attack's negative caution (A/B; applied caution while attacking was 1.11 vs AC's 1.0)
 R.PC_TS = 1.0                 -- trouble-spot + crash caution multiplier for a committed passer (PASS_COMMIT; A/B)
 R.PASS_ABORT = 0              -- >0: not this much alongside the car I'm passing by the braking zone -> tuck back in behind it (A/B)
@@ -630,7 +631,7 @@ function R.evaluate(i, dt)
 
         if state == 1 then
             aggr = math.min(1, baseA + ATTACK_AGGR_ADD)
-            caut = CAUTION_ATTACK * R.ATTACK_CAUT_X * clamp(1 - gapA / attackGap, 0, 1) * (t.follow or 1.0)   -- aero cars keep more distance
+            caut = CAUTION_ATTACK * ((myLap >= R.ACX_LAP) and R.ATTACK_CAUT_X or 1.0) * clamp(1 - gapA / attackGap, 0, 1) * (t.follow or 1.0)   -- aero cars keep more distance
             -- Start MOVING for the pass earlier when there's a genuine speed run on the car ahead -- not
             -- only when almost touching. Fixes a fast car sitting in the slipstream too long before it
             -- commits to the open space beside a slower car (most visible off the start, but present
