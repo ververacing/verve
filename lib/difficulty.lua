@@ -72,6 +72,8 @@ function D.levelToPct(level)
     return pts[#pts][2]
 end
 
+local DELIB_SPREAD = 10   -- per-car levels further apart than this were set by hand in the grid: honoured as written
+D.sliderOverride = nil    -- one-line notice for the UI when the slider overrode the grid's per-car levels
 local cache = {}          -- [i] = level
 local cachedFor = nil
 
@@ -93,7 +95,19 @@ local function compute(i)
         local rel = (mean > 0 and iniLevel > 0) and (iniLevel / mean) or 1.0
         return math.max(LEVEL_MIN, math.min(1.2, base * rel))
     end
-    -- outside career the launcher's number is taken as AC's own level scale, clamped out of the cliff
+    -- outside career: THE SLIDER IS THE TRUTH (owner 2026-09-18). Content Manager writes a per-car AI level for every
+    -- opponent from an older slider value or a grid preset (Sochi: slider 80, per-car 97-104, so the field ran at 100).
+    -- The field runs at the slider; the per-car numbers only keep their relative spread around it. The one exception is
+    -- a grid whose per-car levels are DELIBERATELY spread (more than DELIB_SPREAD apart): that is someone hand-setting
+    -- opponents in the grid, and it is honoured as written.
+    local lo, hi, sum, cnt = 1e9, -1e9, 0, 0
+    for k, v in pairs(Career.carLevels) do if k > 0 and v and v > 0 then sum = sum + v; cnt = cnt + 1; if v < lo then lo = v end; if v > hi then hi = v end end end
+    if cnt > 0 and (hi - lo) <= DELIB_SPREAD and math.abs(sum / cnt - (Career.meter or 100)) > 0.5 then
+        local rel = (iniLevel > 0) and (iniLevel / (sum / cnt)) or 1.0
+        D.sliderOverride = string.format('grid levels %d-%d, slider %d: field at the slider', lo, hi, Career.meter or 100)
+        return math.max(LEVEL_MIN, math.min(1.2, (Career.meter or 100) / 100.0 * rel))
+    end
+    D.sliderOverride = nil
     return math.max(LEVEL_MIN, math.min(1.2, iniLevel / 100.0))
 end
 
@@ -109,7 +123,7 @@ function D.levelFor(i)
 end
 
 function D.describe()
-    if not Career.active then return string.format('Field at the configured level (%d)', Career.meter or 100) end
+    if not Career.active then return D.sliderOverride or string.format('Field at the configured level (%d)', Career.meter or 100) end
     if not D.CAREER_CURVE then return string.format('Career, flat: %d', Career.meter or 100) end
     local s, e = bandFor(Career.meter)
     local pct = s + (e - s) * (Career.ramp or 0)
