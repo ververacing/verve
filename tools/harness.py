@@ -257,6 +257,7 @@ def build_race_ini(args, base_path):
         if not ini.has_section("LIGHTING"):
             ini.add_section("LIGHTING")
         ini.set("LIGHTING", "__CM_WEATHER_TYPE", str(wt))
+        args.weather_type = wt
         ini.set("LIGHTING", "__CM_WEATHER_CONTROLLER", "pureCtrl")
     if args.ambient is not None:
         ini.set("TEMPERATURE", "AMBIENT", str(args.ambient))
@@ -410,6 +411,40 @@ def apply_csp_overrides(spec):
     return restore
 
 
+PURE_SETTINGS = os.path.join(AC_DIR, "extension", "weather-controllers", "pureCtrl", "settings.ini")
+RAINY = {3, 4, 5, 6, 7, 8, 0, 1, 2, 9, 10, 11, 29}   # CSP types that should start on a wet track
+
+
+def apply_pure_for_weather(wt):
+    """Pure runs its last-used plan by default (Verve smoke race 2026-09-18: 'clear' came out as a wet Spa on rain tyres
+    because a 'verve_sunset_rain' plan was last used). For a --weather run: no plan autostart, no last-used, start wetness
+    and puddles 'none' for dry types and 'auto' for rain types, so CM's weather type is what Pure renders. Restored after."""
+    if wt is None or not os.path.exists(PURE_SETTINGS):
+        return None
+    bak = PURE_SETTINGS + ".harness-backup"
+    shutil.copy2(PURE_SETTINGS, bak)
+    lines = open(PURE_SETTINGS, encoding="utf-8").read().splitlines(True)
+    want = {"AUTOSTART": "0", "LAST_USED": "0", "LIVE": "0",
+            "START_WETNESS": "1" if wt in RAINY else "2", "START_PUDDLES": "1" if wt in RAINY else "2"}
+    out = []
+    for ln in lines:
+        key = ln.split("=", 1)[0].strip() if "=" in ln else None
+        if key in want:
+            rest = ln.split(";", 1)[1] if ";" in ln else chr(10)
+            ln = f"{key}={want[key]} ;{rest}" if ";" in ln else f"{key}={want[key]}" + chr(10)
+        out.append(ln)
+    open(PURE_SETTINGS, "w", encoding="utf-8").write("".join(out))
+    return bak
+
+
+def restore_pure(bak):
+    if bak and os.path.exists(bak):
+        try:
+            os.replace(bak, PURE_SETTINGS)
+        except OSError as e:
+            print("  (pure settings not restored:", e, ")")
+
+
 def restore_csp_overrides(restore):
     for path, bak in restore:
         try:
@@ -437,6 +472,7 @@ def run_once(args, arm, run_idx):
     print(f"[{label} #{run_idx}] {ini.get('RACE', 'TRACK')} x{args.laps} laps, {ncars} cars, budget {budget:.0f}s")
 
     csp_restore = apply_csp_overrides(arm.get("csp") or {})
+    pure_bak = apply_pure_for_weather(getattr(args, "weather_type", None))
     t_launch = time.time()
     proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
     # AC occasionally dies at load (a crash box, or an exit within a minute); one relaunch after a pause fixes it
@@ -489,6 +525,7 @@ def run_once(args, arm, run_idx):
                     time.sleep(5)
                 break
     finally:
+        restore_pure(pure_bak)
         restore_csp_overrides(csp_restore)
         if ours:
             subprocess.run(["taskkill", "/IM", "acs.exe", "/F"], capture_output=True)
