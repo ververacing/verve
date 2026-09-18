@@ -43,6 +43,8 @@ RACE_OUT = os.path.join(DOCS, "out", "race_out.json")
 VERVE = os.path.join(AC_DIR, "apps", "lua", "Verve")
 HARNESS_LUA = os.path.join(VERVE, "harness.lua")
 RESULTS_DIR = os.path.join(VERVE, "tools", "harness_results")
+# kept replays live on D: when it exists (C: was down to 20 GB with 33 GB of replays, 2026-09-18); the old folder is the fallback
+REPLAY_DIR = "D:/Verve/harness_replays" if os.path.isdir("D:/") else os.path.join(RESULTS_DIR, "replays")
 
 sys.path.insert(0, os.path.join(VERVE, "tools"))
 from race_metrics import metrics  # noqa: E402
@@ -441,7 +443,7 @@ def run_once(args, arm, run_idx):
         cands = [os.path.join(rdir, f) for f in os.listdir(rdir) if f.endswith(".acreplay") and os.path.getmtime(os.path.join(rdir, f)) >= t_launch]
         if cands:
             newest = max(cands, key=os.path.getmtime)
-            keep = os.path.join(RESULTS_DIR, "replays")
+            keep = REPLAY_DIR
             os.makedirs(keep, exist_ok=True)
             dst = os.path.join(keep, f"{time.strftime('%Y%m%d_%H%M')}_{label}.acreplay")
             shutil.copy2(newest, dst)
