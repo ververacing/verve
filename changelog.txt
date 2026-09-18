@@ -1,5 +1,24 @@
 Verve - changelog
 
+0.14.0
+- Opening laps: every car holds its grid side into turn 1 until just past the apex (turn-1 lanes), and the opening
+  caution scales with the gap to the car ahead, so the front rows brake normally and the pack behind eases in
+  proportion. F1 opening-lap contact roughly a third lower over two days of sprints; GT3 the same or better.
+- Road space: a faster car measures the free room beside the car ahead and aims for the gap instead of orbiting
+  its gearbox. Alone on track: a car with a catchable rival ahead keeps its pace instead of easing off.
+- Penalties (new, off by default until proven): every contact is judged live - rear-end, squeeze, unsafe rejoin,
+  hit a stopped car, pile-up, or racing incident - and a culprit's second offence costs 5 seconds served in the
+  race (AI: a short throttle cut; player: AC's own slow-down penalty). Verdicts go to the CSP log and the race feed.
+- Difficulty: the launcher's slider is the truth in every mode. Content Manager's per-car grid levels only keep
+  their spread around it (a hand-set grid, spread wider than 10 points, is honoured as written).
+- Damage: a car with a broken corner limps to the pits for repairs instead of crawling on the racing line for the
+  rest of the race, and retires if it never gets there (off by default this release).
+- Driver roster: 386 public driver names with pronunciations; no real names anywhere.
+- Look: new black-and-yellow icon and window header.
+- Tools: human lap-time baselines (RSR hotlap boards) with an AI-vs-human check, a held-up metric, opening-lap zone
+  tallies, per-model shift probes, a one-click penalty test, replays kept on D: when present.
+- Includes everything listed under 0.13.0 below, which was never released on its own.
+
 0.13.0
 - Difficulty means something. Verve now applies the AI level the launcher configured for each car itself
   (AC ignored it on the installs we measured: 60 and 100 gave identical lap times), using a curve measured on a
