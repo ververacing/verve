@@ -752,7 +752,9 @@ function R.evaluate(i, dt)
             if overlap < R.PASS_ABORT and overlap > -0.5 and math.abs(aLat - myLat) > 0.25 then
                 local isC = cornerAhead((mySpline + (spd / 3.6) * 1.2 / trackLen) % 1)
                 if isC then
-                    target = clamp(aLat, -0.85, 0.85); caut = caut + 0.5; rsPass = false; Strategy.clear(i)
+                    caut = caut + 0.5; rsPass = false; Strategy.clear(i)                 -- lift first...
+                    if overlap <= 0 then target = clamp(aLat, -0.85, 0.85)               -- ...and only tuck in once fully behind
+                    else target = curOffset[i] or 0 end                                   -- still beside them: hold my line
                 end
             end
         end
