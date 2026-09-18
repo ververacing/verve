@@ -184,6 +184,7 @@ R.OL_LANES = false
 R.CONCEDE = 0                 -- >0: a defender concedes the line to a tier-2 driver behind whose pace rating beats his by this much (A/B)
 R.ATTACK_CAUT_X = 1.0         -- multiplier on the attack's negative caution (A/B; applied caution while attacking was 1.11 vs AC's 1.0)
 R.PC_TS = 1.0                 -- trouble-spot + crash caution multiplier for a committed passer (PASS_COMMIT; A/B)
+R.PASS_ABORT = 0              -- >0: not this much alongside the car I'm passing by the braking zone -> tuck back in behind it (A/B)
 R.PASS_COMMIT = 0             -- >0: a driver this much quicker (pace rating) than the car ahead commits to the pass from ATTACK_GAP (A/B)
 R.RS_OL_REAREND = 0.35        -- rear-end guard trim for a road-space pass on laps 0-1 (CV.RS_REAREND from lap 2); 1.0 = no trim (A/B)
 R.RS_OL_CROWD = 99            -- the star exemption below applies only with at most this many cars close by (A/B)
@@ -534,7 +535,7 @@ function R.evaluate(i, dt)
                 if R.BG_T > 0 then reach = math.max(reach, (spd - aheadSpd) / 3.6 * R.BG_T) end
                 if gm < reach then
                     local aCar = ac.getCar(aheadIdx)
-                    if aCar and ((aCar.brake or 0) > CV.BG_BRAKE or (R.BG_T > 0 and spd - aheadSpd > CV.BG_CLOSE))
+                    if aCar and ((aCar.brake or 0) > CV.BG_BRAKE or (R.BG_T > 0 and spd > 120 and spd - aheadSpd > CV.BG_CLOSE))
                        and math.abs(latOf(aCar.position) - latOf(me.position)) < CV.LAT then
                         -- LOWER hint = earlier braking (x1.5 field-wide: 18/18 lap-1 contact, 101 repairs, 2026-09-16).
                         -- The cut scales with how fast I'm closing on a braking car and how close it already is.
@@ -742,6 +743,19 @@ function R.evaluate(i, dt)
             end
         end
 
+        -- COMMIT OR ABORT (R.PASS_ABORT): a corner within ~1.2 s and I'm offline beside the car ahead but not alongside enough
+        -- -> the corner is theirs: back onto their line behind them, with a lift, and try again after the corner
+        if R.PASS_ABORT > 0 and state == 1 and aheadIdx >= 0 and math.abs(target) > 0.25 and spd > 60 then
+            local sd = gapA * trackLen                                  -- their nose ahead of mine, metres
+            local overlap = 1 - sd / 4.6                                 -- 1 = level, 0 = a full car length back
+            local aLat = latOf(ac.getCar(aheadIdx).position)
+            if overlap < R.PASS_ABORT and overlap > -0.5 and math.abs(aLat - myLat) > 0.25 then
+                local isC = cornerAhead((mySpline + (spd / 3.6) * 1.2 / trackLen) % 1)
+                if isC then
+                    target = clamp(aLat, -0.85, 0.85); caut = caut + 0.5; rsPass = false; Strategy.clear(i)
+                end
+            end
+        end
         if state ~= 1 then Strategy.clear(i) end
         local eff = R.INTENSITY
 

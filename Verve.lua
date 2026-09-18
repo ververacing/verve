@@ -321,6 +321,7 @@ function script.update(dt)
             recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, dropsOff = Recovery.dropsOff,
             mvN = Strategy.attempts, mvOK = Strategy.ok, mvT = Strategy.byTypeString(), gateN = Recovery.gateMoves,
             fwdSign = (Recovery.fwdSign and Recovery.fwdSign() or 0), dropFlips = Recovery.dropFlips,
+            suspPits = Recovery.suspPitCount, faults = Fault.count, penalties = Fault.penCount,
         })
     end) end
     Feed.ENABLED = G.raceFeed

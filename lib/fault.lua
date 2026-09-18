@@ -143,13 +143,20 @@ local function judge(inc, now)
             return 'hit_stopped', c.car, 0.6, string.format('car %d at %d km/h into car %d at %d km/h', c.car, math.floor(x[5]), x[2], math.floor(x[6]))
         end
     end
-    -- squeeze: alongside, and one car's OWN lateral moved toward the other by 0.15+ over the last second
+    -- unsafe rejoin: one of the cars was OFF the road a second ago (own lateral beyond 1.1) and is now in contact on it
+    for _, c in ipairs(inc) do
+        local r = c.rows
+        if #r >= 5 and math.abs(r[#r - 4][13]) > 1.1 and math.abs(r[#r][13]) <= 1.1 then
+            return 'unsafe_rejoin', c.car, 0.8, string.format('car %d rejoined from %.2f off the road into traffic', c.car, r[#r - 4][13])
+        end
+    end
+    -- squeeze: alongside, and one car's OWN lateral moved toward the other by 0.15+ over the last second (both on the road)
     for _, c in ipairs(inc) do
         local r = c.rows
         if #r >= 5 then
             local last, prev = r[#r], r[#r - 4]
             local other = last[9]
-            if cars[other] and math.abs(last[11]) < 5 and last[10] < 3 and prev[9] == other then
+            if cars[other] and math.abs(last[11]) < 5 and last[10] < 3 and prev[9] == other and math.abs(prev[13]) <= 1.1 and math.abs(last[13]) <= 1.1 then
                 local toward = (last[12] >= 0) and 1 or -1                  -- the other car is on this side of me
                 local mine = (last[13] - prev[13]) * toward                -- my own lateral change toward it
                 local ro = nil
