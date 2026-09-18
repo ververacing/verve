@@ -259,7 +259,7 @@ D.DRIVERS = {
     { key='alex_zanardi', name='Luca Zanhardy', say='LOO-kuh zan-HAR-dee', bucket='f1', pace=0.81, aggr=0.76, risk=0.48, cons=0.78 },
     { key='simon_pagenaud', name='Florent Pageturner', say='floh-RAHN PAYJ-turn-er', bucket='f1', pace=0.78, aggr=0.53, risk=0.36, cons=0.75 },
     { key='gil_de_ferran', name='Paulo de Ferrous', say='POW-loh duh FAIR-us', bucket='f1', pace=0.81, aggr=0.53, risk=0.36, cons=0.83 },
-    { key='pato_oward', name='Pato O\'Ward', bucket='f1', pace=0.74, aggr=0.76, risk=0.42, cons=0.72 },
+    { key='pato_oward', name='Patio O\'Warden', say='PAT-ee-oh oh-WAR-den', bucket='f1', pace=0.74, aggr=0.76, risk=0.42, cons=0.72 },
     { key='colton_herta', name='Bryson Heartbeat', say='BRY-sun HART-beet', bucket='f1', pace=0.74, aggr=0.68, risk=0.54, cons=0.62 },
     { key='alexander_rossi', name='Harrison Glossi', say='HAIR-i-sun GLOSS-ee', bucket='f1', pace=0.74, aggr=0.68, risk=0.42, cons=0.72 },
     { key='scott_mclaughlin', name='Blair McLaunchlin', say='blair muh-LAWNCH-lin', bucket='f1', pace=0.74, aggr=0.60, risk=0.42, cons=0.72 },
