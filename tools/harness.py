@@ -244,6 +244,20 @@ def build_race_ini(args, base_path):
     ini.set("RACE", "CARS", str(len(cars) + 1))
     ini.set("RACE", "RACE_LAPS", str(args.laps))
     set_sessions(ini, args)
+    if args.weather:
+        # CSP weather type (Pure/Sol controllers read __CM_WEATHER_TYPE): 12 clear, 13 few clouds, 15 broken clouds, 16 overcast,
+        # 17 fog, 18 mist, 3 light drizzle, 6 light rain, 7 rain, 8 heavy rain, 1 thunderstorm, 27 hot, 26 cold, 28 windy
+        WT = {"clear": 12, "clouds": 15, "overcast": 16, "fog": 17, "mist": 18, "drizzle": 3, "lightrain": 6, "rain": 7,
+              "heavyrain": 8, "storm": 1, "hot": 27, "cold": 26, "windy": 28}
+        wt = WT.get(args.weather.lower(), None)
+        if wt is None and args.weather.isdigit():
+            wt = int(args.weather)
+        if wt is None:
+            raise SystemExit("unknown --weather %r (use one of %s or a CSP type number)" % (args.weather, ", ".join(WT)))
+        if not ini.has_section("LIGHTING"):
+            ini.add_section("LIGHTING")
+        ini.set("LIGHTING", "__CM_WEATHER_TYPE", str(wt))
+        ini.set("LIGHTING", "__CM_WEATHER_CONTROLLER", "pureCtrl")
     if args.ambient is not None:
         ini.set("TEMPERATURE", "AMBIENT", str(args.ambient))
     if args.road is not None:
@@ -479,6 +493,7 @@ def run_once(args, arm, run_idx):
     if best:
         shutil.copy2(RACE_OUT, os.path.join(RESULTS_DIR, f"race_out_{time.strftime('%Y%m%d_%H%M%S')}_{label}.json"))
     m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots", "fault")}, sort_keys=True)
+    m["weather"] = args.weather or ""
     csv_path = os.path.join(RESULTS_DIR, "results.csv")
     new = not os.path.exists(csv_path)
     if not new:   # the columns changed (2026-09-13: ai_level + exact lap times): rotate the old file rather than misalign rows
@@ -513,6 +528,7 @@ def main():
     ap.add_argument("--practice", type=int, default=0, help="minutes of practice before the race (a weekend)")
     ap.add_argument("--quali", type=int, default=0, help="minutes of qualifying before the race (a weekend)")
     ap.add_argument("--ambient", type=int); ap.add_argument("--road", type=int)
+    ap.add_argument("--weather", help="CSP weather type by name (clear, clouds, overcast, fog, mist, drizzle, lightrain, rain, heavyrain, storm, hot, cold, windy) or number; Pure must be the weather controller")
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--label", default="A")
     ap.add_argument("--settings", help="JSON of Verve global settings to override for the run")

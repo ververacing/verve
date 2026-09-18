@@ -41,7 +41,9 @@ def main():
     base = json.load(open(BASE, encoding="utf-8"))
     cars = cars_from_logs()
     rx = re.compile(a.labels)
-    rows = [r for r in csv.DictReader(open(RES, encoding="utf-8")) if rx.fullmatch(r["label"] or "")]
+    rows = []
+    for path in sorted(glob.glob(os.path.join(HERE, "harness_results", "results*.csv"))):   # the harness rotates the file when columns change
+        rows += [r for r in csv.DictReader(open(path, encoding="utf-8")) if rx.fullmatch(r.get("label") or "")]
     if a.level is not None:
         rows = [r for r in rows if r.get("ai_level") and float(r["ai_level"]) == a.level]
     print("%-26s %-14s %-22s %7s %8s | %8s %8s %8s  %s" % ("label", "track", "car", "AIbest", "AImed", "H.top10", "H.med", "H.med+r", "verdict"))
