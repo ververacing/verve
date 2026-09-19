@@ -420,20 +420,43 @@ PURE_SETTINGS = os.path.join(AC_DIR, "extension", "weather-controllers", "pureCt
 RAINY = {3, 4, 5, 6, 7, 8, 0, 1, 2, 9, 10, 11, 29}   # CSP types that should start on a wet track
 
 
+PURE_PLANS = os.path.join(AC_DIR, "extension", "config-ext", "PurePlanner", "Plans")
+# Pure weather-slot index (the "index" a plan container carries) per CSP weather type; rain fields per type
+PURE_INDEX = {12: 2, 13: 3, 14: 4, 15: 5, 16: 6, 17: 17, 18: 18, 3: 30, 6: 40, 7: 50, 8: 60, 1: 70, 27: 2, 26: 2, 28: 2}
+PURE_RAIN = {3: (0.10, 0.25, 0.05), 6: (0.20, 0.45, 0.12), 7: (0.45, 0.85, 0.30), 8: (0.85, 1.0, 0.6), 1: (1.0, 1.0, 0.8)}   # amount, wetness, water
+
+
 def apply_pure_for_weather(wt):
-    """Pure runs its last-used plan by default (Verve smoke race 2026-09-18: 'clear' came out as a wet Spa on rain tyres
-    because a 'verve_sunset_rain' plan was last used). For a --weather run: no plan autostart, no last-used, start wetness
-    and puddles 'none' for dry types and 'auto' for rain types, so CM's weather type is what Pure renders. Restored after."""
+    """Pure only renders weather from a running PLAN (the CM weather type alone came out bone dry twice, 2026-09-19).
+    For a --weather run: write a one-slot Timed plan from the broadcast side's plan as a template (rain amount /
+    wetness / standing water per type, index = Pure's weather slot), point the controller at it with autostart on
+    and last-used off, and restore the controller file after the race. Plans left in the folder are harmless."""
     if wt is None or not os.path.exists(PURE_SETTINGS):
         return None
+    tmpl = None
+    for cand in (os.path.join(PURE_PLANS, "Timed", "verve_sunset_rain.json"), os.path.join(PURE_PLANS, "last_used.json")):
+        if os.path.exists(cand):
+            tmpl = json.load(open(cand, encoding="utf-8")); break
+    if not tmpl or not tmpl.get("container"):
+        print("  (no Pure plan template; weather left to the CM type)")
+        return None
+    plan = {"control": {"timemulti": 1, "type": 2, "loop": False}, "container": [dict(tmpl["container"][0])]}
+    c = plan["container"][0]; c["data"] = dict(c["data"]); w = dict(c["data"]["weather"])
+    c["data"]["timestamp"] = int(time.time()); c["data"]["duration"] = 7200
+    amount, wetness, water = PURE_RAIN.get(wt, (0.0, 0.0, 0.0))
+    w.update({"index": PURE_INDEX.get(wt, 2), "rain_amount": amount, "rain_wetness": wetness, "rain_water": water,
+              "rain_probability": 100 if amount > 0 else 0, "rain_variance": 0, "mist": 0.6 if wt in (17, 18) else 0,
+              "rain_amount_dyn": False, "rain_wetness_dyn": False, "rain_water_dyn": False, "mist_dyn": False,
+              "rain_amount_range": 0, "rain_wetness_range": 0, "rain_water_range": 0, "rain_probability_range": 0, "mist_range": 0})
+    c["data"]["weather"] = w
+    os.makedirs(os.path.join(PURE_PLANS, "Timed"), exist_ok=True)
+    with open(os.path.join(PURE_PLANS, "Timed", "verve_harness.json"), "w", encoding="utf-8") as f:
+        json.dump(plan, f)
     bak = PURE_SETTINGS + ".harness-backup"
     shutil.copy2(PURE_SETTINGS, bak)
     lines = open(PURE_SETTINGS, encoding="utf-8").read().splitlines(True)
-    # Pure only renders falling rain from a running plan; with the plan parked, the START_WETNESS / START_PUDDLES levels
-    # set the surface directly ("lightrain" through the CM type alone came out bone dry, 2026-09-19): low / wet / slippery
-    level = {3: "3", 6: "3", 9: "3", 4: "4", 7: "4", 10: "4", 0: "4", 5: "5", 8: "5", 11: "5", 1: "5", 2: "5", 23: "5", 29: "4"}
-    want = {"AUTOSTART": "0", "LAST_USED": "0", "LIVE": "0",
-            "START_WETNESS": level.get(wt, "2"), "START_PUDDLES": level.get(wt, "2")}
+    want = {"AUTOSTART": "1", "LAST_USED": "0", "LIVE": "0", "PLAN": "Timed/verve_harness",
+            "START_WETNESS": "1", "START_PUDDLES": "1"}
     out = []
     for ln in lines:
         key = ln.split("=", 1)[0].strip() if "=" in ln else None
