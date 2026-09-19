@@ -425,8 +425,11 @@ def apply_pure_for_weather(wt):
     bak = PURE_SETTINGS + ".harness-backup"
     shutil.copy2(PURE_SETTINGS, bak)
     lines = open(PURE_SETTINGS, encoding="utf-8").read().splitlines(True)
+    # Pure only renders falling rain from a running plan; with the plan parked, the START_WETNESS / START_PUDDLES levels
+    # set the surface directly ("lightrain" through the CM type alone came out bone dry, 2026-09-19): low / wet / slippery
+    level = {3: "3", 6: "3", 9: "3", 4: "4", 7: "4", 10: "4", 0: "4", 5: "5", 8: "5", 11: "5", 1: "5", 2: "5", 23: "5", 29: "4"}
     want = {"AUTOSTART": "0", "LAST_USED": "0", "LIVE": "0",
-            "START_WETNESS": "1" if wt in RAINY else "2", "START_PUDDLES": "1" if wt in RAINY else "2"}
+            "START_WETNESS": level.get(wt, "2"), "START_PUDDLES": level.get(wt, "2")}
     out = []
     for ln in lines:
         key = ln.split("=", 1)[0].strip() if "=" in ln else None
