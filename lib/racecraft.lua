@@ -329,7 +329,7 @@ end
 -- the turning is. An oval turns the same way the entire lap (|sum of turns| ~ total turning); a road
 -- course balances left and right (sum near zero). Computed once per session.
 local function detectOval()
-    local oval = false
+    local oval, sampled = false, false
     pcall(function()
         local N = 96
         local pts = {}
@@ -338,6 +338,7 @@ local function detectOval()
             if not p then return end
             pts[k] = p
         end
+        sampled = true
         local signed, total = 0, 0
         for k = 0, N - 1 do
             local a, b, c = pts[k], pts[(k + 1) % N], pts[(k + 2) % N]
@@ -353,7 +354,7 @@ local function detectOval()
         end
         if total > 1e-3 then oval = (math.abs(signed) / total) > 0.6 end   -- mostly one-way = oval
     end)
-    return oval
+    return oval, sampled
 end
 
 local function LANE_APEX_M_frac(len) return 40.0 / (len or 4500) end   -- turn-1 lane hold: metres past the apex, as a lap fraction
@@ -1123,6 +1124,9 @@ function R.beginFrame()
             latNow[j] = c and latOf(c.position) or 0
         end
     end)
+    if not R.ovalChecked then   -- the session-start check can run before the AI line is loaded (Daytona 2026-09-19: an oval read as a road course)
+        local o, ok = detectOval(); if ok then R.isOval = o; R.ovalChecked = true end
+    end
     if not scaled then      -- (re)derive the metre-based gaps for this track (also self-heals after a hot-reload)
         scaled = true
         pcall(function() local s = ac.getSim(); scaleToTrack(s and s.trackLengthM) end)
@@ -1136,7 +1140,7 @@ function R.reset()
     R.last = {}
     pcall(Strategy.reset)
     scaled = false
-    R.isOval = detectOval()     -- classify the track once per session (oval vs road course)
+    R.isOval, R.ovalChecked = detectOval()     -- classify the track (oval vs road course); re-checked in beginFrame until the AI line samples
 end
 
 return R
