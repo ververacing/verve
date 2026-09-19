@@ -1,5 +1,27 @@
 Verve - changelog
 
+0.14.1
+- Ovals: the "groove" (committing to a high or low lane in a pack) is off. It was what turned a 20-car Daytona race
+  into a 48-incident wreck; without it the same race ran 6 and 3 incidents with no retirements and more lead changes
+  than stock AC. Oval detection is also fixed (it could run before the track's AI line had loaded).
+- Difficulty: the launcher's slider is the truth in every mode. Content Manager's per-car grid levels only keep their
+  spread around it; a hand-set grid (levels more than 10 apart) is honoured as written. The window says when the slider
+  overrode the grid.
+- Opening lap: turn-1 lanes and caution-by-gap are on by default (each car holds its grid side into turn 1; the
+  opening caution scales with the gap to the car ahead).
+- Conflicts: the window warns when something else is changing the AI level or aggression (rubber-banding, adaptation,
+  other AI apps) - Verve reads its own values back every frame and reports a steady mismatch.
+- Anonymous race stats (opt-in): each race is sent once (a quit before the confirmation used to resend it), a race
+  restarted within seconds is no longer reported as finished, the player's start position is captured properly, field
+  spread is only computed for races, and the row carries Verve's own frame cost and error count. A column the server does
+  not know yet is dropped and the row resent, so an older database never rejects a newer app.
+- Race feed: a "names" event after driver profiles apply (the header is written before that). A car refuelling in its
+  box is no longer treated as stranded.
+- Roster: the one remaining real name renamed (387 of 387 fictional).
+- Off by default, for testing: a RainFX-aware wet rule (with rain physics present, Verve's own wet grip cut is not
+  stacked on top), live fault attribution and penalties, a suspension limper that sends a car with a broken corner to the
+  pits.
+
 0.14.0
 - Opening laps: every car holds its grid side into turn 1 until just past the apex (turn-1 lanes), and the opening
   caution scales with the gap to the car ahead, so the front rows brake normally and the pack behind eases in
