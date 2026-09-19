@@ -292,6 +292,10 @@ def parse_profiles(spec, ncars):
             out["all"] = v
         elif k == "last":
             out["slots"][ncars - 1] = v
+        elif ".." in k:                              # a slot range: 12..17=arch_veteran
+            a, b = k.split("..")
+            for i in range(int(a), int(b) + 1):
+                out["slots"][i] = v
         else:
             out["slots"][int(k)] = v
     return out
