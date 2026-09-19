@@ -433,19 +433,21 @@ def apply_pure_for_weather(wt):
     and last-used off, and restore the controller file after the race. Plans left in the folder are harmless."""
     if wt is None or not os.path.exists(PURE_SETTINGS):
         return None
+    # template: tools/pure_plan_template.json, a copy of the DAYCYCLE plan (control type 1, looping, one 24 h container)
+    # that is the only kind seen to rain on this machine; a Timed (type 2) plan with a timestamp never fired
     tmpl = None
-    for cand in (os.path.join(PURE_PLANS, "Timed", "verve_sunset_rain.json"), os.path.join(PURE_PLANS, "last_used.json")):
+    for cand in (os.path.join(os.path.dirname(os.path.abspath(__file__)), "pure_plan_template.json"), os.path.join(PURE_PLANS, "last_used.json")):
         if os.path.exists(cand):
             tmpl = json.load(open(cand, encoding="utf-8")); break
     if not tmpl or not tmpl.get("container"):
         print("  (no Pure plan template; weather left to the CM type)")
         return None
-    plan = {"control": {"timemulti": 1, "type": 2, "loop": False}, "container": [dict(tmpl["container"][0])]}
+    plan = {"control": {"timemulti": 1, "type": 1, "loop": True}, "container": [dict(tmpl["container"][0])]}
     c = plan["container"][0]; c["data"] = dict(c["data"]); w = dict(c["data"]["weather"])
-    c["data"]["timestamp"] = int(time.time()); c["data"]["duration"] = 7200
+    c["data"]["duration"] = 86400
     amount, wetness, water = PURE_RAIN.get(wt, (0.0, 0.0, 0.0))
     w.update({"index": PURE_INDEX.get(wt, 2), "rain_amount": amount, "rain_wetness": wetness, "rain_water": water,
-              "rain_probability": 100 if amount > 0 else 0, "rain_variance": 0, "mist": 0.6 if wt in (17, 18) else 0,
+              "rain_probability": 1.0 if amount > 0 else 0, "rain_variance": 0, "mist": 0.6 if wt in (17, 18) else 0,
               "rain_amount_dyn": False, "rain_wetness_dyn": False, "rain_water_dyn": False, "mist_dyn": False,
               "rain_amount_range": 0, "rain_wetness_range": 0, "rain_water_range": 0, "rain_probability_range": 0, "mist_range": 0})
     c["data"]["weather"] = w
