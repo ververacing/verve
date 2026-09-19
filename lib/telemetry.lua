@@ -185,13 +185,23 @@ function T.buildReport(sim, ctx, completed, abortReason)
     return '{' .. table.concat(fields, ',') .. '}'
 end
 
-local function post(body, onDone)
+-- a column the server does not know yet (PGRST204 'Could not find the ... column'): drop it from the row and resend once,
+-- so a client can be ahead of the database schema (session_key, 2026-09-19: every send failed for a day before this)
+local function withoutColumn(body, col)
+    local out = body:gsub(',"' .. col .. '":"[^"]*"', ''):gsub(',"' .. col .. '":[^,}]*', '')
+    return out
+end
+local function post(body, onDone, retried)
     pcall(function()
         web.post(URL, { ['apikey'] = KEY, ['Authorization'] = 'Bearer ' .. KEY, ['Content-Type'] = 'application/json', ['Prefer'] = 'return=minimal' }, body,
             function(err, res)
                 local ok = (not err) and res and res.status and res.status >= 200 and res.status < 300
                 local rejected = (not ok) and res and res.status and res.status >= 400 and res.status < 500
                 pcall(function() ac.log(string.format('Verve telemetry: %s (%s) %s', ok and 'sent' or 'failed', tostring(err or (res and res.status)), rejected and tostring(res.body):sub(1, 200) or '')) end)
+                if rejected and not retried then
+                    local col = tostring(res.body):match("Could not find the '([%w_]+)' column")
+                    if col then post(withoutColumn(body, col), onDone, true); return end
+                end
                 if rejected then S.pending = '' end        -- malformed row: drop it, don't retry forever
                 if onDone then onDone(ok) end
             end)

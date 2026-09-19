@@ -137,6 +137,8 @@ R.cv2 = cv2                                                               -- (re
 -- CONVOY v2 (harness A/B: R.CONVOY2_ON): throttle, never a speed cap. A follower closing on the car ahead on the
 -- same line loses throttle in proportion to the gap; the field is released from the lights row by row.
 R.CONVOY2_ON = true 
+R.ROWCAUT_X = 1.0             -- row-caution multiplier (A/B for big grids, 2026-09-19)
+R.ROW_T_X = 1.0               -- staggered-release per-row hold multiplier (A/B for big grids)
 R.OL_ROWCAUT = true           -- opening lap: brake earlier the further back you started (harness A/B)
 R.OL_SPINYELLOW = false       -- opening lap: a sideways / much slower car ahead is a yellow, not just a stopped one (harness A/B)
 R.OL_SIDEYIELD = false        -- opening lap: alongside a car whose nose is ahead, corner coming -> tuck in behind it (harness A/B)
@@ -189,7 +191,7 @@ R.PASS_ABORT = 0              -- >0: not this much alongside the car I'm passing
 R.PASS_COMMIT = 0             -- >0: a driver this much quicker (pace rating) than the car ahead commits to the pass from ATTACK_GAP (A/B)
 R.RS_OL_REAREND = 0.35        -- rear-end guard trim for a road-space pass on laps 0-1 (CV.RS_REAREND from lap 2); 1.0 = no trim (A/B)
 R.RS_OL_CROWD = 99            -- the star exemption below applies only with at most this many cars close by (A/B)
-R.GROOVE_X = 1.0              -- oval groove offset multiplier (0 = no groove; A/B 2026-09-19: at Daytona the 0.62 lane offset pinned a 20-car
+R.GROOVE_X = 0.0              -- DEFAULT OFF 2026-09-19 (owner-reported Daytona: on 48/39/34 incidents, off 6/3). Oval groove offset multiplier (0 = no groove; A/B 2026-09-19: at Daytona the 0.62 lane offset pinned a 20-car
                               -- Euro NASCAR field at 242 km/h and produced 48 incidents; with the oval undetected the same cars ran 300 with 15)
 R.RS_OL_METER = 95            -- laps 0-1: road space is allowed for a TOP-TIER driver (profile pace >= 0.75, the manoeuvre layer's tier 2)
                               -- when the difficulty meter is at or above this (0 = never). The pack stays gated; a star may go
@@ -507,7 +509,7 @@ function R.evaluate(i, dt)
             if cv2.clock and cv2.back[i] then
                 local tl0 = os.clock() - cv2.clock
                 if tl0 < (cv2.react[i] or 0) then thr = math.min(thr, CV.REACT_THR)   -- reaction time: not on the gas yet
-                elseif tl0 < (cv2.react[i] or 0) + CV.ROW_T * (cv2.back[i] / CV.ROW_M) then thr = math.min(thr, CV.THR) end   -- staggered release
+                elseif tl0 < (cv2.react[i] or 0) + CV.ROW_T * R.ROW_T_X * (cv2.back[i] / CV.ROW_M) then thr = math.min(thr, CV.THR) end   -- staggered release
             end
             if olS < CV.END and aheadIdx >= 0 and gapA * trackLen < CV.GAP_M and spd > aheadSpd + CV.CLOSING
                and not (R.OL_STAR_CONVOY and Strategy.tierOf(i) >= 2) then
@@ -803,7 +805,7 @@ function R.evaluate(i, dt)
             caut = caut + OPENLAP_CAUT * openingLap * (1 + crash) * prox   -- crashy tracks get extra start caution (kills the opening-lap pile-ups)
             if R.OL_ROWCAUT and myLap == 0 and cv2.back[i] then    -- row ten brakes on the lights of the car ahead: earlier the further back
                 -- (scaling this by aggression was tried 2026-09-16: the star went off the road at 127 km/h; it protects him)
-                caut = caut + CV.ROWCAUT * clamp(cv2.back[i] / CV.ROWCAUT_M, 0, 1) * openingLap * prox
+                caut = caut + CV.ROWCAUT * R.ROWCAUT_X * clamp(cv2.back[i] / CV.ROWCAUT_M, 0, 1) * openingLap * prox
             end
             local olAggr = OPENLAP_AGGR
             if R.OL_STAR_AGGR > 0 and Strategy.tierOf(i) >= 2 then olAggr = OPENLAP_AGGR * R.OL_STAR_AGGR end
