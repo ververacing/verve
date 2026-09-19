@@ -507,10 +507,31 @@ def run_once(args, arm, run_idx):
     t_launch = time.time()
     proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
     # AC occasionally dies at load (a crash box, or an exit within a minute); one relaunch after a pause fixes it
-    for attempt in range(2):
+    csp_log = os.path.join(DOCS, "logs", "custom_shaders_patch.log")
+    for attempt in range(3):
         time.sleep(45)
         if proc.poll() is None:
-            break
+            # alive: but is it LOADING? On CSP preview builds the process sometimes sits with zero CPU and an empty CSP
+            # log for its whole budget (2026-09-19, two races lost that way). Give it 90 s more to write the log.
+            hung = False
+            for _ in range(6):
+                time.sleep(15)
+                try:
+                    fresh = os.path.getmtime(csp_log) >= t_launch - 2 and os.path.getsize(csp_log) > 2000
+                except OSError:
+                    fresh = False
+                if fresh or proc.poll() is not None:
+                    break
+            else:
+                hung = True
+            if not hung:
+                break
+            print(f"  !! acs.exe hung at launch ({time.time() - t_launch:.0f}s, no CSP log); killing and relaunching (attempt {attempt + 1})")
+            subprocess.run(["taskkill", "/IM", "acs.exe", "/F"], capture_output=True)
+            time.sleep(20)
+            t_launch = time.time()
+            proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
+            continue
         if acs_running():
             break                                   # someone else's game: handled below
         print(f"  !! acs.exe exited {time.time() - t_launch:.0f}s after launch (attempt {attempt + 1}); relaunching")
