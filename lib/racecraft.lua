@@ -189,6 +189,8 @@ R.PASS_ABORT = 0              -- >0: not this much alongside the car I'm passing
 R.PASS_COMMIT = 0             -- >0: a driver this much quicker (pace rating) than the car ahead commits to the pass from ATTACK_GAP (A/B)
 R.RS_OL_REAREND = 0.35        -- rear-end guard trim for a road-space pass on laps 0-1 (CV.RS_REAREND from lap 2); 1.0 = no trim (A/B)
 R.RS_OL_CROWD = 99            -- the star exemption below applies only with at most this many cars close by (A/B)
+R.GROOVE_X = 1.0              -- oval groove offset multiplier (0 = no groove; A/B 2026-09-19: at Daytona the 0.62 lane offset pinned a 20-car
+                              -- Euro NASCAR field at 242 km/h and produced 48 incidents; with the oval undetected the same cars ran 300 with 15)
 R.RS_OL_METER = 95            -- laps 0-1: road space is allowed for a TOP-TIER driver (profile pace >= 0.75, the manoeuvre layer's tier 2)
                               -- when the difficulty meter is at or above this (0 = never). The pack stays gated; a star may go
                               -- round from the lights (owner 2026-09-16: 'Max behind a slow car with 75% of the track open')
@@ -989,10 +991,10 @@ function R.evaluate(i, dt)
         -- side-by-side through the banking, holding it (not darting back to one line). Take the lane
         -- the car ahead isn't in, else a stable personal groove. Edge-safety below still keeps it off
         -- the wall. This is what turns oval running into real pack racing.
-        if R.isOval and classKey == 'nascar' and gapA < GROOVE_RANGE then
+        if R.isOval and classKey == 'nascar' and gapA < GROOVE_RANGE and R.GROOVE_X > 0 then
             local dLatA = aheadIdx >= 0 and latOf(ac.getCar(aheadIdx).position) or 0
             local side = (math.abs(dLatA) > 0.12) and -sgn(dLatA) or ((hash01(i * 7 + 3) < 0.5) and -1 or 1)
-            target = side * GROOVE_OFFSET
+            target = side * GROOVE_OFFSET * R.GROOVE_X
             holdSign[i] = side; holdUntil[i] = os.clock() + GROOVE_HOLD    -- commit to the lane
         end
 
