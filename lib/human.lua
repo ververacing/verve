@@ -20,6 +20,12 @@ H.INTENSITY     = 0.5      -- variability scale (0 = none, 1 = subtle, 1.5 = str
 H.HUMAN_VAR     = true     -- personality / drift / fade / pressure / slipstream
 H.HUMAN_ERRORS  = true     -- occasional gentle bobbles
 H.CLASS_PHYSICS = true     -- cold-tyre warm-up / wet / dirty air
+-- RainFX (CSP preview builds) models wet grip physically and puts cars on rain tyres: Verve's own wet rule, written for
+-- installs without rain physics, then stacks on top (Spa GT3 in the wet ran +35 % on lap time, real is +10-15 %; 2026-09-18).
+-- When the module is enabled these scale the grip cut and the extra caution; both are harness switches until the A/B is in.
+H.RAINFX_GRIP   = 0.0      -- x the wet grip cut when RainFX is on (0 = physics already does it)
+H.RAINFX_CAUT   = 0.5      -- x the wet caution when RainFX is on
+H.rainfx        = nil      -- detected at first use: true when the RainFX module is enabled on this install
 
 -- amplitudes
 local PERSONALITY_AMP = 0.020
@@ -166,6 +172,18 @@ local function warmupFrac(i, car)
     return clamp(1 - (stintProgressLaps(i, car) / WARMUP_LAPS), 0, 1)
 end
 
+local function rainfxOn()
+    if H.rainfx == nil then
+        H.rainfx = false
+        pcall(function()
+            local cfg = ac.INIConfig.cspModule(ac.CSPModuleID.RainFX)
+            if cfg and cfg:get('BASIC', 'ENABLED', 0) == 1 then H.rainfx = true end
+        end)
+    end
+    return H.rainfx
+end
+H.rainfxOn = rainfxOn
+
 local function wetness01()
     local w = 0
     pcall(function()
@@ -176,6 +194,8 @@ local function wetness01()
     end)
     return w
 end
+
+H.wetness01 = wetness01
 
 local function pressure01(i, myCar, now)
     if pressCacheT[i] and (now - pressCacheT[i]) < 0.3 then return pressCache[i] or 0 end
@@ -359,7 +379,11 @@ function H.getModifiers(i)
                 pCaut = pCaut + WARMUP_MAX_CAUT * wu * cm.warmup
             end
             local wet = wetness01()
-            if wet > 0 then pGrip = pGrip - WET_MAX_GRIP * wet * cm.wet; pCaut = pCaut + WET_MAX_CAUT * wet * cm.wet end
+            if wet > 0 then
+                local g, c = 1.0, 1.0
+                if rainfxOn() then g, c = H.RAINFX_GRIP, H.RAINFX_CAUT end
+                pGrip = pGrip - WET_MAX_GRIP * wet * cm.wet * g; pCaut = pCaut + WET_MAX_CAUT * wet * cm.wet * c
+            end
             local da = dirtyair01(i, car)
             if da > 0 and cm.dirty > 0 then pGrip = pGrip - DIRTY_MAX_GRIP * da * cm.dirty; pCaut = pCaut + DIRTY_MAX_CAUT * da * cm.dirty end
         end

@@ -13,6 +13,7 @@ local Feed      = require('lib.feed')
 local Career    = require('lib.career')       -- recognises AC career events; reads the launcher's difficulty numbers
 local Difficulty = require('lib.difficulty')  -- makes those numbers real (AC ignores them on some installs)
 local Telemetry = require('lib.telemetry')
+local Watch     = require('lib.watch')        -- read-back watchdog: is anything else writing the AI level / aggression?
 local Fault     = require('lib.fault')        -- who caused each contact, and the time penalty it costs (owner's ask 2026-09-17)
 local Strategy  = require('lib.strategy')     -- planned manoeuvres (racecraft drives it; Verve owns the toggle + status)    -- opt-in anonymous race reports         -- structured race feed (opt-in; consumed by Verve Booth / Race Engineer)
 Racecraft.penCap = Fault.penCap            -- penalty throttle caps, read by racecraft's throttle setter (shared table)
@@ -101,6 +102,7 @@ local function sessionReset(restart)
     pcall(Racecraft.reset)
     shiftSet = {}
     pcall(Fault.reset)
+    pcall(Watch.reset)
     -- driver profiles are session-only: wipe every race. NOT on a restart: the picks should survive it, and
     -- the AI-level overrides persist in physics across a restart, so the remembered base levels stay valid
     if not restart then pcall(Drivers.reset) end
@@ -144,6 +146,7 @@ function script.update(dt)
             if type(Harness.recovery) == 'table' then for k, v in pairs(Harness.recovery) do Recovery[k] = v end end
             if type(Harness.racecraft) == 'table' then for k, v in pairs(Harness.racecraft) do Racecraft[k] = v end end
             if type(Harness.fault) == 'table' then for k, v in pairs(Harness.fault) do Fault[k] = v end end
+            if type(Harness.human) == 'table' then for k, v in pairs(Harness.human) do Human[k] = v end end
             if Diag and Harness.label then Diag.label = tostring(Harness.label) end
         end
         -- AC loads to a pre-session screen and waits for the Drive button; nothing (not even the AI grid)
@@ -322,11 +325,14 @@ function script.update(dt)
             mvN = Strategy.attempts, mvOK = Strategy.ok, mvT = Strategy.byTypeString(), gateN = Recovery.gateMoves,
             fwdSign = (Recovery.fwdSign and Recovery.fwdSign() or 0), dropFlips = Recovery.dropFlips,
             suspPits = Recovery.suspPitCount, faults = Fault.count, penalties = Fault.penCount,
+            conflictLevel = Watch.conflicts.level, conflictAggr = Watch.conflicts.aggr,
+            wet = (function() local w = 0; pcall(function() w = sim.rainWetness or 0 end); return w end)(), rain = (function() local r = 0; pcall(function() r = sim.rainIntensity or 0 end); return r end)(),
         })
     end) end
     Feed.ENABLED = G.raceFeed
     if G.raceFeed then pcall(Feed.update, dt, { rc = Racecraft.last, recState = Recovery.stateOf, recentDrops = Recovery.recentDrops }) end
     pcall(Fault.update, dt)
+    pcall(Watch.update, dt)
     Telemetry.ENABLED = G.shareData == true
     Telemetry.VERSION = Update.LOCAL_VERSION or '0.0.0'
     Telemetry.UNATTENDED = Harness ~= nil and Harness.autopilot == true
@@ -521,6 +527,11 @@ function script.windowMain()
     end
     ui.newLine()
 
+    if Watch.detail ~= '' then
+        ui.textColored(Watch.detail, rgbm(1, 0.7, 0.2, 1))
+        ui.textWrapped('Another app or a CSP setting (rubber-banding, adaptation, AI Whisperer) is writing the same AI values as Verve. Turn that off, or Verve difficulty and racecraft will fight it.')
+        ui.separator()
+    end
     if otherAI then
         ui.textColored('Heads up: "' .. otherAI .. '" is installed.', rgbm(1, 0.7, 0.2, 1))
         ui.textWrapped('It also controls AI grip, so running both fights over the same setting. ' ..

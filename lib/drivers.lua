@@ -627,4 +627,6 @@ function D.applyPace(i, base)
     end)
 end
 
+function D.appliedLevel(i) return lastApplied[i] end   -- what Verve last wrote (the conflict watchdog reads it back)
+
 return D

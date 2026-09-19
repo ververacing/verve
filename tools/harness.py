@@ -311,6 +311,7 @@ def write_harness_lua(arm, ttl_s, ncars=0):
         "racecraft": arm.get("racecraft", {}),
         "troublespots": arm.get("troublespots", {}),   # e.g. {"FRESH": true}: this run neither loads nor saves the learned map
         "fault": arm.get("fault", {}),                 # lib/fault.lua switches, e.g. {"ENABLED": true, "ENFORCE": false}
+        "human": arm.get("human", {}),                 # lib/human.lua fields, e.g. {"RAINFX_GRIP": 1.0}
     }
     with open(HARNESS_LUA, "w", encoding="utf-8") as f:
         f.write("-- written by tools/harness.py; self-expiring; never shipped\nreturn " + lua_literal(body) + "\n")
@@ -574,7 +575,7 @@ def run_once(args, arm, run_idx):
     m["player_best_lap_s"] = round(best[0], 2) if 0 in best else ""
     if best:
         shutil.copy2(RACE_OUT, os.path.join(RESULTS_DIR, f"race_out_{time.strftime('%Y%m%d_%H%M%S')}_{label}.json"))
-    m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots", "fault", "csp")}, sort_keys=True)
+    m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots", "fault", "csp", "human")}, sort_keys=True)
     m["weather"] = args.weather or ""
     csv_path = os.path.join(RESULTS_DIR, "results.csv")
     new = not os.path.exists(csv_path)
@@ -617,6 +618,7 @@ def main():
     ap.add_argument("--recovery", help="JSON of Recovery module fields to override for the run, e.g. {\"DROP_API\":\"car\"}")
     ap.add_argument("--racecraft", help="JSON of Racecraft module fields to override for the run")
     ap.add_argument("--troublespots", help="JSON of Troublespots module fields, e.g. {\"FRESH\":true} = clean learned map for this run")
+    ap.add_argument("--human", help="JSON of Human module fields, e.g. {\"RAINFX_GRIP\":1.0,\"RAINFX_CAUT\":1.0}")
     ap.add_argument("--csp", help="JSON of CSP per-user config overrides for this run only, e.g. {\"new_behaviour\":{\"AI_RACE_RUBBERBANDING\":{\"ENABLED\":1}}}")
     ap.add_argument("--fault", help="JSON of Fault module fields (penalties), e.g. {\"ENABLED\":true,\"ENFORCE\":false}")
     ap.add_argument("--drivers", choices=["none", "random"], default="none", help="random: assign Verve driver profiles to the whole grid (the Randomize button)")
@@ -635,7 +637,7 @@ def main():
     else:
         arms = [{"label": args.label, "settings": json.loads(args.settings) if args.settings else {}, "drivers": args.drivers, "profiles": args.profiles,
                  "recovery": json.loads(args.recovery) if args.recovery else {}, "racecraft": json.loads(args.racecraft) if args.racecraft else {},
-                 "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}}]
+                 "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}, "human": json.loads(args.human) if args.human else {}}]
 
     results = []
     for r in range(args.runs):
