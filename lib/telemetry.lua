@@ -61,7 +61,7 @@ local function sample(sim)
                 if prev > 10000 then st.laps[i][#st.laps[i] + 1] = prev / 1000 end
             end
             -- start positions (first sample once the race is on)
-            if st.startPos[i] == nil and (c.lapCount or 0) == 0 and sim.isSessionStarted then st.startPos[i] = c.racePosition end
+            if st.startPos[i] == nil and (c.lapCount or 0) <= 1 and sim.isSessionStarted and (c.racePosition or 0) > 0 then st.startPos[i] = c.racePosition end
             -- incidents: damage jumps; contact if another car is within 20 m
             local dmg = maxDamage(c)
             local pd = st.dmgPrev[i]
@@ -167,7 +167,7 @@ function T.buildReport(sim, ctx, completed, abortReason)
         '"crash_repairs":' .. jint(ctx.crashRepairs), '"limp_repairs":' .. jint(ctx.limpRepairs),
         '"repositions":' .. jint(ctx.drops), '"repositions_ok":' .. jint(ctx.dropsOk),
         '"lead_changes":' .. jint(st.leadChanges), '"pit_stops":' .. jint(totalPits),
-        '"ai_best_lap_s":' .. jnum(aiBest), '"ai_median_lap_s":' .. jnum(median(aiMed)), '"field_spread_pct":' .. jnum(spread),
+        '"ai_best_lap_s":' .. jnum(aiBest), '"ai_median_lap_s":' .. jnum(median(aiMed)), '"field_spread_pct":' .. jnum((function() local r = false; pcall(function() r = sim.raceSessionType == ac.SessionType.Race end); return r and spread or nil end)()),
         '"player_start_pos":' .. jint(st.startPos[0]), '"player_finish_pos":' .. jint(p and p.racePosition or nil),
         '"player_laps":' .. jint(#st.laps[0]), '"player_best_lap_s":' .. jnum(pBest), '"player_median_lap_s":' .. jnum(pMed),
         '"player_incidents":' .. jint(st.inc[0]), '"player_max_damage":' .. jint(st.maxDmg[0]), '"player_pit_stops":' .. jint(st.pits[0]),
@@ -177,6 +177,8 @@ function T.buildReport(sim, ctx, completed, abortReason)
         '"profiles_used":' .. jint(ctx.profilesUsed), '"archetypes_used":' .. jint(ctx.archetypesUsed),
         '"trouble_spots":' .. jint(ctx.troubleSpots),
         '"fps_avg":' .. jnum(st.fpsN > 0 and st.fps / st.fpsN or nil),
+        '"verve_ms_avg":' .. jnum(ctx.verveMs), '"lua_errors":' .. jint(ctx.luaErrors),
+        '"session_key":' .. jstr(S.installId .. '-' .. tostring(st.t0) .. '-' .. tostring(ctx.track or '')),   -- for server-side de-duplication
         '"settings":' .. (ctx.settingsJson or 'null'),
         '"cars_detail":[' .. table.concat(detail, ',') .. ']',
     }
@@ -245,9 +247,11 @@ function T.update(dt, ctx)
         if flagT > 15 then
             sentThis = true
             pcall(function()
-                local body = T.buildReport(sim, ctx, true, nil)
-                S.pending = body
-                post(body, function(ok2) if ok2 then S.pending = ''; S.sent = (S.sent or 0) + 1 end end)
+                local leaderLaps = 0
+                for i = 0, sim.carsCount - 1 do local c = ac.getCar(i); if c and (c.lapCount or 0) > leaderLaps then leaderLaps = c.lapCount end end
+                local real = leaderLaps >= 1 and (os.time() - st.t0) >= 60     -- a 15 s 'finished' race is a restart artefact
+                local body = T.buildReport(sim, ctx, real, real and nil or 'restart')
+                post(body, function(ok2) if ok2 then S.sent = (S.sent or 0) + 1 else S.pending = body end end)
             end)
         end
     else

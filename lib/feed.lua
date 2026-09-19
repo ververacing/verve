@@ -84,6 +84,7 @@ local function newFile(sim)
 end
 
 function F.reset()
+    namesSent, namesT = '', 0
     flush()
     file = nil; started = false
     prev = {}; prevOrder = nil; lapStart = {}; bestLap = {}; overallBest = nil
@@ -92,6 +93,15 @@ function F.reset()
 end
 
 -- stats: the same table Verve passes to the diagnostics logger (rc = Racecraft.last, recState = Recovery.stateOf)
+local namesSent, namesT = '', 0
+-- the header is written at session start, before driver profiles rename the cars: re-emit the names when they settle
+local function namesEvent(sim, t)
+    local parts = {}
+    for i = 0, sim.carsCount - 1 do local n = ''; pcall(function() n = ac.getDriverName(i) or '' end); parts[#parts + 1] = string.format('"%d":"%s"', i, esc(n)) end
+    local body = table.concat(parts, ',')
+    if body ~= namesSent then namesSent = body; event(t, 'names', '"names":{' .. body .. '}') end
+end
+
 function F.update(dt, stats)
     if not F.ENABLED then return end
     local ok, sim = pcall(ac.getSim); if not ok or not sim then return end
@@ -106,6 +116,7 @@ function F.update(dt, stats)
     end
     lastState = t
     stats = stats or {}
+    if t - namesT >= 5 then namesT = t; pcall(namesEvent, sim, t) end   -- every 5 s, written only when a name changed
     local rc = stats.rc or {}
 
     -- gather

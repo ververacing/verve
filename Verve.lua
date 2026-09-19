@@ -30,6 +30,7 @@ pcall(function()
     if Harness and type(Harness.troublespots) == 'table' then for k, v in pairs(Harness.troublespots) do Troublespots[k] = v end end
 end)
 local harnessApplied, autopilotArmed, harnessT = false, false, 0
+local frameMs, frameN, luaErrors = 0, 0, 0     -- Verve's own cost per frame and errors swallowed by pcall (telemetry)
 local shiftSet = {}                              -- per car: shift thresholds applied (see Racecraft.SHIFT_UP)
 local harnessStartT, harnessStarted = 0, false   -- "press Drive" on AC's pre-session screen (ac.tryToStart)
 local harnessEndT = 0                            -- seconds a timed session (practice/quali) has been over
@@ -137,6 +138,7 @@ local function detectRestart(sim, dt)
 end
 
 function script.update(dt)
+    local tFrame0 = os.preciseClock and os.preciseClock() or os.clock()
     if Harness then
         if not harnessApplied then
             harnessApplied = true
@@ -258,7 +260,7 @@ function script.update(dt)
     -- start at 0 so the player's own car is managed WHEN (and only when) it's under AI control
     -- (Ctrl+C takeover): the isAIControlled gate below means we never touch it while you drive.
     for i = 0, sim.carsCount - 1 do
-        pcall(function()
+        local okCar = pcall(function()
             local car = ac.getCar(i)
             if not car or not car.isAIControlled then return end
             if car.isInPitlane then return end          -- never touch a car doing a pit stop (player or AI)
@@ -304,6 +306,7 @@ function script.update(dt)
             end
             if G.controlGrip or behaviourOn then n = n + 1 end
         end)
+        if not okCar then luaErrors = luaErrors + 1 end
     end
     managed = n
 
@@ -337,6 +340,8 @@ function script.update(dt)
     Telemetry.VERSION = Update.LOCAL_VERSION or '0.0.0'
     Telemetry.UNATTENDED = Harness ~= nil and Harness.autopilot == true
     if Telemetry.ENABLED then pcall(Telemetry.update, dt, telemetryCtx()) end
+    local tFrame1 = os.preciseClock and os.preciseClock() or os.clock()
+    frameMs = frameMs + (tFrame1 - tFrame0) * 1000; frameN = frameN + 1
 end
 
 -- everything the anonymous race report needs from the other modules (no names, no paths)
@@ -354,6 +359,7 @@ telemetryCtx = function()
         meter = Career.meter, isCareer = Career.active, careerEvent = Career.active and (Career.series .. '/' .. Career.event) or nil,
         laps = Career.laps, playerModel = playerModel, cspBuild = cspBuild,
         retiredByVerve = Recovery.retiredCount, crashRepairs = Recovery.repairedCount, limpRepairs = Recovery.limpCount, suspPits = Recovery.suspPitCount,
+        verveMs = frameN > 0 and frameMs / frameN or nil, luaErrors = luaErrors, track = (function() local t = ''; pcall(function() t = ac.getTrackID() or '' end); return t end)(),
         drops = Recovery.dropN, dropsOk = Recovery.dropOK, troubleSpots = Troublespots.hotCount(),
         faults = Fault.count, penalties = Fault.penCount,
         profilesUsed = pu, archetypesUsed = au,

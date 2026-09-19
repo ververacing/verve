@@ -60,6 +60,7 @@ local REJOIN_THROTTLE_CUT = 0.40 -- throttle starts at (1 - this) of full and ra
 local PIT_STUCK_T = 15.0      -- stopped in the pit LANE (not the box) this long -> it's done, let AC retire it
 local BOX_LIMBO_T = 75.0      -- stationary in the BOX this long mid-race (AC damage-pit, never retired) -> retired
 local boxT = {}
+local boxFuel = {}         -- fuel last seen in the box: rising fuel = a live pit stop, not limbo (an AI Escalade retired mid-stop, 2026-09-18)
 local DANGER_MAX  = 5.0       -- longest a recovering car waits for traffic before it goes anyway (on a busy straight
                               -- "someone's coming" is ALWAYS true -- one car waited 80 s on the line and got parked for it)
 local WHEEL_BITS  = { [0] = 4, [1] = 8, [2] = 16, [3] = 32 }   -- ac.Wheel bit masks: FL, FR, RL, RR (Front = 12 = 4|8)
@@ -690,7 +691,9 @@ function R.update(dt)
                 -- (Zandvoort + Silverstone GPs, 2026-09-14). A real stop is under a minute; longer than that in
                 -- a race with laps on the board is a retirement: mark it so bookkeeping, feed and reports agree.
                 if inBox and spd < STOP_SPEED and (car.lapCount or 0) >= 1 and car.isAIControlled then
-                    boxT[i] = (boxT[i] or 0) + dt
+                    local fuel = car.fuel or 0
+                    if boxFuel[i] and fuel > boxFuel[i] + 0.01 then boxT[i] = 0 else boxT[i] = (boxT[i] or 0) + dt end   -- refuelling: the stop is live
+                    boxFuel[i] = fuel
                     if boxT[i] > BOX_LIMBO_T then parkInPits(i); boxT[i] = 0 end
                 else
                     boxT[i] = 0
@@ -1074,7 +1077,7 @@ end
 
 function R.reset()
     R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0
-    boxT = {}
+    boxT = {}; boxFuel = {}
     ownLaps, ownSpline = {}, {}
     hasMoved, stuckT, recT = {}, {}, {}
     lastFwd = {}
