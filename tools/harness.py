@@ -449,14 +449,18 @@ def apply_pure_for_weather(wt):
               "rain_amount_dyn": False, "rain_wetness_dyn": False, "rain_water_dyn": False, "mist_dyn": False,
               "rain_amount_range": 0, "rain_wetness_range": 0, "rain_water_range": 0, "rain_probability_range": 0, "mist_range": 0})
     c["data"]["weather"] = w
-    os.makedirs(os.path.join(PURE_PLANS, "Timed"), exist_ok=True)
-    with open(os.path.join(PURE_PLANS, "Timed", "verve_harness.json"), "w", encoding="utf-8") as f:
+    # the only path that has actually rendered rain here is Pure's LAST-USED plan with autostart (the broadcast side's
+    # plan did it by accident on 2026-09-18); a named PLAN with LAST_USED=0 came out dry. So the generated plan goes in
+    # as last_used.json (the original is backed up and restored with the controller file).
+    lu = os.path.join(PURE_PLANS, "last_used.json")
+    if os.path.exists(lu) and not os.path.exists(lu + ".harness-backup"):
+        shutil.copy2(lu, lu + ".harness-backup")
+    with open(lu, "w", encoding="utf-8") as f:
         json.dump(plan, f)
     bak = PURE_SETTINGS + ".harness-backup"
     shutil.copy2(PURE_SETTINGS, bak)
     lines = open(PURE_SETTINGS, encoding="utf-8").read().splitlines(True)
-    want = {"AUTOSTART": "1", "LAST_USED": "0", "LIVE": "0", "PLAN": "Timed/verve_harness",
-            "START_WETNESS": "1", "START_PUDDLES": "1"}
+    want = {"AUTOSTART": "1", "LAST_USED": "1", "LIVE": "0", "START_WETNESS": "1", "START_PUDDLES": "1"}
     out = []
     for ln in lines:
         key = ln.split("=", 1)[0].strip() if "=" in ln else None
@@ -474,6 +478,12 @@ def restore_pure(bak):
             os.replace(bak, PURE_SETTINGS)
         except OSError as e:
             print("  (pure settings not restored:", e, ")")
+    lu = os.path.join(PURE_PLANS, "last_used.json")
+    if os.path.exists(lu + ".harness-backup"):
+        try:
+            os.replace(lu + ".harness-backup", lu)
+        except OSError as e:
+            print("  (pure last-used plan not restored:", e, ")")
 
 
 def restore_csp_overrides(restore):
