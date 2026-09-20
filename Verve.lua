@@ -214,6 +214,13 @@ function script.update(dt)
                 if harnessT > 2.0 then
                     autopilotArmed = true
                     pcall(function() physics.setCarAutopilot(true, true) end)
+                    -- the launcher fuels the player for a short run (30 L); give the autopilot the AI field's load, or it pits twice
+                    pcall(function()
+                        local fs = {}
+                        for i = 1, simH.carsCount - 1 do local c = ac.getCar(i); if c and c.fuel and c.fuel > 0 then fs[#fs + 1] = c.fuel end end
+                        table.sort(fs)
+                        if #fs > 0 and physics.setCarFuel then physics.setCarFuel(0, fs[math.ceil(#fs / 2)]) end
+                    end)
                     -- chase camera for unattended runs: markedly lighter on the GPU than the cockpit view
                     pcall(function() ac.setCurrentCamera(ac.CameraMode.Drivable); ac.setCurrentDrivableCamera(ac.DrivableCamera.Chase) end)
                     -- randomised driver profiles, the way a real grid will be run (same as the UI button)

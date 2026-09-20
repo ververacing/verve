@@ -364,7 +364,7 @@ end
 -- then spent eight minutes crashing into two "retired" cars at pit exit. Native retirement it is; the
 -- yellow flag + go-around cover the ~20 s the wreck sits there.
 local function parkInPits(i)
-    if parked[i] or not R.raceSession then return end
+    if parked[i] or not R.raceSession or i == 0 then return end   -- never the player's car: a human may take the wheel back
     parked[i] = true
     -- Move it to its pit box NOW. AC's own retirement of a stationary car took 160-540 s in the 07:05 race
     -- (a wreck sat in view for six laps; a "frozen" car at the pit exit for seven minutes). Its box is where
