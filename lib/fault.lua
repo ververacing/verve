@@ -95,7 +95,7 @@ local function sample(sim, now)
             end
             local prev = dmgLast[i]
             local jump = prev and (dmg[i] - prev) or 0
-            local ev = Contacts.recent(i, 0.4)
+            local ev = Contacts.recent(i, 0.8)
             if ev and (seenEv[ev.id] or ev.drop < 5) then ev = nil end
             if (jump >= DMG_JUMP or ev) and r and #r > 0 then
                 if ev then seenEv[ev.id] = true end
