@@ -189,6 +189,13 @@ function script.update(dt)
                     if (c.lapCount or 0) >= 1 then anyLap = true end
                 end
             end
+            -- HEAVY SPRINT (Harness.stopAtLap): a long race's fuel load, a sprint's duration -- quit once the leader has done N laps
+            local leaderLaps = 0
+            if type(Harness.stopAtLap) == 'number' and Harness.stopAtLap > 0 then for i = 0, simH.carsCount - 1 do local c = ac.getCar(i); if c and (c.lapCount or 0) > leaderLaps then leaderLaps = c.lapCount end end end
+            if type(Harness.stopAtLap) == 'number' and Harness.stopAtLap > 0 and leaderLaps >= Harness.stopAtLap and not harnessQuit then
+                harnessQuit = true
+                pcall(function() ac.log('Verve harness: stop-at-lap reached, shutting AC down (replay autosave)'); ac.shutdownAssettoCorsa() end)
+            end
             if allParked and anyLap then
                 harnessDoneT = harnessDoneT + dt
                 if harnessDoneT > 20.0 and not harnessQuit then

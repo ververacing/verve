@@ -195,6 +195,9 @@ R.PASS_CAUT = 0.0             -- ...the caution ceiling while finishing (0 = the
 R.PASS_COMMIT = 0             -- >0: a driver this much quicker (pace rating) than the car ahead commits to the pass from ATTACK_GAP (A/B)
 R.RS_OL_REAREND = 0.35        -- rear-end guard trim for a road-space pass on laps 0-1 (CV.RS_REAREND from lap 2); 1.0 = no trim (A/B)
 R.RS_OL_CROWD = 99            -- the star exemption below applies only with at most this many cars close by (A/B)
+R.OL_FUEL_K = 0               -- >0: the opening-lap brake-guard reach and row caution grow with the fuel on board: x (1 + K x (fuel - 20) / 50),
+                              -- so a 67 L race start (+50 kg over a sprint's 15 L) brakes earlier. Every opening-lap rule was tuned on
+                              -- 2-lap sprints; Spa 12-lap starts ran 16-18/18 in contact vs 7-12/18 for sprints the same night (2026-09-20)
 R.CV_TGAP = 0                 -- >0: the opening-lap convoy gap is this many SECONDS of travel at my speed (never less than CV.GAP_M);
                               -- the floor scales with it. 24-car Spa: the deepest rows arrive fastest onto the slowest pack (A/B 2026-09-19)
 R.GROOVE_X = 0.0              -- DEFAULT OFF 2026-09-19 (owner-reported Daytona: on 48/39/34 incidents, off 6/3). Oval groove offset multiplier (0 = no groove; A/B 2026-09-19: at Daytona the 0.62 lane offset pinned a 20-car
@@ -546,6 +549,7 @@ function R.evaluate(i, dt)
             if R.OL_BRAKEGUARD and myLap <= 1 and aheadIdx >= 0 and not (Recovery.stateOf(i) or {}).rec then
                 local gm = gapA * trackLen
                 local reach = CV.BG_M
+                if R.OL_FUEL_K > 0 then reach = reach * (1 + R.OL_FUEL_K * clamp(((me.fuel or 20) - 20) / 50, 0, 1.5)) end   -- heavier car, longer braking
                 if R.BG_T > 0 then reach = math.max(reach, (spd - aheadSpd) / 3.6 * R.BG_T) end
                 if gm < reach then
                     local aCar = ac.getCar(aheadIdx)
@@ -736,7 +740,7 @@ function R.evaluate(i, dt)
             aggr = math.min(1, baseA + DEFEND_AGGR_ADD)
             caut = CAUTION_DEFEND
             local concede = false
-            if R.CONCEDE > 0 and behindIdx >= 0 and Strategy.tierOf(behindIdx) >= 2 then
+            if R.CONCEDE > 0 and myLap >= 2 and behindIdx >= 0 and Strategy.tierOf(behindIdx) >= 2 then   -- not in the opening-lap pack
                 local bp = Drivers.statsOf(behindIdx)
                 if bp and bp.pace >= ((prof and prof.pace) or 0.6) + R.CONCEDE then concede = true end
             end
@@ -759,7 +763,7 @@ function R.evaluate(i, dt)
 
         -- COMMIT OR ABORT (R.PASS_ABORT): a corner within ~1.2 s and I'm offline beside the car ahead but not alongside enough
         -- -> the corner is theirs: back onto their line behind them, with a lift, and try again after the corner
-        if R.PASS_ABORT > 0 and state == 1 and aheadIdx >= 0 and math.abs(target) > 0.25 and spd > 60 then
+        if R.PASS_ABORT > 0 and myLap >= 2 and state == 1 and aheadIdx >= 0 and math.abs(target) > 0.25 and spd > 60 then   -- lap 2+: on lap 0 the lanes ARE an offset
             local sd = gapA * trackLen                                  -- their nose ahead of mine, metres
             local overlap = 1 - sd / 4.6                                 -- 1 = level, 0 = a full car length back
             local aLat = latOf(ac.getCar(aheadIdx).position)
@@ -831,7 +835,8 @@ function R.evaluate(i, dt)
             caut = caut + OPENLAP_CAUT * openingLap * (1 + crash) * prox   -- crashy tracks get extra start caution (kills the opening-lap pile-ups)
             if R.OL_ROWCAUT and myLap == 0 and cv2.back[i] then    -- row ten brakes on the lights of the car ahead: earlier the further back
                 -- (scaling this by aggression was tried 2026-09-16: the star went off the road at 127 km/h; it protects him)
-                caut = caut + CV.ROWCAUT * R.ROWCAUT_X * clamp(cv2.back[i] / CV.ROWCAUT_M, 0, 1) * openingLap * prox
+                local fuelX = (R.OL_FUEL_K > 0) and (1 + R.OL_FUEL_K * clamp(((me.fuel or 20) - 20) / 50, 0, 1.5)) or 1
+                caut = caut + CV.ROWCAUT * R.ROWCAUT_X * fuelX * clamp(cv2.back[i] / CV.ROWCAUT_M, 0, 1) * openingLap * prox
             end
             local olAggr = OPENLAP_AGGR
             if R.OL_STAR_AGGR > 0 and Strategy.tierOf(i) >= 2 then olAggr = OPENLAP_AGGR * R.OL_STAR_AGGR end

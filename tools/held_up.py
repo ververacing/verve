@@ -60,6 +60,12 @@ def main():
                     if tier.get(A, 1) <= tier.get(B, 1): continue
                     # progress of A relative to B in metres (A behind B = positive gap)
                     dl = (cb["lap"] + cb["spline"] / 1000.0) - (ca["lap"] + ca["spline"] / 1000.0)
+                    # B must be the NEXT car ahead of A: with a third car between them the episode is that car's, not B's
+                    # (counted every train member as a failed pass, 2026-09-20)
+                    if 0 < dl < 0.5:
+                        pa = ca["lap"] + ca["spline"] / 1000.0
+                        if any(C not in (A, B) and not cc["ret"] and not cc["pit"] and 0 < (cc["lap"] + cc["spline"] / 1000.0) - pa < dl for C, cc in g.items()):
+                            continue
                     gap_m = dl * tl
                     key = (A, B)
                     if key in open_ep:

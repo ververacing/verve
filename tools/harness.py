@@ -309,6 +309,7 @@ def write_harness_lua(arm, ttl_s, ncars=0):
         "randomizeDrivers": bool(arm.get("drivers") == "random"),
         "profiles": parse_profiles(arm.get("profiles"), ncars),   # fixed grid: {all=key, slots={[i]=key}} (nil = untouched)
         "shutdownAtEnd": True,        # Verve quits AC ~20 s after the flag so the replay autosaves
+        "stopAtLap": arm.get("stop_laps") or 0,      # heavy sprint: Verve quits once the leader has done N laps (a long race's fuel, a sprint's length)
         # raceFeed is a Verve setting (1-2 Hz feed in Documents/Assetto Corsa/verve_feed): the 8 s diag can't resolve who hit whom
         "settings": {"raceFeed": True, "shareData": True, **arm.get("settings", {})},   # shareData: exercises the opt-in report path; rows are flagged unattended
         "recovery": arm.get("recovery", {}),
@@ -544,7 +545,8 @@ def run_once(args, arm, run_idx):
     ini, ncars = build_race_ini(args, backup if args.grid is None else RACE_INI)
     force_ai_level(ini, getattr(args, "ai_level", 0))
     write_ini(ini, RACE_INI)
-    budget = args.laps * args.lap_budget_s + 240 + 60 * (getattr(args, "practice", 0) + getattr(args, "quali", 0)) + (120 if (getattr(args, "practice", 0) or getattr(args, "quali", 0)) else 0)
+    eff_laps = min(args.laps, args.stop_laps) if getattr(args, "stop_laps", 0) else args.laps
+    budget = eff_laps * args.lap_budget_s + 240 + 60 * (getattr(args, "practice", 0) + getattr(args, "quali", 0)) + (120 if (getattr(args, "practice", 0) or getattr(args, "quali", 0)) else 0)
     write_harness_lua(arm, ttl_s=int(budget) + 120, ncars=ncars)
     label = arm.get("label", "A")
     print(f"[{label} #{run_idx}] {ini.get('RACE', 'TRACK')} x{args.laps} laps, {ncars} cars, budget {budget:.0f}s")
@@ -616,7 +618,7 @@ def run_once(args, arm, run_idx):
             if state is None:
                 continue
             leader_lap, all_parked, age = state
-            if leader_lap > args.laps or (all_parked and age > 40 and leader_lap >= 1):
+            if leader_lap > args.laps or (getattr(args, "stop_laps", 0) and leader_lap >= args.stop_laps) or (all_parked and age > 40 and leader_lap >= 1):
                 finished = True
                 # let Verve close AC itself (replay autosave); fall back to the kill after 90 s
                 for _ in range(18):
@@ -720,6 +722,7 @@ def main():
     ap.add_argument("--troublespots", help="JSON of Troublespots module fields, e.g. {\"FRESH\":true} = clean learned map for this run")
     ap.add_argument("--human", help="JSON of Human module fields, e.g. {\"RAINFX_GRIP\":1.0,\"RAINFX_CAUT\":1.0}")
     ap.add_argument("--csp", help="JSON of CSP per-user config overrides for this run only, e.g. {\"new_behaviour\":{\"AI_RACE_RUBBERBANDING\":{\"ENABLED\":1}}}")
+    ap.add_argument("--stop-laps", type=int, default=0, help="heavy sprint: end the race gracefully once the leader completes N laps (fuel load of --laps, duration of N)")
     ap.add_argument("--assists", help="JSON of launcher assists for this run only (cfg/assists.ini [ASSISTS]), e.g. {\"DAMAGE\":0} = damage off")
     ap.add_argument("--fault", help="JSON of Fault module fields (penalties), e.g. {\"ENABLED\":true,\"ENFORCE\":false}")
     ap.add_argument("--drivers", choices=["none", "random"], default="none", help="random: assign Verve driver profiles to the whole grid (the Randomize button)")
@@ -739,7 +742,7 @@ def main():
         arms = [{"label": args.label, "settings": json.loads(args.settings) if args.settings else {}, "drivers": args.drivers, "profiles": args.profiles,
                  "recovery": json.loads(args.recovery) if args.recovery else {}, "racecraft": json.loads(args.racecraft) if args.racecraft else {},
                  "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}, "human": json.loads(args.human) if args.human else {},
-                 "assists": json.loads(args.assists) if args.assists else {}}]
+                 "assists": json.loads(args.assists) if args.assists else {}, "stop_laps": args.stop_laps}]
 
     results = []
     for r in range(args.runs):
