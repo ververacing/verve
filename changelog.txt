@@ -33,6 +33,11 @@ Verve - changelog
   opening-lap convoy keep a time gap instead of a fixed distance (24-car grids under test).
 - README: CSP build requirement stated; "Before you race": the slider is real (80 beginner / 90 intermediate / 100
   strong club racer), keep damage on at 50 % or more, run one AI mod at a time.
+- Race weekends: after a practice or qualifying session some AI cars never launched in the race (an OverTake review:
+  "in race-weekend mode they just no longer start"). Verve's own retirement rule had parked cars that sat in their box
+  after a run, and the hold carried into the race. Retirements and repositions now happen only in a race session, and
+  every hold is released when a new session starts. Reproduced (4 dead cars after a 10-minute qualifying) and verified
+  fixed on the same weekend.
 
 0.14.0
 - Opening laps: every car holds its grid side into turn 1 until just past the apex (turn-1 lanes), and the opening
