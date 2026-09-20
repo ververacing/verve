@@ -188,6 +188,10 @@ R.ACX_LAP = 0                 -- ATTACK_CAUT_X applies from this lap on (0 = alw
 R.ATTACK_CAUT_X = 1.0         -- multiplier on the attack's negative caution (A/B; applied caution while attacking was 1.11 vs AC's 1.0)
 R.PC_TS = 1.0                 -- trouble-spot + crash caution multiplier for a committed passer (PASS_COMMIT; A/B)
 R.PASS_ABORT = 0              -- >0: not this much alongside the car I'm passing by the braking zone -> tuck back in behind it (A/B)
+R.PASS_FINISH = 0             -- >0: a committed quicker driver (PASS_COMMIT) offline beside the car ahead, within this many car lengths of level,
+                              -- finishes the pass: caution floored at PASS_CAUT, full aggression, later braking on the inside (A/B 2026-09-19)
+R.PASS_BH = 1.06              -- ...brake hint multiplier on the inside line into the corner (> 1 = later braking; 1 = off)
+R.PASS_CAUT = 0.0             -- ...the caution ceiling while finishing (0 = the stacked back-off terms are cancelled for the move)
 R.PASS_COMMIT = 0             -- >0: a driver this much quicker (pace rating) than the car ahead commits to the pass from ATTACK_GAP (A/B)
 R.RS_OL_REAREND = 0.35        -- rear-end guard trim for a road-space pass on laps 0-1 (CV.RS_REAREND from lap 2); 1.0 = no trim (A/B)
 R.RS_OL_CROWD = 99            -- the star exemption below applies only with at most this many cars close by (A/B)
@@ -768,6 +772,24 @@ function R.evaluate(i, dt)
                 end
             end
         end
+        -- FINISH THE PASS (R.PASS_FINISH): the committed quicker driver, offline beside the car ahead and within reach of level,
+        -- stops hedging: full aggression now, a later brake point when he holds the inside into the corner, and (below, after
+        -- the back-off terms) his caution is capped at PASS_CAUT. PASS_ABORT still tucks him in when the corner is not his.
+        -- (2026-09-17: veterans passed midfielders in a third of episodes; pre-positioning alone ended side by side into the
+        -- braking zone, so the missing piece is the brake point, not the line.)
+        local passFinish = false
+        if R.PASS_FINISH > 0 and state == 1 and paceEdge and aheadIdx >= 0 and myLap >= 2 and math.abs(target) > 0.25 and spd > 60 then
+            local overlap = 1 - gapA * trackLen / 4.6
+            local aLat = latOf(ac.getCar(aheadIdx).position)
+            if overlap > -R.PASS_FINISH and math.abs(aLat - myLat) > 0.25 then
+                passFinish = true; aggr = 1
+                if R.PASS_BH > 1 and cv2.base[i] then
+                    local isC, ins = cornerAhead((mySpline + (spd / 3.6) * 1.2 / trackLen) % 1)
+                    if isC and ins ~= 0 and target * ins > 0 then cv2.bg[i] = true; pcall(physics.setAIBrakeHint, i, cv2.base[i] * R.PASS_BH) end
+                end
+                R.passFinishN = (R.passFinishN or 0) + 1      -- diag: frames spent finishing a pass this session
+            end
+        end
         if state ~= 1 then Strategy.clear(i) end
         local eff = R.INTENSITY
 
@@ -1054,6 +1076,7 @@ function R.evaluate(i, dt)
         if lappedAhead then caut = caut - FREEPASS_CAUT; if state == 0 then state = 1 end end
         -- cap the stacked back-off (see CAUT_MAX); the attack/defend NEGATIVE caution is left alone
         if caut > CAUT_MAX then caut = CAUT_MAX end
+        if passFinish and caut > R.PASS_CAUT then caut = R.PASS_CAUT end   -- finishing a pass: no hedging (see PASS_FINISH)
 
         -- slew the offset (anti-dart)
         local cur = curOffset[i] or 0

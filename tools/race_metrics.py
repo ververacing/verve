@@ -15,11 +15,12 @@ def load(path):
     hdr = next((r for r in raw if "hdr" in r), None)
     rows = [r for r in raw if "hdr" not in r and "ev" not in r]
     drops = [r for r in raw if r.get("ev") == "drop"]
-    return hdr, rows, drops
+    contacts = [r for r in raw if r.get("ev") == "contact"]     # diag's contact ring (damage jump OR collision event, dmg = severity)
+    return hdr, rows, drops, contacts
 
 
 def metrics(path):
-    hdr, rows, drops = load(path)
+    hdr, rows, drops, contacts = load(path)
     if len(rows) < 3:
         return {"file": path, "error": "too few frames"}
     t0 = rows[0]["t"]
@@ -38,6 +39,12 @@ def metrics(path):
                 if p["spd"] < 40:
                     low += 1
             prev[c["i"]] = c
+    # damage OFF in the launcher (no car ever shows damage): incidents come from the contact events instead
+    # (written on a collision event since 2026-09-19, severity = speed lost; AI cars, the same 8 threshold)
+    damage_seen = has and any(c["dmg"] > 0 for r in rows for c in r["grid"])
+    if not damage_seen and contacts:
+        inc = [e.get("lap", 0) for e in contacts if e.get("car", 0) != 0 and e.get("dmg", 0) >= 8]
+        low = 0
 
     # stationary episodes >= 40 s (a "frozen" car)
     frozen, longest = 0, 0
@@ -85,6 +92,8 @@ def metrics(path):
         "incidents": len(inc),
         "incidents_lap0_1": sum(1 for l in inc if l <= 1),
         "incidents_low_speed": low,
+        "contact_events": len(contacts),
+        "damage_on": bool(damage_seen),
         "crash_repairs": last.get("crashRepairs", 0),
         "drops": last.get("dropN", 0),
         "drops_ok": last.get("dropOK", 0),
