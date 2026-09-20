@@ -192,7 +192,10 @@ def set_sessions(ini, args):
         sessions.append({"NAME": "Practice", "TYPE": "1", "DURATION_MINUTES": str(args.practice), "SPAWN_SET": "PIT"})
     if getattr(args, "quali", 0):
         sessions.append({"NAME": "Qualifying", "TYPE": "2", "DURATION_MINUTES": str(args.quali), "SPAWN_SET": "PIT"})
-    sessions.append({"NAME": "Quick Race" if not sessions else "Race", "TYPE": "3", "LAPS": str(args.laps), "DURATION_MINUTES": "0",
+    minutes = getattr(args, "minutes", 0) or 0
+    # a TIMED race (most outside races are timed): LAPS 0 + DURATION_MINUTES; AC adds a lap after the clock runs out
+    sessions.append({"NAME": "Quick Race" if not sessions else "Race", "TYPE": "3", "LAPS": "0" if minutes else str(args.laps),
+                     "DURATION_MINUTES": str(minutes) if minutes else "0",
                      "SPAWN_SET": "START", "STARTING_POSITION": str(args.start_pos)})
     for n, sec in enumerate(sessions):
         ini.add_section(f"SESSION_{n}")
@@ -242,7 +245,7 @@ def build_race_ini(args, base_path):
         ini.set("RACE", "TRACK", args.track)
         ini.set("RACE", "CONFIG_TRACK", args.layout or "")
     ini.set("RACE", "CARS", str(len(cars) + 1))
-    ini.set("RACE", "RACE_LAPS", str(args.laps))
+    ini.set("RACE", "RACE_LAPS", "0" if getattr(args, "minutes", 0) else str(args.laps))
     set_sessions(ini, args)
     if args.weather:
         # CSP weather type (Pure/Sol controllers read __CM_WEATHER_TYPE): 12 clear, 13 few clouds, 15 broken clouds, 16 overcast,
@@ -546,7 +549,9 @@ def run_once(args, arm, run_idx):
     force_ai_level(ini, getattr(args, "ai_level", 0))
     write_ini(ini, RACE_INI)
     eff_laps = min(args.laps, args.stop_laps) if getattr(args, "stop_laps", 0) else args.laps
-    budget = eff_laps * args.lap_budget_s + 240 + 60 * (getattr(args, "practice", 0) + getattr(args, "quali", 0)) + (120 if (getattr(args, "practice", 0) or getattr(args, "quali", 0)) else 0)
+    budget = eff_laps * args.lap_budget_s + 240
+    if getattr(args, "minutes", 0):
+        budget = args.minutes * 60 + 2 * args.lap_budget_s + 240      # the clock, the extra lap, the load + 60 * (getattr(args, "practice", 0) + getattr(args, "quali", 0)) + (120 if (getattr(args, "practice", 0) or getattr(args, "quali", 0)) else 0)
     write_harness_lua(arm, ttl_s=int(budget) + 120, ncars=ncars)
     label = arm.get("label", "A")
     print(f"[{label} #{run_idx}] {ini.get('RACE', 'TRACK')} x{args.laps} laps, {ncars} cars, budget {budget:.0f}s")
@@ -618,7 +623,8 @@ def run_once(args, arm, run_idx):
             if state is None:
                 continue
             leader_lap, all_parked, age = state
-            if leader_lap > args.laps or (getattr(args, "stop_laps", 0) and leader_lap >= args.stop_laps) or (all_parked and age > 40 and leader_lap >= 1):
+            lap_done = (leader_lap > args.laps) if not getattr(args, "minutes", 0) else False   # timed: the flag is 'all parked'
+            if lap_done or (getattr(args, "stop_laps", 0) and leader_lap >= args.stop_laps) or (all_parked and age > 40 and leader_lap >= 1):
                 finished = True
                 # let Verve close AC itself (replay autosave); fall back to the kill after 90 s
                 for _ in range(18):
@@ -722,6 +728,7 @@ def main():
     ap.add_argument("--troublespots", help="JSON of Troublespots module fields, e.g. {\"FRESH\":true} = clean learned map for this run")
     ap.add_argument("--human", help="JSON of Human module fields, e.g. {\"RAINFX_GRIP\":1.0,\"RAINFX_CAUT\":1.0}")
     ap.add_argument("--csp", help="JSON of CSP per-user config overrides for this run only, e.g. {\"new_behaviour\":{\"AI_RACE_RUBBERBANDING\":{\"ENABLED\":1}}}")
+    ap.add_argument("--minutes", type=int, default=0, help="TIMED race of N minutes (LAPS 0; AC adds a lap after the clock). --laps is then only the fuel/budget estimate")
     ap.add_argument("--stop-laps", type=int, default=0, help="heavy sprint: end the race gracefully once the leader completes N laps (fuel load of --laps, duration of N)")
     ap.add_argument("--assists", help="JSON of launcher assists for this run only (cfg/assists.ini [ASSISTS]), e.g. {\"DAMAGE\":0} = damage off")
     ap.add_argument("--fault", help="JSON of Fault module fields (penalties), e.g. {\"ENABLED\":true,\"ENFORCE\":false}")

@@ -653,7 +653,7 @@ function R.update(dt)
                 end
             end
             -- GIVEN UP ON and still sitting there: park it (instant clear) rather than leave a frozen car
-            if hopeless[i] and spd < STOP_SPEED and (os.clock() - hopeless[i]) > HOPELESS_T then parkInPits(i); return end
+            if hopeless[i] and (car.speedKmh or 0) < STOP_SPEED and (os.clock() - hopeless[i]) > HOPELESS_T then parkInPits(i); return end   -- (read `spd` before its local: a nil global, error swallowed by the pcall - frozen cars, fixed 2026-09-20)
             local retired = false
             pcall(function() retired = (car.isRetired == true) end)
             if retired then
