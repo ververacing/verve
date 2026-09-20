@@ -302,7 +302,7 @@ function script.update(dt)
             if behaviourOn then
                 physics.setAICaution(i, cautApplied)
             end
-            if Diag then diagPer[i] = { hG = gOff, hC = cOff, grip = gripApplied, rc = rcCaut, caut = cautApplied } end
+            if Diag then diagPer[i] = { hG = gOff, hC = cOff, grip = gripApplied, rc = rcCaut, caut = cautApplied, wu = Human.wu and Human.wu[i] or 0 } end
             -- Formula DRS discipline: close DRS when the game says it isn't available (outside a
             -- zone / not within range). Toggle-based with a cooldown so it doesn't flip-flop.
             if G.drsDiscipline and Classes.keyOf(i) == 'formula' and car.drsPresent

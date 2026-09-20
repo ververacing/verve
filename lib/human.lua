@@ -25,6 +25,10 @@ H.CLASS_PHYSICS = true     -- cold-tyre warm-up / wet / dirty air
 -- When the module is enabled these scale the grip cut and the extra caution; both are harness switches until the A/B is in.
 H.RAINFX_GRIP   = 0.0      -- x the wet grip cut when RainFX is on (0 = physics already does it)
 H.RAINFX_CAUT   = 0.5      -- x the wet caution when RainFX is on
+H.WARMUP_MODE   = 'min'    -- 'min': cold-tyre penalty = the smaller of the temperature model and the laps model (after WARMUP_LAPS
+                           -- of a stint the tyres are as warm as they get). 'temp': temperature only - which never reached zero for
+                           -- GT3 AI at 10 C ambient: a permanent 44 % cold-tyre tax on every car, all race (found 2026-09-20)
+H.wu = {}                  -- per car: the warm-up fraction last applied (diag)
 H.DIRTY_CAUT_X  = 1.0      -- x the dirty-air caution (harness A/B 2026-09-20: an attacking veteran carried +0.12 of it on top of
                            -- a cancelled attack term, running MORE cautious than a car alone; 0 = dirty air costs grip only)
 H.rainfx        = nil      -- detected at first use: true when the RainFX module is enabled on this install
@@ -170,8 +174,12 @@ local function warmupFrac(i, car)
             if avg > 0 and avg < 200 then byTemp = clamp((80 - avg) / 50, 0, 1) end
         end
     end)
-    if byTemp ~= nil then return byTemp end
-    return clamp(1 - (stintProgressLaps(i, car) / WARMUP_LAPS), 0, 1)
+    local byLaps = clamp(1 - (stintProgressLaps(i, car) / WARMUP_LAPS), 0, 1)
+    if byTemp ~= nil then
+        if H.WARMUP_MODE == 'temp' then return byTemp end
+        return math.min(byTemp, byLaps)
+    end
+    return byLaps
 end
 
 local function rainfxOn()
@@ -282,13 +290,14 @@ local function dirtyair01(i, myCar)
     return d
 end
 
-function H.reset() scaled = false end     -- session start: re-derive the per-track distances
+function H.reset() scaled = false; H.wu = {} end     -- session start: re-derive the per-track distances
 
 -- Returns additive (gripOffset, cautionOffset). Player / slow / recovering cars -> 0,0.
 function H.getModifiers(i)
     if not H.ENABLED then return 0, 0 end
     if not scaled then scaled = true; pcall(function() scaleToTrack(ac.getSim().trackLengthM) end) end
-    if i == nil or i < 1 then return 0, 0 end
+    if i == nil or i < 0 then return 0, 0 end
+    if i == 0 then local isAI = false; pcall(function() local c = ac.getCar(0); isAI = c ~= nil and c.isAIControlled == true end); if not isAI then return 0, 0 end end
     do
         local ok, spd = pcall(function() local c = ac.getCar(i); return (c and c.speedKmh) or 999 end)
         if ok and spd and spd < 40 then return 0, 0 end
@@ -373,6 +382,7 @@ function H.getModifiers(i)
 
         if H.CLASS_PHYSICS then
             local wu = warmupFrac(i, car)
+            H.wu[i] = wu
             if wu > 0 then
                 -- Cold tyres genuinely bite, on every track -- the same rubber you're on. (A build briefly
                 -- removed the grip cut on "crashy" tracks; the data said cold tyres were NOT the cause of
