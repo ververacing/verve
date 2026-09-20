@@ -211,16 +211,16 @@ local function withoutColumn(body, col)
     local out = body:gsub(',"' .. col .. '":"[^"]*"', ''):gsub(',"' .. col .. '":%b{}', ''):gsub(',"' .. col .. '":%b[]', ''):gsub(',"' .. col .. '":[^,}]*', '')
     return out
 end
-local function post(body, onDone, retried)
+local function post(body, onDone, tries)         -- tries: unknown columns already dropped from this row
     pcall(function()
         web.post(URL, { ['apikey'] = KEY, ['Authorization'] = 'Bearer ' .. KEY, ['Content-Type'] = 'application/json', ['Prefer'] = 'return=minimal' }, body,
             function(err, res)
                 local ok = (not err) and res and res.status and res.status >= 200 and res.status < 300
                 local rejected = (not ok) and res and res.status and res.status >= 400 and res.status < 500
                 pcall(function() ac.log(string.format('Verve telemetry: %s (%s) %s', ok and 'sent' or 'failed', tostring(err or (res and res.status)), rejected and tostring(res.body):sub(1, 200) or '')) end)
-                if rejected and not retried then
+                if rejected and (tries or 0) < 8 then       -- one unknown column per reply: drop it and resend (bounded)
                     local col = tostring(res.body):match("Could not find the '([%w_]+)' column")
-                    if col then post(withoutColumn(body, col), onDone, true); return end
+                    if col then post(withoutColumn(body, col), onDone, (tries or 0) + 1); return end
                 end
                 if rejected then S.pending = '' end        -- malformed row: drop it, don't retry forever
                 if onDone then onDone(ok) end
