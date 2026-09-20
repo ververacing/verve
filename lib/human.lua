@@ -25,6 +25,8 @@ H.CLASS_PHYSICS = true     -- cold-tyre warm-up / wet / dirty air
 -- When the module is enabled these scale the grip cut and the extra caution; both are harness switches until the A/B is in.
 H.RAINFX_GRIP   = 0.0      -- x the wet grip cut when RainFX is on (0 = physics already does it)
 H.RAINFX_CAUT   = 0.5      -- x the wet caution when RainFX is on
+H.DIRTY_CAUT_X  = 1.0      -- x the dirty-air caution (harness A/B 2026-09-20: an attacking veteran carried +0.12 of it on top of
+                           -- a cancelled attack term, running MORE cautious than a car alone; 0 = dirty air costs grip only)
 H.rainfx        = nil      -- detected at first use: true when the RainFX module is enabled on this install
 
 -- amplitudes
@@ -385,7 +387,7 @@ function H.getModifiers(i)
                 pGrip = pGrip - WET_MAX_GRIP * wet * cm.wet * g; pCaut = pCaut + WET_MAX_CAUT * wet * cm.wet * c
             end
             local da = dirtyair01(i, car)
-            if da > 0 and cm.dirty > 0 then pGrip = pGrip - DIRTY_MAX_GRIP * da * cm.dirty; pCaut = pCaut + DIRTY_MAX_CAUT * da * cm.dirty end
+            if da > 0 and cm.dirty > 0 then pGrip = pGrip - DIRTY_MAX_GRIP * da * cm.dirty; pCaut = pCaut + DIRTY_MAX_CAUT * da * cm.dirty * H.DIRTY_CAUT_X end
         end
     end)
 
