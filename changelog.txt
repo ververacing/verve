@@ -21,6 +21,18 @@ Verve - changelog
 - Off by default, for testing: a RainFX-aware wet rule (with rain physics present, Verve's own wet grip cut is not
   stacked on top), live fault attribution and penalties, a suspension limper that sends a car with a broken corner to the
   pits.
+- Contacts without damage: incidents are read from CSP's collision state as well as from damage, so an install with
+  damage turned off (one outside player's 23-car, 34-lap race reported zero incidents) now reports its contacts in the
+  race feed, the anonymous stats and the fault judge. The stats row also carries the launcher's damage and fuel settings.
+- Update banner: the download button only ever opens the project's own GitHub page.
+- The difficulty notice ("grid levels 97-104, slider 80: field at the slider") now actually appears in the window's
+  Status section outside career mode.
+- Anonymous race stats: a row is resent once per column the server does not know yet (it used to give up after one),
+  and the frame-cost and error figures are per race, not per game launch.
+- Harness (maintainers): --assists {"DAMAGE":0} runs one race with the launcher's damage off; R.CV_TGAP (off) makes the
+  opening-lap convoy keep a time gap instead of a fixed distance (24-car grids under test).
+- README: CSP build requirement stated; "Before you race": the slider is real (80 beginner / 90 intermediate / 100
+  strong club racer), keep damage on at 50 % or more, run one AI mod at a time.
 
 0.14.0
 - Opening laps: every car holds its grid side into turn 1 until just past the apex (turn-1 lanes), and the opening
