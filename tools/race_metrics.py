@@ -131,7 +131,8 @@ def lapping_views(rows, n):
             if c["spd"] < 30 or c["pit"] or c["ret"]:
                 continue
             sp = c["spline"] / 1000.0
-            ahead = min(((o["spline"] / 1000.0 - sp) % 1.0) for o in g if o["i"] != c["i"] and not o["ret"] and o["spd"] > 5) if len(g) > 1 else 1.0
+            others = [((o["spline"] / 1000.0 - sp) % 1.0) for o in g if o["i"] != c["i"] and not o["ret"] and o["spd"] > 5]
+            ahead = min(others) if others else 1.0     # (everyone else stopped - a point-to-point finish - crashed the harness, Trento 2026-09-20)
             if ahead > 0.03:
                 clear.setdefault((c["i"], int(sp / BIN)), []).append(c["spd"])
     losses, episodes, open_ep = [], [], {}

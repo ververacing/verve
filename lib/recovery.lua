@@ -559,6 +559,13 @@ function R.update(dt)
     if not scaled then scaled = true; pcall(function() scaleToTrack(sim.trackLengthM) end) end   -- per-track distances (self-heals after a hot-reload)
     if #drops > 0 then pcall(judgeDrops, os.clock()) end
     pcall(function() R.raceSession = (sim.raceSessionType == ac.SessionType.Race) end)
+    if R.pointToPoint == nil then      -- once per session: a hill climb / touge has no lap to rejoin and its finish is a stop
+        R.pointToPoint = false
+        pcall(function()
+            local a = ac.trackProgressToWorldCoordinate(0.0, false); local b = ac.trackProgressToWorldCoordinate(0.995, false)
+            if a and b and a:distance(b) > 300 then R.pointToPoint = true; ac.log('Verve: point-to-point track - recovery stands down') end
+        end)
+    end
     if not overridesCleared then
         -- After a (re)load our per-car tables are empty but the limits we set on the PHYSICS side persist: a
         -- car mid throttle-ramp would stay at 40% throttle for the rest of the race. Clear them all once.
@@ -571,6 +578,7 @@ function R.update(dt)
             overriding[i] = true; releaseControls(i)      -- and any stale control override from before the (re)load
         end
     end
+    if R.pointToPoint then R.count = 0; return end
     for i = 0, sim.carsCount - 1 do          -- includes the player's car WHEN it's under AI control (Ctrl+C)
         pcall(function()
             local car = ac.getCar(i)
@@ -613,6 +621,7 @@ function R.update(dt)
                 end
             end
             if not car.isAIControlled then return end
+            if car.isRaceFinished then endRec(i); return end   -- past the flag: AC is taking it to the pits, whatever that looks like (Baku 2026-09-20)
             if parked[i] then return end                -- retired by us: sitting in its pit box, leave it be
             local pt = pendingTemps[i]
             if pt then
@@ -1080,6 +1089,7 @@ end
 
 function R.reset()
     R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0
+    R.pointToPoint = nil
     boxT = {}; boxFuel = {}
     ownLaps, ownSpline = {}, {}
     hasMoved, stuckT, recT = {}, {}, {}

@@ -106,8 +106,17 @@ def grid_from_models(models, count, seed=0):
     quick race uses (95-102) and generic driver names."""
     rnd = random.Random(seed)
     cars = []
+    # "model*k" pins k consecutive slots to that model (a class-sorted multi-class grid: 'gt3a*9,gt3b*9,gt4*6'); plain
+    # names cycle as before
+    expanded = []
+    for m in models:
+        if "*" in m:
+            name, k = m.split("*", 1); expanded += [name] * int(k)
+        else:
+            expanded.append(m)
+    pinned = any("*" in m for m in models)
     for n in range(count):
-        m = models[n % len(models)]
+        m = expanded[n] if pinned and n < len(expanded) else expanded[n % len(expanded)]
         cars.append({
             "MODEL": m, "MODEL_CONFIG": "", "AI_LEVEL": str(rnd.randint(95, 102)), "AI_AGGRESSION": "0",
             "SKIN": first_skin(m), "DRIVER_NAME": f"{FIRST_NAMES[n % len(FIRST_NAMES)]} {LAST_NAMES[(n * 7) % len(LAST_NAMES)]}",
@@ -245,7 +254,7 @@ def build_race_ini(args, base_path):
         ini.set("RACE", "TRACK", args.track)
         ini.set("RACE", "CONFIG_TRACK", args.layout or "")
     ini.set("RACE", "CARS", str(len(cars) + 1))
-    ini.set("RACE", "RACE_LAPS", "0" if getattr(args, "minutes", 0) else str(args.laps))
+    ini.set("RACE", "RACE_LAPS", str(args.laps))     # also for a timed race: AC fuels the AI from this estimate (0 = 4 L, the field ran dry after two laps, 2026-09-20)
     set_sessions(ini, args)
     if args.weather:
         # CSP weather type (Pure/Sol controllers read __CM_WEATHER_TYPE): 12 clear, 13 few clouds, 15 broken clouds, 16 overcast,
@@ -349,9 +358,10 @@ def race_state(diag):
             return None
         r = rows[-1]
         parked = all(c["pit"] and c["spd"] < 3 for c in r["grid"])
+        stopped = all(c["spd"] < 3 for c in r["grid"])       # a point-to-point finish: nobody is ever "in the pits" (Trento 2026-09-20)
         if r.get("session", 3) != 3:          # a practice / qualifying file: never "finished"
             return 0, False, 0
-        return r["leaderLap"], parked, time.time() - os.path.getmtime(diag)
+        return r["leaderLap"], parked or (stopped and r["leaderLap"] >= 1), time.time() - os.path.getmtime(diag)
     except (OSError, ValueError, KeyError):
         return None
 
