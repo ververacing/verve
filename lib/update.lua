@@ -9,6 +9,8 @@ U.LOCAL_VERSION = "0.14.1"
 U.VERSION_URL   = "https://raw.githubusercontent.com/ververacing/verve/main/version.json"
 
 U.latest, U.downloadUrl, U.summary = nil, nil, nil
+-- the link comes from a file fetched over the network: only ever open the project's own GitHub
+function U.safeUrl(u) return type(u) == 'string' and u:sub(1, 36) == 'https://github.com/ververacing/verve' end
 local checked = false
 
 local function nums(v)
@@ -35,7 +37,7 @@ function U.check()
             local url = res.body:match('"url"%s*:%s*"([^"]+)"')
             local sum = res.body:match('"summary"%s*:%s*"([^"]+)"')
             if ver and newer(ver, U.LOCAL_VERSION) then
-                U.latest, U.downloadUrl, U.summary = ver, url, sum
+                U.latest, U.downloadUrl, U.summary = ver, U.safeUrl(url) and url or nil, sum
             end
         end)
     end)

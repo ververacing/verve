@@ -12,6 +12,7 @@
 -- (judge and log), F.ENFORCE (also serve the penalties). Verdicts go to ac.log, the race feed ("penalty" events) and the
 -- diagnostics summary.
 
+local Contacts = require('lib.contacts')
 local F = {}
 F.ENABLED  = false
 F.ENFORCE  = false
@@ -23,6 +24,7 @@ F.FREE     = 1.0      -- strike points every car gets before penalties start (a 
 local TICK, RING, DMG_JUMP, INC_T, INC_S = 0.25, 16, 8, 1.5, 0.010
 local ring, dmgLast, lastT = {}, {}, 0
 local pending = {}          -- contacts waiting to be grouped: { t, car, lap, spline, dmg, rows }
+local seenEv = {}           -- collision event ids already turned into a contact
 local strikes = {}          -- car -> strike points
 local charged = {}          -- car -> penalty seconds handed out so far (whole points served)
 F.penCap = {}               -- car -> { cap, till } read by racecraft's throttle setter (shared table, no upvalue there)
@@ -46,7 +48,7 @@ end
 function F.attach(recentDrops, feedEv) drops, feedEvent = recentDrops, feedEv end
 
 function F.reset()
-    ring, dmgLast, pending, strikes, charged = {}, {}, {}, {}, {}
+    ring, dmgLast, pending, strikes, charged, seenEv = {}, {}, {}, {}, {}, {}
     for k in pairs(F.penCap) do F.penCap[k] = nil end     -- in place: racecraft holds a reference to this table
     F.log, F.count, F.penCount, lastT = {}, 0, 0, 0
 end
@@ -92,10 +94,14 @@ local function sample(sim, now)
                 ring[i] = nil
             end
             local prev = dmgLast[i]
-            if prev and dmg[i] - prev >= DMG_JUMP and r and #r > 0 then
+            local jump = prev and (dmg[i] - prev) or 0
+            local ev = Contacts.recent(i, 0.4)
+            if ev and (seenEv[ev.id] or ev.drop < 5) then ev = nil end
+            if (jump >= DMG_JUMP or ev) and r and #r > 0 then
+                if ev then seenEv[ev.id] = true end
                 local rows = {}
                 for k, v in ipairs(r) do rows[k] = v end
-                pending[#pending + 1] = { t = now, car = i, lap = c.lapCount or 0, spline = spl[i], dmg = dmg[i] - prev, rows = rows }
+                pending[#pending + 1] = { t = now, car = i, lap = c.lapCount or 0, spline = spl[i], dmg = math.max(jump, ev and ev.drop or 0), rows = rows }
                 ring[i] = {}
             end
             dmgLast[i] = dmg[i]

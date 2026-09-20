@@ -488,6 +488,41 @@ def restore_pure(bak):
             print("  (pure last-used plan not restored:", e, ")")
 
 
+ASSISTS_INI = os.path.join(CFG, "assists.ini")
+
+def apply_assists(spec):
+    """--assists JSON {"DAMAGE": 0, "FUEL_RATE": 2} -> [ASSISTS] keys in cfg/assists.ini for this run only (the launcher's
+    damage / fuel / tyre settings; an outside install with damage OFF is what the contacts detector exists for). The file
+    is backed up and restored after the run. Returns the backup path or None."""
+    if not spec or not os.path.exists(ASSISTS_INI):
+        return None
+    bak = ASSISTS_INI + ".harness-backup"
+    shutil.copy2(ASSISTS_INI, bak)
+    lines = open(ASSISTS_INI, encoding="utf-8").read().splitlines(True)
+    want = {str(k): str(v) for k, v in spec.items()}
+    out, seen = [], set()
+    for ln in lines:
+        key = ln.split("=", 1)[0].strip() if "=" in ln else None
+        if key in want:
+            rest = ln.split(";", 1)[1] if ";" in ln else chr(10)
+            ln = f"{key}={want[key]} ;{rest}" if ";" in ln else f"{key}={want[key]}" + chr(10)
+            seen.add(key)
+        out.append(ln)
+    for k in want:
+        if k not in seen:
+            out.append(f"{k}={want[k]}" + chr(10))
+    open(ASSISTS_INI, "w", encoding="utf-8").write("".join(out))
+    return bak
+
+
+def restore_assists(bak):
+    if bak and os.path.exists(bak):
+        try:
+            os.replace(bak, ASSISTS_INI)
+        except OSError as e:
+            print("  (assists not restored:", e, ")")
+
+
 def restore_csp_overrides(restore):
     for path, bak in restore:
         try:
@@ -515,6 +550,7 @@ def run_once(args, arm, run_idx):
     print(f"[{label} #{run_idx}] {ini.get('RACE', 'TRACK')} x{args.laps} laps, {ncars} cars, budget {budget:.0f}s")
 
     csp_restore = apply_csp_overrides(arm.get("csp") or {})
+    assists_bak = apply_assists(arm.get("assists") or {})
     pure_bak = apply_pure_for_weather(getattr(args, "weather_type", None))
     t_launch = time.time()
     proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
@@ -590,6 +626,7 @@ def run_once(args, arm, run_idx):
                 break
     finally:
         restore_pure(pure_bak)
+        restore_assists(assists_bak)
         restore_csp_overrides(csp_restore)
         if ours:
             subprocess.run(["taskkill", "/IM", "acs.exe", "/F"], capture_output=True)
@@ -683,6 +720,7 @@ def main():
     ap.add_argument("--troublespots", help="JSON of Troublespots module fields, e.g. {\"FRESH\":true} = clean learned map for this run")
     ap.add_argument("--human", help="JSON of Human module fields, e.g. {\"RAINFX_GRIP\":1.0,\"RAINFX_CAUT\":1.0}")
     ap.add_argument("--csp", help="JSON of CSP per-user config overrides for this run only, e.g. {\"new_behaviour\":{\"AI_RACE_RUBBERBANDING\":{\"ENABLED\":1}}}")
+    ap.add_argument("--assists", help="JSON of launcher assists for this run only (cfg/assists.ini [ASSISTS]), e.g. {\"DAMAGE\":0} = damage off")
     ap.add_argument("--fault", help="JSON of Fault module fields (penalties), e.g. {\"ENABLED\":true,\"ENFORCE\":false}")
     ap.add_argument("--drivers", choices=["none", "random"], default="none", help="random: assign Verve driver profiles to the whole grid (the Randomize button)")
     ap.add_argument("--profiles", help="fixed profiles: 'all=arch_rookie,last=lewis_hamilton,3=kevin_estre' (slot 0 = the autopilot player car; 'last' = back of the grid)")
@@ -700,7 +738,8 @@ def main():
     else:
         arms = [{"label": args.label, "settings": json.loads(args.settings) if args.settings else {}, "drivers": args.drivers, "profiles": args.profiles,
                  "recovery": json.loads(args.recovery) if args.recovery else {}, "racecraft": json.loads(args.racecraft) if args.racecraft else {},
-                 "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}, "human": json.loads(args.human) if args.human else {}}]
+                 "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}, "human": json.loads(args.human) if args.human else {},
+                 "assists": json.loads(args.assists) if args.assists else {}}]
 
     results = []
     for r in range(args.runs):

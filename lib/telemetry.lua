@@ -14,6 +14,9 @@ T.UNATTENDED = false         -- harness/autopilot run: flagged so human statisti
 local URL = 'https://qcdnlochctwfsvslnqxo.supabase.co/rest/v1/race_reports'
 local KEY = 'sb_publishable_eaoWTXUhM7jcbZ8vBRhtYw_bPIcJa8W'
 
+local Contacts = require('lib.contacts')
+-- launcher assists (damage / fuel rate) on builds that expose ac.getAssists(); nil elsewhere
+local function assist(k) local v = nil; pcall(function() local a = ac.getAssists and ac.getAssists(); if a then v = a[k] end end); return v end
 local S = ac.storage({ installId = '', pending = '', sent = 0 })
 if S.installId == '' then
     local chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
@@ -46,6 +49,20 @@ end
 
 local function sample(sim)
     st.samples = st.samples + 1
+    -- damage off in the launcher: damage never jumps, so incidents come from CSP's collision state instead; with damage
+    -- on the damage path stays (comparable with every row sent so far). The row carries damage_setting either way.
+    if st.damageOff == nil then st.damageOff = (assist('damageRate') == 0) end
+    if st.damageOff and Contacts.available then
+        local evs, last = Contacts.since(st.contactCursor or 0); st.contactCursor = last
+        for _, e in ipairs(evs) do
+            local c = ac.getCar(e.car)
+            if c and not c.isInPitlane and st.inc[e.car] ~= nil and e.drop >= 3 then
+                st.inc[e.car] = st.inc[e.car] + 1
+                if e.other >= 0 then st.incContact = st.incContact + 1 else st.incSolo = st.incSolo + 1 end
+                if e.lap <= 1 then st.incLap1 = st.incLap1 + 1 end
+            end
+        end
+    end
     pcall(function() if sim.fps and sim.fps > 0 then st.fps = st.fps + sim.fps; st.fpsN = st.fpsN + 1 end end)
     local leader = nil
     local inPits = 0
@@ -65,7 +82,7 @@ local function sample(sim)
             -- incidents: damage jumps; contact if another car is within 20 m
             local dmg = maxDamage(c)
             local pd = st.dmgPrev[i]
-            if pd ~= nil and dmg - pd >= 8 and not c.isInPitlane then
+            if not st.damageOff and pd ~= nil and dmg - pd >= 8 and not c.isInPitlane then
                 st.inc[i] = st.inc[i] + 1
                 local near = false
                 for j = 0, sim.carsCount - 1 do
@@ -177,6 +194,9 @@ function T.buildReport(sim, ctx, completed, abortReason)
         '"profiles_used":' .. jint(ctx.profilesUsed), '"archetypes_used":' .. jint(ctx.archetypesUsed),
         '"trouble_spots":' .. jint(ctx.troubleSpots),
         '"fps_avg":' .. jnum(st.fpsN > 0 and st.fps / st.fpsN or nil),
+        '"damage_setting":' .. jnum(assist('damageRate')),
+        '"fuel_setting":' .. jnum(assist('fuelRate')),
+        '"contacts_seen":' .. jint(Contacts.count),
         '"verve_ms_avg":' .. jnum(ctx.verveMs), '"lua_errors":' .. jint(ctx.luaErrors),
         '"session_key":' .. jstr(S.installId .. '-' .. tostring(st.t0) .. '-' .. tostring(ctx.track or '')),   -- for server-side de-duplication
         '"settings":' .. (ctx.settingsJson or 'null'),
@@ -188,7 +208,7 @@ end
 -- a column the server does not know yet (PGRST204 'Could not find the ... column'): drop it from the row and resend once,
 -- so a client can be ahead of the database schema (session_key, 2026-09-19: every send failed for a day before this)
 local function withoutColumn(body, col)
-    local out = body:gsub(',"' .. col .. '":"[^"]*"', ''):gsub(',"' .. col .. '":[^,}]*', '')
+    local out = body:gsub(',"' .. col .. '":"[^"]*"', ''):gsub(',"' .. col .. '":%b{}', ''):gsub(',"' .. col .. '":%b[]', ''):gsub(',"' .. col .. '":[^,}]*', '')
     return out
 end
 local function post(body, onDone, retried)

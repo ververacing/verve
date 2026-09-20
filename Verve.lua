@@ -14,8 +14,9 @@ local Career    = require('lib.career')       -- recognises AC career events; re
 local Difficulty = require('lib.difficulty')  -- makes those numbers real (AC ignores them on some installs)
 local Telemetry = require('lib.telemetry')
 local Watch     = require('lib.watch')        -- read-back watchdog: is anything else writing the AI level / aggression?
+local Contacts  = require('lib.contacts')     -- contacts from CSP's collision state (works with damage off)
 local Fault     = require('lib.fault')        -- who caused each contact, and the time penalty it costs (owner's ask 2026-09-17)
-local Strategy  = require('lib.strategy')     -- planned manoeuvres (racecraft drives it; Verve owns the toggle + status)    -- opt-in anonymous race reports         -- structured race feed (opt-in; consumed by Verve Booth / Race Engineer)
+local Strategy  = require('lib.strategy')     -- planned manoeuvres (racecraft drives it; Verve owns the toggle + status)
 Racecraft.penCap = Fault.penCap            -- penalty throttle caps, read by racecraft's throttle setter (shared table)
 Fault.attach(Recovery.recentDrops, Feed.event)
 local Diag = nil; pcall(function() Diag = require('diag') end)   -- LOCAL dev diagnostics; absent in the shipped build
@@ -97,11 +98,13 @@ local function sessionReset(restart)
     pcall(function() local okS, simR = pcall(ac.getSim); if okS and simR then Telemetry.abort(restart and 'restart' or 'session change', simR, telemetryCtx()) end end)
     pcall(Career.reset)
     pcall(Difficulty.reset)
+    frameMs, frameN, luaErrors = 0, 0, 0
     harnessStarted, harnessStartT, autopilotArmed, harnessT, harnessEndT = false, 0, false, 0, 0
     pcall(Classes.reset)
     pcall(Human.reset)            -- per-track distances
     pcall(Racecraft.reset)
     shiftSet = {}
+    pcall(Contacts.reset)
     pcall(Fault.reset)
     pcall(Watch.reset)
     -- driver profiles are session-only: wipe every race. NOT on a restart: the picks should survive it, and
@@ -327,13 +330,15 @@ function script.update(dt)
             recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, dropsOff = Recovery.dropsOff,
             mvN = Strategy.attempts, mvOK = Strategy.ok, mvT = Strategy.byTypeString(), gateN = Recovery.gateMoves,
             fwdSign = (Recovery.fwdSign and Recovery.fwdSign() or 0), dropFlips = Recovery.dropFlips,
-            suspPits = Recovery.suspPitCount, faults = Fault.count, penalties = Fault.penCount,
+            suspPits = Recovery.suspPitCount, faults = Fault.count, penalties = Fault.penCount, contacts = Contacts.count,
+            contactRecent = Contacts.recent,
             conflictLevel = Watch.conflicts.level, conflictAggr = Watch.conflicts.aggr,
             wet = (function() local w = 0; pcall(function() w = sim.rainWetness or 0 end); return w end)(), rain = (function() local r = 0; pcall(function() r = sim.rainIntensity or 0 end); return r end)(),
         })
     end) end
     Feed.ENABLED = G.raceFeed
     if G.raceFeed then pcall(Feed.update, dt, { rc = Racecraft.last, recState = Recovery.stateOf, recentDrops = Recovery.recentDrops }) end
+    pcall(Contacts.update, dt)
     pcall(Fault.update, dt)
     pcall(Watch.update, dt)
     Telemetry.ENABLED = G.shareData == true
@@ -496,7 +501,7 @@ function script.windowMain()
     if Update.latest then
         ui.textColored('Update available: v' .. Update.latest .. (Update.summary and ('  -  ' .. Update.summary) or ''), rgbm(0.98, 0.85, 0.02, 1))
         if Update.downloadUrl then
-            if ui.button('Get the update##upd') then pcall(function() os.openURL(Update.downloadUrl) end) end
+            if ui.button('Get the update##upd') then pcall(function() if Update.safeUrl(Update.downloadUrl) then os.openURL(Update.downloadUrl) end end) end
             ui.sameLine(); ui.textColored(Update.downloadUrl, rgbm(0.5, 0.5, 0.5, 1))
         end
     end
@@ -605,9 +610,10 @@ function script.windowMain()
         ui.text('Verve is OFF.')
     else
         ui.text(string.format('AI cars managed: %d', managed))
+        if not Career.active and Difficulty.sliderOverride then ui.textColored('Difficulty: ' .. Difficulty.sliderOverride, rgbm(0.8, 0.7, 0.4, 1)) end
         if G.racecraft then
             ui.text(string.format('Attacking: %d   Defending: %d', Racecraft.attacking or 0, Racecraft.defending or 0))
-            ui.text('Track read as: ' .. (Racecraft.isOval and 'Oval / speedway (groove racing on)' or 'Road course'))
+            ui.text('Track read as: ' .. (Racecraft.isOval and 'Oval / speedway' or 'Road course'))
             if G.strategy ~= false then ui.text(string.format('Planned manoeuvres: %d (%d gained a place)', Strategy.attempts or 0, Strategy.ok or 0)) end
         end
         if G.troubleSpots then

@@ -191,6 +191,8 @@ R.PASS_ABORT = 0              -- >0: not this much alongside the car I'm passing
 R.PASS_COMMIT = 0             -- >0: a driver this much quicker (pace rating) than the car ahead commits to the pass from ATTACK_GAP (A/B)
 R.RS_OL_REAREND = 0.35        -- rear-end guard trim for a road-space pass on laps 0-1 (CV.RS_REAREND from lap 2); 1.0 = no trim (A/B)
 R.RS_OL_CROWD = 99            -- the star exemption below applies only with at most this many cars close by (A/B)
+R.CV_TGAP = 0                 -- >0: the opening-lap convoy gap is this many SECONDS of travel at my speed (never less than CV.GAP_M);
+                              -- the floor scales with it. 24-car Spa: the deepest rows arrive fastest onto the slowest pack (A/B 2026-09-19)
 R.GROOVE_X = 0.0              -- DEFAULT OFF 2026-09-19 (owner-reported Daytona: on 48/39/34 incidents, off 6/3). Oval groove offset multiplier (0 = no groove; A/B 2026-09-19: at Daytona the 0.62 lane offset pinned a 20-car
                               -- Euro NASCAR field at 242 km/h and produced 48 incidents; with the oval undetected the same cars ran 300 with 15)
 R.RS_OL_METER = 95            -- laps 0-1: road space is allowed for a TOP-TIER driver (profile pace >= 0.75, the manoeuvre layer's tier 2)
@@ -511,12 +513,14 @@ function R.evaluate(i, dt)
                 if tl0 < (cv2.react[i] or 0) then thr = math.min(thr, CV.REACT_THR)   -- reaction time: not on the gas yet
                 elseif tl0 < (cv2.react[i] or 0) + CV.ROW_T * R.ROW_T_X * (cv2.back[i] / CV.ROW_M) then thr = math.min(thr, CV.THR) end   -- staggered release
             end
-            if olS < CV.END and aheadIdx >= 0 and gapA * trackLen < CV.GAP_M and spd > aheadSpd + CV.CLOSING
+            local cvGap, cvNear = CV.GAP_M, CV.NEAR_M
+            if R.CV_TGAP > 0 then cvGap = math.max(CV.GAP_M, spd / 3.6 * R.CV_TGAP); cvNear = cvGap * (CV.NEAR_M / CV.GAP_M) end   -- a time gap: the faster I arrive, the further out I ease
+            if olS < CV.END and aheadIdx >= 0 and gapA * trackLen < cvGap and spd > aheadSpd + CV.CLOSING
                and not (R.OL_STAR_CONVOY and Strategy.tierOf(i) >= 2) then
                 local aCar = ac.getCar(aheadIdx)
                 if aCar and math.abs(latOf(aCar.position) - latOf(me.position)) < CV.LAT then
                     local gm = gapA * trackLen
-                    thr = math.min(thr, clamp(CV.THR_MIN + (1 - CV.THR_MIN) * (gm - CV.NEAR_M) / (CV.GAP_M - CV.NEAR_M), CV.THR_MIN, 1))
+                    thr = math.min(thr, clamp(CV.THR_MIN + (1 - CV.THR_MIN) * (gm - cvNear) / (cvGap - cvNear), CV.THR_MIN, 1))
                 end
             end
             -- SIDE YIELD: two-abreast into a corner on lap 0 is how same-row pairs touch (Barcelona F1 2026-09-16:

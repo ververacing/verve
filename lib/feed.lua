@@ -20,6 +20,8 @@ local BATTLE_GAP_S  = 1.0      -- a fight is "a battle" once the gap is under th
 local BATTLE_HOLD   = 3        -- ...for this many snapshots
 local STUCK_S       = 8.0      -- stationary off the line this long = stuck (and a yellow if on the road)
 local INCIDENT_MIN  = 8        -- km/h of new body damage that counts as an incident
+local Contacts = require('lib.contacts')
+local feedEvSeen = {}       -- per car: last collision event id already reported
 
 local file, buf, started = nil, {}, false
 local lastState, lastFlush = -1e9, -1e9
@@ -84,6 +86,7 @@ local function newFile(sim)
 end
 
 function F.reset()
+    feedEvSeen = {}
     namesSent, namesT = '', 0
     flush()
     file = nil; started = false
@@ -183,6 +186,10 @@ function F.update(dt, stats)
                 end
             end
             local dd = c.dmg - p.dmg
+            if dd < INCIDENT_MIN and Contacts.available then     -- no damage jump: a collision event in the last second counts instead
+                local ev = Contacts.recent(i, 1.0)
+                if ev and ev.id ~= feedEvSeen[i] and ev.drop >= 3 then dd = math.max(INCIDENT_MIN, ev.drop); feedEvSeen[i] = ev.id end
+            end
             if dd >= INCIDENT_MIN and not c.pit then
                 local contact = {}
                 -- WHO HAD THE CORNER: the closest other car by on-track gap in the second BEFORE the hit (the previous

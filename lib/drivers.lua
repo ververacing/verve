@@ -12,6 +12,7 @@
 -- Not affiliated with any driver, team or series -- for entertainment. Numbers are easy to edit.
 
 local Classes = require('lib.classes')
+local Difficulty = require('lib.difficulty')   -- the measured level <-> lap-time curve (no cycle: difficulty needs only career)
 local D = {}
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
 -- pace spreads AI level DOWN from the difficulty. The FASTEST driver actually on the grid runs at the
@@ -618,7 +619,6 @@ function D.applyPace(i, base)
             if paceDirty then recomputeFieldMaxPace() end
             -- the fastest profile on the grid runs at `base`; the rest are spread BELOW it by pace rating,
             -- in lap-time terms (SPREAD_PCT per 1.0 of rating), converted to a level through the measured curve
-            local Difficulty = require('lib.difficulty')
             local basePct = Difficulty.levelToPct(base)
             lvl = math.min(base, Difficulty.pctToLevel(basePct + (fieldMaxPace - st.pace) * SPREAD_PCT))
         end

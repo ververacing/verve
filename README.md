@@ -27,9 +27,8 @@ racing, on **any** car and track. Toggle and tune everything in the in‑game pa
   out of range); in‑zone DRS is left to the game.
 
 ## Requirements
-- A recent **Custom Shaders Patch**. `REQUIRED_VERSION` in `manifest.ini` is the minimum CSP
-  build (currently a conservative placeholder — validate against the oldest CSP you want to
-  support before a public release).
+- **Custom Shaders Patch** build 3465 or newer (`REQUIRED_VERSION` in `manifest.ini`).
+  Tested on 3465 and the preview builds players are on (3749–4157).
 - Content Manager recommended.
 
 ## Install
@@ -39,6 +38,15 @@ racing, on **any** car and track. Toggle and tune everything in the in‑game pa
 
 In game, open the **Verve AI** app from the app sidebar and enable it. You can review each car's
 detected class and set per‑car levels on the grid before the lights.
+
+## Before you race (three things that matter)
+1. **The difficulty slider is real.** 80 is a beginner field, 90 an intermediate one, 100 a strong club racer.
+   Verve makes the launcher's number the truth in every mode (Content Manager's per-car grid levels only keep
+   their spread around it), so start where you actually are — 100 is not the default, it's the top.
+2. **Keep damage on, 50 % or more.** With damage off nothing ever retires, a wrecked car sits on the line all
+   race, and the field never strings out the way a real one does.
+3. **Turn off other AI mods and CSP's AI rubber‑banding / adaptation.** They write the same AI values Verve
+   does. Verve watches for this and says so in its window; when it does, switch the other one off.
 
 ## Notes
 - Verve controls AI grip via CSP's public physics API. If you also run another AI‑grip mod
