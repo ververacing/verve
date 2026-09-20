@@ -321,6 +321,8 @@ local rejoinUntil = {}     -- throttle-ramp deadline after a teleport
 local pitStuckT = {}       -- seconds stopped in the pit lane (outside the box)
 local dangerT = {}         -- seconds a recovering car has been holding for traffic (capped by DANGER_MAX)
 local overridesCleared = false   -- one-time (re)load self-heal: drop any throttle/top-speed limits we left on cars
+R.raceSession = true             -- false in practice / qualifying: no parking, no box limbo, no pit-lane repositions (a car
+                                 -- parked in a long qualifying kept throttle 0 into the race: 'the AI no longer start', 2026-09-19)
 
 -- throttle allowed right now for a car that was just set back on the track (1 = no limit)
 local function rampLimit(i)
@@ -362,7 +364,7 @@ end
 -- then spent eight minutes crashing into two "retired" cars at pit exit. Native retirement it is; the
 -- yellow flag + go-around cover the ~20 s the wreck sits there.
 local function parkInPits(i)
-    if parked[i] then return end
+    if parked[i] or not R.raceSession then return end
     parked[i] = true
     -- Move it to its pit box NOW. AC's own retirement of a stationary car took 160-540 s in the 07:05 race
     -- (a wreck sat in view for six laps; a "frozen" car at the pit exit for seven minutes). Its box is where
@@ -556,6 +558,7 @@ function R.update(dt)
     local active = 0
     if not scaled then scaled = true; pcall(function() scaleToTrack(sim.trackLengthM) end) end   -- per-track distances (self-heals after a hot-reload)
     if #drops > 0 then pcall(judgeDrops, os.clock()) end
+    pcall(function() R.raceSession = (sim.raceSessionType == ac.SessionType.Race) end)
     if not overridesCleared then
         -- After a (re)load our per-car tables are empty but the limits we set on the PHYSICS side persist: a
         -- car mid throttle-ramp would stay at 40% throttle for the rest of the race. Clear them all once.
@@ -563,7 +566,7 @@ function R.update(dt)
         for i = 0, sim.carsCount - 1 do
             pcall(function()
                 local c = ac.getCar(i)
-                if c and c.isAIControlled and not c.isRetired then physics.setAIThrottleLimit(i, 1); physics.setAITopSpeed(i, 1e9) end
+                if c and c.isAIControlled and not c.isRetired then physics.setAIThrottleLimit(i, 1); physics.setAITopSpeed(i, 1e9); physics.setAIStopCounter(i, 0) end
             end)
             overriding[i] = true; releaseControls(i)      -- and any stale control override from before the (re)load
         end
@@ -690,7 +693,7 @@ function R.update(dt)
                 -- retired it -- our protection blocks AC's retirement -- so it sat there "running" for 40 laps
                 -- (Zandvoort + Silverstone GPs, 2026-09-14). A real stop is under a minute; longer than that in
                 -- a race with laps on the board is a retirement: mark it so bookkeeping, feed and reports agree.
-                if inBox and spd < STOP_SPEED and (car.lapCount or 0) >= 1 and car.isAIControlled then
+                if inBox and spd < STOP_SPEED and (car.lapCount or 0) >= 1 and car.isAIControlled and R.raceSession then
                     local fuel = car.fuel or 0
                     if boxFuel[i] and fuel > boxFuel[i] + 0.01 then boxT[i] = 0 else boxT[i] = (boxT[i] or 0) + dt end   -- refuelling: the stop is live
                     boxFuel[i] = fuel
@@ -701,7 +704,7 @@ function R.update(dt)
                 -- (hasMoved: the grid slots by the pit wall count as "in the pit lane" -- a car waiting for the lights
                 -- is not stuck. Zandvoort 2026-09-16: two healthy cars parked at the pit entry at the end of lap 0
                 -- because this timer had filled up on the grid.)
-                if not inBox and spd < STOP_SPEED and not terminalDamage(car) and hasMoved[i] then
+                if not inBox and spd < STOP_SPEED and not terminalDamage(car) and hasMoved[i] and R.raceSession then
                     pitStuckT[i] = (pitStuckT[i] or 0) + dt
                     pcall(function() physics.preventAIFromRetiring(i) end)
                     if pitStuckT[i] > PIT_STUCK_T then
@@ -1104,6 +1107,7 @@ function R.reset()
     knot = {}
     lastRepairT = {}
     for i in pairs(overriding) do releaseControls(i) end   -- hand every car's controls back at a session change
+    overridesCleared = false     -- and release every throttle / top-speed / stop-counter hold on the next update (they persist across sessions)
     drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}
     R.dropN, R.dropOK, R.dropsOff, R.dropFlips, R.gateMoves = 0, 0, false, 0, 0
     gateStage = {}
