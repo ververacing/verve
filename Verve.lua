@@ -45,7 +45,7 @@ local DEFAULTS = {
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
     crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
-    careerCurve = true, shareData = false, strategy = true,
+    careerCurve = true, shareData = false, strategy = true, raceStart = 'calm',
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
@@ -56,7 +56,7 @@ local S = ac.storage({
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
     crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
-    careerCurve = true, shareData = false, strategy = true,
+    careerCurve = true, shareData = false, strategy = true, raceStart = 'calm',
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     autosave = true, schema = 1,
 })
@@ -265,6 +265,7 @@ function script.update(dt)
     Human.HUMAN_ERRORS  = G.humanErrors
     Human.CLASS_PHYSICS = G.classPhys
     Racecraft.ENABLED     = G.racecraft
+    Racecraft.START_X     = ({ calm = 1.0, racing = 0.5, stock = 0.0 })[G.raceStart] or 1.0
     Strategy.ENABLED      = G.strategy ~= false
     Racecraft.INTENSITY   = G.rcIntensity
     Racecraft.VARIABILITY = G.intensity     -- spreads per-driver aggression across the field
@@ -366,8 +367,8 @@ end
 -- everything the anonymous race report needs from the other modules (no names, no paths)
 telemetryCtx = function()
     local settings = {}
-    for _, k in ipairs({ 'humanErrors', 'drsDiscipline', 'controlGrip', 'careerCurve', 'intensity', 'rcIntensity', 'baseGrip' }) do
-        local v = G[k]; settings[#settings + 1] = string.format('"%s":%s', k, type(v) == 'number' and string.format('%.2f', v) or tostring(v == true))
+    for _, k in ipairs({ 'humanErrors', 'drsDiscipline', 'controlGrip', 'careerCurve', 'intensity', 'rcIntensity', 'baseGrip', 'raceStart' }) do
+        local v = G[k]; settings[#settings + 1] = string.format('"%s":%s', k, type(v) == 'number' and string.format('%.2f', v) or (type(v) == 'string' and ('"' .. v .. '"') or tostring(v == true)))
     end
     local pu, au = 0, 0
     pcall(function() pu, au = Drivers.counts() end)
@@ -573,6 +574,12 @@ function script.windowMain()
     ui.text('Options')
     toggle('Human errors', 'humanErrors', 'Occasional gentle bobbles on forgiving cars. Never on Formula/Prototype/Hypercar. Grip-slewed so it will not spin cars.')
     toggle('Career: scale difficulty across the series', 'careerCurve', 'In AC career events the difficulty meter picks a pace band and each event moves you through it: soft first series, a real fight at the end, never leaving the band. Off = every career event at the meter\'s flat level. (Outside career the meter always applies as set.)')
+    do
+        local names = { calm = 'Calm', racing = 'Racing', stock = 'Stock' }
+        ui.text('Race start'); ui.sameLine(150)
+        comboFor('##raceStart', names[G.raceStart] or 'Calm', G.raceStart, { 'calm', 'racing', 'stock' }, function(o) setG('raceStart', o) end)
+        if ui.itemHovered() then ui.setTooltip('How the AI launches and takes the first lap. Calm: staggered release and extra spacing into the first corners (the fewest first-lap pile-ups). Racing: half of that - backmarkers go for it, expect the occasional turn-1 tangle, as in real life. Stock: none of it, AC\'s own start.') end
+    end
     toggle('Tactics: set-up passes, late-brake lunges, switchbacks', 'strategy', 'Planned manoeuvres on top of the reactive racecraft, per class (a GT driver out-brakes, a formula driver sets it up on the straight, a stock car slingshots). Unlocked from 90 on the difficulty meter; a driver\'s pace rating decides how much of the playbook they use (a Rookie never switchbacks, a Veteran does).')
     toggle('Send anonymous race stats to improve Verve', 'shareData', 'After each race, send one small anonymous summary (track, cars, laps, difficulty, finishers, incidents, repairs, your positions and lap times). No names, no gamer tag, no paths, no hardware ids. Off by default.')
     toggle('Formula DRS discipline', 'drsDiscipline', 'On Formula cars, close DRS when the game says it is not available (outside a DRS zone or not within range). In-zone DRS is left to the game.')
