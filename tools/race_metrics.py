@@ -46,11 +46,15 @@ def metrics(path):
         inc = [e.get("lap", 0) for e in contacts if e.get("car", 0) != 0 and e.get("dmg", 0) >= 8]
         low = 0
 
-    # stationary episodes >= 40 s (a "frozen" car)
+    # stationary episodes >= 40 s (a "frozen" car) -- only before the leader's last lap change: after the flag AC parks
+    # the field wherever it likes and Verve stands down (finished cars, 2026-09-20)
+    t_end = max((r["t"] for a, r in zip(rows, rows[1:]) if r["leaderLap"] != a["leaderLap"]), default=rows[-1]["t"] + 1)
     frozen, longest = 0, 0
     for ci in range(n):
         run = 0
         for r in rows:
+            if r["t"] >= t_end:
+                break
             c = next(x for x in r["grid"] if x["i"] == ci)
             if c["spd"] < 3 and not c["pit"] and (r["t"] - t0) > 30:
                 run += 8
