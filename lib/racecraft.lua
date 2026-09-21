@@ -140,7 +140,7 @@ R.cv2 = cv2                                                               -- (re
 R.CONVOY2_ON = true 
 R.ROWCAUT_X = 1.0             -- row-caution multiplier (A/B for big grids, 2026-09-19)
 R.ROW_T_X = 1.0               -- staggered-release per-row hold multiplier (A/B for big grids)
-R.OL_GRID_DEPTH = 0           -- >0: on a deep grid the row caution keeps growing past CV.ROWCAUT_M up to the grid's depth, and the brake
+R.OL_GRID_DEPTH = 0.5         -- DEFAULT 2026-09-21 (owner): 13 heavy-sprint pairs at 18-24 cars, better in 10, heavy hits down; neutral at 18. >0: on a deep grid the row caution keeps growing past CV.ROWCAUT_M up to the grid's depth, and the brake
                               -- guard's reach grows x (1 + this x back / depth) for the cars that started furthest back (A/B 2026-09-20)
 R.OL_ROWCAUT = true           -- opening lap: brake earlier the further back you started (harness A/B)
 R.OL_SPINYELLOW = false       -- opening lap: a sideways / much slower car ahead is a yellow, not just a stopped one (harness A/B)
@@ -191,6 +191,10 @@ R.ACX_LAP = 0                 -- ATTACK_CAUT_X applies from this lap on (0 = alw
 R.ATTACK_CAUT_X = 1.0         -- multiplier on the attack's negative caution (A/B; applied caution while attacking was 1.11 vs AC's 1.0)
 R.PC_TS = 1.0                 -- trouble-spot + crash caution multiplier for a committed passer (PASS_COMMIT; A/B)
 R.PASS_ABORT = 0              -- >0: not this much alongside the car I'm passing by the braking zone -> tuck back in behind it (A/B)
+R.TOW_ATTACK = 0              -- >0: on a STRAIGHT (steer < 0.1), above TOW_MIN km/h, within TOW_M of the car ahead, with a pace edge of
+                              -- TOW_EDGE, the applied caution is floored at -this (corners untouched). Tow diagnostic 2026-09-21: a veteran
+                              -- in the tow LOSES 0.6-1.2 m/s to the car ahead - AC's AI following distance, and Verve never got under 1.0
+R.TOW_MIN = 150; R.TOW_M = 60; R.TOW_EDGE = 0.15
 R.PASS_FINISH = 0             -- >0: a committed quicker driver (PASS_COMMIT) offline beside the car ahead, within this many car lengths of level,
                               -- finishes the pass: caution floored at PASS_CAUT, full aggression, later braking on the inside (A/B 2026-09-19)
 R.PASS_BH = 1.06              -- ...brake hint multiplier on the inside line into the corner (> 1 = later braking; 1 = off)
@@ -1087,6 +1091,14 @@ function R.evaluate(i, dt)
         -- cap the stacked back-off (see CAUT_MAX); the attack/defend NEGATIVE caution is left alone
         if caut > K.CAUT_MAX then caut = K.CAUT_MAX end
         if passFinish and caut > R.PASS_CAUT then caut = R.PASS_CAUT end   -- finishing a pass: no hedging (see PASS_FINISH)
+        -- TOW ATTACK (R.TOW_ATTACK): straight, fast, close, and clearly quicker -> stop keeping AC's following distance
+        if R.TOW_ATTACK > 0 and state == 1 and aheadIdx >= 0 and myLap >= 2 and spd > R.TOW_MIN and gapA * trackLen < R.TOW_M then
+            local st = me.steer
+            if type(st) == 'number' and math.abs(st) < 0.1 and prof then
+                local ap = Drivers.statsOf(aheadIdx)
+                if ap and prof.pace - ap.pace >= R.TOW_EDGE and caut > -R.TOW_ATTACK then caut = -R.TOW_ATTACK; R.towN = (R.towN or 0) + 1 end
+            end
+        end
 
         -- slew the offset (anti-dart)
         local cur = curOffset[i] or 0
