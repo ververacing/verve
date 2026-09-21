@@ -140,6 +140,8 @@ R.cv2 = cv2                                                               -- (re
 R.CONVOY2_ON = true 
 R.ROWCAUT_X = 1.0             -- row-caution multiplier (A/B for big grids, 2026-09-19)
 R.ROW_T_X = 1.0               -- staggered-release per-row hold multiplier (A/B for big grids)
+R.OL_GRID_DEPTH = 0           -- >0: on a deep grid the row caution keeps growing past CV.ROWCAUT_M up to the grid's depth, and the brake
+                              -- guard's reach grows x (1 + this x back / depth) for the cars that started furthest back (A/B 2026-09-20)
 R.OL_ROWCAUT = true           -- opening lap: brake earlier the further back you started (harness A/B)
 R.OL_SPINYELLOW = false       -- opening lap: a sideways / much slower car ahead is a yellow, not just a stopped one (harness A/B)
 R.OL_SIDEYIELD = false        -- opening lap: alongside a car whose nose is ahead, corner coming -> tuck in behind it (harness A/B)
@@ -551,6 +553,7 @@ function R.evaluate(i, dt)
                 local gm = gapA * trackLen
                 local reach = CV.BG_M
                 if R.OL_FUEL_K > 0 then reach = reach * (1 + R.OL_FUEL_K * clamp(((me.fuel or 20) - 20) / 50, 0, 1.5)) end   -- heavier car, longer braking
+                if R.OL_GRID_DEPTH > 0 and cv2.back[i] and (cv2.depth or 0) > 0 then reach = reach * (1 + R.OL_GRID_DEPTH * cv2.back[i] / cv2.depth) end   -- the deeper you started, the earlier
                 if R.BG_T > 0 then reach = math.max(reach, (spd - aheadSpd) / 3.6 * R.BG_T) end
                 if gm < reach then
                     local aCar = ac.getCar(aheadIdx)
@@ -837,7 +840,8 @@ function R.evaluate(i, dt)
             if R.OL_ROWCAUT and myLap == 0 and cv2.back[i] then    -- row ten brakes on the lights of the car ahead: earlier the further back
                 -- (scaling this by aggression was tried 2026-09-16: the star went off the road at 127 km/h; it protects him)
                 local fuelX = (R.OL_FUEL_K > 0) and (1 + R.OL_FUEL_K * clamp(((me.fuel or 20) - 20) / 50, 0, 1.5)) or 1
-                caut = caut + CV.ROWCAUT * R.ROWCAUT_X * fuelX * clamp(cv2.back[i] / CV.ROWCAUT_M, 0, 1) * openingLap * prox
+                local rowCap = (R.OL_GRID_DEPTH > 0) and math.max(1, (cv2.depth or 0) / CV.ROWCAUT_M) or 1   -- a deep grid: the ramp does not stop at 90 m
+                caut = caut + CV.ROWCAUT * R.ROWCAUT_X * fuelX * clamp(cv2.back[i] / CV.ROWCAUT_M, 0, rowCap) * openingLap * prox
             end
             local olAggr = K.OPENLAP_AGGR
             if R.OL_STAR_AGGR > 0 and Strategy.tierOf(i) >= 2 then olAggr = K.OPENLAP_AGGR * R.OL_STAR_AGGR end
@@ -1148,6 +1152,7 @@ function R.beginFrame()
                 end
                 for j, x in pairs(sp) do
                     cv2.back[j] = math.max(0, (front - x) * trackLen)
+                    if cv2.back[j] > (cv2.depth or 0) then cv2.depth = cv2.back[j] end     -- the grid's depth (m), for OL_GRID_DEPTH
                     -- reaction time at the lights: a human grid never launches as one
                     cv2.react[j] = (R.OL_REACT_MAX > 0) and (CV.REACT_MIN + math.max(0, R.OL_REACT_MAX - CV.REACT_MIN) * math.random()) or 0
                 end
@@ -1173,7 +1178,7 @@ function R.reset()
     dmgSeen, dmgLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     letbyT, letbyDone, letbyFor = {}, {}, {}
-    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil }; R.cv2 = cv2
+    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0 }; R.cv2 = cv2
     R.last = {}
     pcall(Strategy.reset)
     scaled = false

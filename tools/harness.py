@@ -254,6 +254,8 @@ def build_race_ini(args, base_path):
         ini.set("RACE", "TRACK", args.track)
         ini.set("RACE", "CONFIG_TRACK", args.layout or "")
     ini.set("RACE", "CARS", str(len(cars) + 1))
+    if getattr(args, "minutes", 0):
+        ini.set("RACE", "VIRTUAL_LAPS", str(args.laps))   # the lap estimate AC fuels the AI with in a timed race (RACE_LAPS alone gave 4 L, 2026-09-20)
     ini.set("RACE", "RACE_LAPS", str(args.laps))     # also for a timed race: AC fuels the AI from this estimate (0 = 4 L, the field ran dry after two laps, 2026-09-20)
     set_sessions(ini, args)
     if args.weather:
@@ -622,6 +624,7 @@ def run_once(args, arm, run_idx):
         # End of race is read from the diagnostics file (AC only rewrites out/race_out.json on exit to the
         # menu, so that signal never fires in an unattended run): the leader has completed all the laps,
         # or every car is stationary in the pits and the logger has gone quiet.
+        stopped_checks = 0
         while time.time() - t_launch < budget:
             time.sleep(10)
             if proc.poll() is not None:
@@ -633,8 +636,9 @@ def run_once(args, arm, run_idx):
             if state is None:
                 continue
             leader_lap, all_parked, age = state
+            stopped_checks = stopped_checks + 1 if all_parked else 0      # a field stopped for 4 checks (40 s) is over, logger or not (point-to-point finish)
             lap_done = (leader_lap > args.laps) if not getattr(args, "minutes", 0) else False   # timed: the flag is 'all parked'
-            if lap_done or (getattr(args, "stop_laps", 0) and leader_lap >= args.stop_laps) or (all_parked and age > 40 and leader_lap >= 1):
+            if lap_done or (getattr(args, "stop_laps", 0) and leader_lap >= args.stop_laps) or (all_parked and (age > 40 or stopped_checks >= 4) and leader_lap >= 1):
                 finished = True
                 # let Verve close AC itself (replay autosave); fall back to the kill after 90 s
                 for _ in range(18):
