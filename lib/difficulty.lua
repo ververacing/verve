@@ -15,6 +15,7 @@
 -- CALIBRATION STATUS: the level -> lap-time mapping (pctToLevel) is PROVISIONAL (speed ~ level). It is
 -- re-fitted from the single-make calibration runs (tools/harness_results, labels vcal_*).
 local Career = require('lib.career')
+local Classes = require('lib.classes')
 local D = {}
 D.CAREER_CURVE = true     -- the band/ramp layer for career events (user option "careerCurve")
 D.ENABLED = true
@@ -37,16 +38,32 @@ local function bandFor(meter)
     return a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f
 end
 
--- MEASURED level -> lap time (single-make M3 E92 field, Nurburgring Sprint, 3 laps each, 2026-09-14;
--- blend of best and median-of-best laps, % slower than level 1.00). Two things the numbers say: the first
--- ten points barely register, and below ~0.75 the AI falls off a cliff (0.70 and 0.60 are identical: the
--- sim floors the level there, and the laps get erratic). So the usable range is 0.75..1.00, about 0..12%.
-local PCT_AT_LEVEL = { [100] = 0.0, [90] = 1.5, [80] = 6.7, [75] = 11.5, [70] = 16.6 }
+-- MEASURED level -> lap time, % slower than level 100, per car class (median of per-car best laps, 8-car veteran
+-- fields, 4-lap sprints, 2026-09-21: GT3 at Spa, SF70H at Barcelona, Giulia QV at Magione; the single-make M3 E92
+-- Nurburgring row of 2026-09-14 kept for touring cars). Every car type has the same shape: the first ten points
+-- cost 0-2 %, 85 costs 4-8 %, and 80 falls off a cliff (15-20 % on race cars), below which the laps get erratic.
+-- So the raw AC scale is not what the labels say: 80 is not "a bit slower than 90". These curves let the slider
+-- mean lap-time steps instead (D.SLIDER_CURVE): 100 = expert pace, 90 = +5 %, 80 = +10 %, 70 = +15 %.
+local CURVES = {
+    gt      = { { 100, 0.0 }, { 95, 0.2 }, { 90, 2.1 }, { 85, 7.0 }, { 80, 16.6 }, { 70, 24.9 } },
+    formula = { { 100, 0.0 }, { 95, 0.0 }, { 90, 1.1 }, { 85, 4.3 }, { 80, 15.6 }, { 70, 18.0 } },
+    road    = { { 100, 0.0 }, { 95, 0.7 }, { 90, 4.7 }, { 85, 6.7 }, { 80, 11.0 }, { 70, 14.4 } },
+    touring = { { 100, 0.0 }, { 90, 1.5 }, { 80, 6.7 }, { 75, 11.5 }, { 70, 16.6 } },
+}
+local CURVE_OF = { formula = 'formula', formula_jr = 'formula', prototype = 'gt', hypercar = 'gt', gt = 'gt', nascar = 'gt',
+                   touring = 'touring', road = 'road', vintage = 'road', drift = 'road', kart = 'road', rally = 'road' }
 local LEVEL_MIN = 0.72
--- % slower than expert -> AI level (inverse of the table, linear between points, clamped to the usable range)
-function D.pctToLevel(pct)
+D.SLIDER_CURVE = true         -- user option sliderCurve: outside career the slider is lap-time steps (else the raw AC level)
+D.SLIDER_PCT_PER_POINT = 0.5  -- 100 -> 0 %, 90 -> +5 %, 80 -> +10 %, 70 -> +15 %
+local function curveFor(i)
+    local key = 'gt'
+    pcall(function() key = CURVE_OF[Classes.keyOf(i)] or 'gt' end)
+    return CURVES[key], key
+end
+-- % slower than expert -> AI level (inverse of the curve, linear between points, clamped to the usable range)
+function D.pctToLevel(pct, pts)
     pct = math.max(0, pct or 0)
-    local pts = { { 100, 0.0 }, { 90, 1.5 }, { 80, 6.7 }, { 75, 11.5 }, { 70, 16.6 } }
+    pts = pts or CURVES.gt
     for k = 1, #pts - 1 do
         local l1, p1 = pts[k][1], pts[k][2]
         local l2, p2 = pts[k + 1][1], pts[k + 1][2]
@@ -59,9 +76,9 @@ function D.pctToLevel(pct)
 end
 local pctToLevel = D.pctToLevel
 -- and the forward direction (what a level costs), for the UI / reports
-function D.levelToPct(level)
+function D.levelToPct(level, pts)
     local l = (level or 1) * 100
-    local pts = { { 100, 0.0 }, { 90, 1.5 }, { 80, 6.7 }, { 75, 11.5 }, { 70, 16.6 } }
+    pts = pts or CURVES.gt
     if l >= 100 then return 0 end
     for k = 1, #pts - 1 do
         if l >= pts[k + 1][1] then
@@ -86,7 +103,7 @@ local function compute(i)
     if Career.active and D.CAREER_CURVE then
         local startPct, endPct = bandFor(Career.meter)
         local pct = startPct + (endPct - startPct) * (Career.ramp or 0)
-        local base = pctToLevel(pct)
+        local base = pctToLevel(pct, (curveFor(i)))
         -- keep the event's own relative spread between opponents (86..88 => +-1%), measured against the grid's
         -- own average so a harness-forced flat grid comes out at exactly the band level
         local sum, cnt = 0, 0
@@ -102,10 +119,21 @@ local function compute(i)
     -- opponents in the grid, and it is honoured as written.
     local lo, hi, sum, cnt = 1e9, -1e9, 0, 0
     for k, v in pairs(Career.carLevels) do if k > 0 and v and v > 0 then sum = sum + v; cnt = cnt + 1; if v < lo then lo = v end; if v > hi then hi = v end end end
-    if cnt > 0 and (hi - lo) <= DELIB_SPREAD and math.abs(sum / cnt - (Career.meter or 100)) > 0.5 then
-        local rel = (iniLevel > 0) and (iniLevel / (sum / cnt)) or 1.0
-        D.sliderOverride = string.format('grid levels %d-%d, slider %d: field at the slider', lo, hi, Career.meter or 100)
-        return math.max(LEVEL_MIN, math.min(1.2, (Career.meter or 100) / 100.0 * rel))
+    local meter = Career.meter or 100
+    local deliberate = cnt > 0 and (hi - lo) > DELIB_SPREAD
+    local rel = 1.0
+    if cnt > 0 and not deliberate and iniLevel > 0 then rel = iniLevel / (sum / cnt) end
+    if D.SLIDER_CURVE and not deliberate and meter < 100 then
+        -- the slider as lap-time steps: 90 = +5 %, 80 = +10 % ... on THIS class's measured curve
+        local pct = (100 - meter) * D.SLIDER_PCT_PER_POINT
+        local pts, key = curveFor(i)
+        local lvl = pctToLevel(pct, pts)
+        D.sliderOverride = string.format('slider %d = field +%.0f%% off expert pace (%s curve, AI level %.0f)', meter, pct, key, lvl * 100)
+        return math.max(LEVEL_MIN, math.min(1.2, lvl * rel))
+    end
+    if cnt > 0 and not deliberate and math.abs(sum / cnt - meter) > 0.5 then
+        D.sliderOverride = string.format('grid levels %d-%d, slider %d: field at the slider', lo, hi, meter)
+        return math.max(LEVEL_MIN, math.min(1.2, meter / 100.0 * rel))
     end
     D.sliderOverride = nil
     return math.max(LEVEL_MIN, math.min(1.2, iniLevel / 100.0))

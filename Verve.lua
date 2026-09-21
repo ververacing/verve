@@ -45,7 +45,7 @@ local DEFAULTS = {
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
     crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
-    careerCurve = true, shareData = false, strategy = true, raceStart = 'calm',
+    careerCurve = true, shareData = false, strategy = true, raceStart = 'calm', sliderCurve = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
@@ -56,7 +56,7 @@ local S = ac.storage({
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
     crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
-    careerCurve = true, shareData = false, strategy = true, raceStart = 'calm',
+    careerCurve = true, shareData = false, strategy = true, raceStart = 'calm', sliderCurve = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     autosave = true, schema = 1,
 })
@@ -257,6 +257,7 @@ function script.update(dt)
     detectRestart(sim, dt)                    -- "Restart session" doesn't fire onSessionStart; catch it ourselves
     Career.detect()                           -- once per session: is this a career event? what did the launcher configure?
     Difficulty.CAREER_CURVE = G.careerCurve
+    Difficulty.SLIDER_CURVE = G.sliderCurve ~= false
     Drivers.LOCKED = Career.active            -- career: the difficulty curve sets the field; profiles are off
     Drivers.autoMatch()                       -- once per session: AC driver names that match the roster get their profile
     Human.ENABLED       = true
@@ -367,7 +368,7 @@ end
 -- everything the anonymous race report needs from the other modules (no names, no paths)
 telemetryCtx = function()
     local settings = {}
-    for _, k in ipairs({ 'humanErrors', 'drsDiscipline', 'controlGrip', 'careerCurve', 'intensity', 'rcIntensity', 'baseGrip', 'raceStart' }) do
+    for _, k in ipairs({ 'humanErrors', 'drsDiscipline', 'controlGrip', 'careerCurve', 'intensity', 'rcIntensity', 'baseGrip', 'raceStart', 'sliderCurve' }) do
         local v = G[k]; settings[#settings + 1] = string.format('"%s":%s', k, type(v) == 'number' and string.format('%.2f', v) or (type(v) == 'string' and ('"' .. v .. '"') or tostring(v == true)))
     end
     local pu, au = 0, 0
@@ -573,6 +574,7 @@ function script.windowMain()
     ui.newLine()
     ui.text('Options')
     toggle('Human errors', 'humanErrors', 'Occasional gentle bobbles on forgiving cars. Never on Formula/Prototype/Hypercar. Grip-slewed so it will not spin cars.')
+    toggle('Difficulty slider in lap-time steps (90 = +5%, 80 = +10%)', 'sliderCurve', 'AC\'s own level scale is not linear: on race cars 90 is 2% slower than 100 but 80 is 17% slower, and below that the AI gets erratic. On, the slider means measured lap-time steps for the car class you are racing: 100 = expert pace, 90 = +5%, 80 = +10%, 70 = +15%. Off, the raw AC level. A grid whose opponents were hand-set to different levels is always honoured as written.')
     toggle('Career: scale difficulty across the series', 'careerCurve', 'In AC career events the difficulty meter picks a pace band and each event moves you through it: soft first series, a real fight at the end, never leaving the band. Off = every career event at the meter\'s flat level. (Outside career the meter always applies as set.)')
     do
         local names = { calm = 'Calm', racing = 'Racing', stock = 'Stock' }
