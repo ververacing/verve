@@ -8,8 +8,11 @@ grid order (#1 = pole) so the card carries no names.
 import argparse
 import os
 import statistics as st
+import sys
 
-import fastf1
+# tools/queue.py shadows the standard library's queue module (urllib3 needs it): drop tools/ from the import path
+sys.path[:] = [p for p in sys.path if not p.rstrip('\/').endswith('tools')]
+import fastf1  # noqa: E402
 
 
 def main():
@@ -41,6 +44,7 @@ def main():
     t_end = {}     # (driver, L) -> seconds since race start
     ltime = {}     # driver -> [lap seconds]
     pits = 0
+    starts = []
     for _, lp in laps.iterrows():
         d = str(lp["DriverNumber"]); L = int(lp["LapNumber"])
         if L > N:
@@ -53,6 +57,8 @@ def main():
         lt = lp["LapTime"]
         if lt == lt and L >= 2:
             ltime.setdefault(d, []).append(lt.total_seconds())
+        if lt == lt and L == 1 and lp["Time"] == lp["Time"]:
+            starts.append(lp["Time"].total_seconds() - lt.total_seconds())   # the race start = lap 1 end - lap 1 time
         if lp["PitInTime"] == lp["PitInTime"] and L >= 1:
             pits += 1
     chart = {}
@@ -75,7 +81,7 @@ def main():
                 k += p0 - p1
         changes[L] = k
     lead_changes = sum(1 for L in range(2, last_lap + 1) if chart.get(L, {}).get(1) != chart.get(L - 1, {}).get(1))
-    dur = t_leader or 0
+    dur = (t_leader - min(starts)) if (t_leader and starts) else (t_leader or 0)
     out = []
     out.append("# RACE")
     out.append(f"Formula, {ses.event['Location']}. {n} cars. {last_lap} laps completed by the leader in {dur // 60:.0f} min {dur % 60:.0f} s.")

@@ -99,6 +99,11 @@ def build(path, label="Race A", ref_format=False):
     """ref_format: only the lines a real timing sheet can give (no damage counts, no first-30-s line): for a Turing
     vote against tools/ref_card_f1.py cards."""
     hdr, rows, contacts = load_diag(path)
+    # a weekend file can start with the tail of qualifying (session 2): the card is the race (session 3) only
+    if rows and any(r.get('session') == 3 for r in rows):
+        rows = [r for r in rows if r.get('session', 3) == 3]
+        t_race = rows[0]['t'] if rows else 0
+        contacts = [c for c in contacts if c['t'] >= t_race]
     if not rows or len(rows) < 3:
         return None
     n = rows[0]["cars"]
