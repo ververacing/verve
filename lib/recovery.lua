@@ -463,8 +463,10 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
         for _, sp in ipairs(spots) do if math.abs((sp - progress + 0.5) % 1 - 0.5) * trackLen < R.DROP_SAME_M then near = near + 1 end end
         if near >= 2 then
             progress = (progress + R.DROP_SKIP_M / trackLen) % 1
+            skipGate = true      -- the gate would pull it straight back to the split - the chicane itself at Imola; one lap of AC's credit is the price
             center = ac.trackProgressToWorldCoordinate(progress, false)
             if not center then return false end
+            pcall(function() ac.log(string.format('Verve: car %d dropped past its trouble spot (%.3f)', i, progress)) end)
         end
     end
     local gated = false
