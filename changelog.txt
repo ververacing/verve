@@ -1,5 +1,21 @@
 Verve - changelog
 
+0.14.2
+- Passing: a faster car now gets on with it. Verve's cold-tyre model judged tyres "warm" only at 80 C, so on cool days
+  (below about 18 C ambient) every AI car carried a permanent cold-tyre penalty all race: 4 % less grip and a quarter
+  more caution than intended, which is what made a quicker driver hesitate behind a slower one. Warm-up now ends after
+  two laps of a stint (and starts again on new tyres after a stop), as it always should have. Measured: a veteran stuck
+  behind a midfielder gets past in about half the time at Monza, and converts more of his attempts at Spa; lap times
+  unchanged, so the difficulty scale is unchanged.
+- Opening laps at race fuel: the brake guard's reach and the row caution now grow with the fuel on board, so a full
+  tank brakes earlier for turn 1. Every opening-lap rule had been tuned on light sprints; long races start 50 kg heavier.
+  Twelve-lap-fuel opening laps at Spa: 14/3/14 incidents -> 7/8/9; Barcelona F1: 11/9/10 -> 8/6/2; heavy hits down
+  at every track.
+- A car Verve had given up on could sit stationary on the track for the rest of the race (a "frozen car"); fixed.
+- Verve never retires or parks the player's car.
+- Harness (maintainers): timed races (--minutes), heavy sprints (--stop-laps), the constants of the racecraft module in
+  one table (the app was five switches from LuaJIT's upvalue limit).
+
 0.14.1
 - Ovals: the "groove" (committing to a high or low lane in a pack) is off. It was what turned a 20-car Daytona race
   into a 48-incident wreck; without it the same race ran 6 and 3 incidents with no retirements and more lead changes
