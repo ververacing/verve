@@ -95,7 +95,9 @@ def sibling(path, kind):
     return best
 
 
-def build(path, label="Race A"):
+def build(path, label="Race A", ref_format=False):
+    """ref_format: only the lines a real timing sheet can give (no damage counts, no first-30-s line): for a Turing
+    vote against tools/ref_card_f1.py cards."""
     hdr, rows, contacts = load_diag(path)
     if not rows or len(rows) < 3:
         return None
@@ -281,6 +283,9 @@ def build(path, label="Race A"):
         meds = sorted(statistics.median(v) for v in lap_times.values() if len(v) >= 2)
         if len(meds) >= 4:
             out.append(f"Lap-time spread: median laps from {meds[0]:.1f} s (quickest car) to {meds[len(meds)//2]:.1f} s (mid-field) to {meds[-1]:.1f} s (slowest).")
+    if ref_format:
+        drop = ("Cars taking damage", "Car-to-car contacts", "Cars that stopped", "First thirty seconds", "Retired:")
+        out = [l for l in out if not l.startswith(drop)]
     return "\n".join(out) + "\n"
 
 
@@ -289,8 +294,9 @@ def main():
     ap.add_argument("diag")
     ap.add_argument("--out")
     ap.add_argument("--label", default="Race A")
+    ap.add_argument("--ref-format", action="store_true")
     a = ap.parse_args()
-    card = build(a.diag, a.label)
+    card = build(a.diag, a.label, a.ref_format)
     if card is None:
         print("(too few snapshots)"); return
     if a.out:

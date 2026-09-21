@@ -51,6 +51,7 @@ def main():
     ap.add_argument("--out", default=os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa", "verve_desk", "gauntlet"))
     ap.add_argument("--per-side", type=int, default=2)
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--ref-format", action="store_true", help="sim cards in the reference format (for a vote against real cards)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     rnd = random.Random(a.seed)
@@ -62,7 +63,7 @@ def main():
             if f.endswith(".md"):
                 cards.append((f, open(f, encoding="utf-8").read()))
             else:
-                c = race_card.build(f, label="RACE")
+                c = race_card.build(f, label="RACE", ref_format=a.ref_format or any(x.endswith(".md") for x in glob.glob(a.b)))
                 if c:
                     cards.append((f, c))
         sides[side] = cards
