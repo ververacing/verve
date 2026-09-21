@@ -247,8 +247,11 @@ function script.update(dt)
         end
     end
     if not G.enabled then
-        -- (local dev diagnostics still log a DISABLED race, so a baseline run can be compared)
+        -- (local dev diagnostics still log a DISABLED race, so a baseline run can be compared; the race feed is an
+        -- observer and keeps running too, so a stock-AI race gets the same timing card as a Verve race)
         if Diag then pcall(function() Diag.update(dt, { managed = 0 }) end) end
+        Feed.ENABLED = G.raceFeed
+        if G.raceFeed then pcall(Feed.update, dt, {}) end
         return
     end
     local ok, sim = pcall(ac.getSim)
