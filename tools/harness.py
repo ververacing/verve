@@ -592,7 +592,9 @@ def run_once(args, arm, run_idx):
     eff_laps = min(args.laps, args.stop_laps) if getattr(args, "stop_laps", 0) else args.laps
     budget = eff_laps * args.lap_budget_s + 240
     if getattr(args, "minutes", 0):
-        budget = args.minutes * 60 + 2 * args.lap_budget_s + 240      # the clock, the extra lap, the load + 60 * (getattr(args, "practice", 0) + getattr(args, "quali", 0)) + (120 if (getattr(args, "practice", 0) or getattr(args, "quali", 0)) else 0)
+        budget = args.minutes * 60 + 2 * args.lap_budget_s + 240      # the clock, the extra lap, the load
+    # a weekend: the timed sessions, plus their loads (the terms were lost in a comment for one night, 2026-09-21)
+    budget += 60 * (getattr(args, "practice", 0) + getattr(args, "quali", 0)) + (120 if (getattr(args, "practice", 0) or getattr(args, "quali", 0)) else 0)
     write_harness_lua(arm, ttl_s=int(budget) + 120, ncars=ncars)
     label = arm.get("label", "A")
     print(f"[{label} #{run_idx}] {ini.get('RACE', 'TRACK')} x{args.laps} laps, {ncars} cars, budget {budget:.0f}s")

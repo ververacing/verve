@@ -189,7 +189,7 @@ end
 local drops = {}           -- recent repositions being judged: { i, t, ok, spl }
 local dropCount, dropSpots = {}, {}   -- per car: repositions this race, and the spline of each (same-spot escape)
 R.DROP_MAX_PER_CAR = 6     -- repositions per car per race; past it the car is AC's (Imola F3 2026-09-21: 92 drops in 4 laps)
-R.DROP_SAME_M = 60         -- two drops within this many metres = the same spot...
+R.DROP_SAME_M = 200        -- two drops within this many metres = the same CORNER (the gate scatters requests 50-150 m; 60 missed most repeats, Imola 2026-09-21)...
 R.DROP_SKIP_M = 150        -- ...the next one goes this much further along the track (past the corner it cannot take)
 local dropFailed = {}      -- cars whose last reposition did NOT rejoin: no second drop -- they retire
 R.dropN, R.dropOK = 0, 0   -- session tally (for the UI / diagnostics)
