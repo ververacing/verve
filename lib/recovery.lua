@@ -187,6 +187,10 @@ local function releaseControls(i)
     end)
 end
 local drops = {}           -- recent repositions being judged: { i, t, ok, spl }
+local dropCount, dropSpots = {}, {}   -- per car: repositions this race, and the spline of each (same-spot escape)
+R.DROP_MAX_PER_CAR = 6     -- repositions per car per race; past it the car is AC's (Imola F3 2026-09-21: 92 drops in 4 laps)
+R.DROP_SAME_M = 60         -- two drops within this many metres = the same spot...
+R.DROP_SKIP_M = 150        -- ...the next one goes this much further along the track (past the corner it cannot take)
 local dropFailed = {}      -- cars whose last reposition did NOT rejoin: no second drop -- they retire
 R.dropN, R.dropOK = 0, 0   -- session tally (for the UI / diagnostics)
 R.DROP_API = 'car'         -- 'car' = physics.setCarPosition, 'ai' = physics.setAICarPosition (A/B 2026-09-14: same lap counting; 'car' rejoined cleaner)
@@ -270,6 +274,7 @@ R.dropsOff = false         -- repositioning switched off for this session (rate 
 -- may this car be repositioned automatically right now?
 local function dropsAllowed(i)
     if dropFailed[i] then return false end
+    if (dropCount[i] or 0) >= R.DROP_MAX_PER_CAR then return false end
     if R.dropsOff then return false end
     return true
 end
@@ -451,6 +456,17 @@ end
 -- gets it to REJOIN. Gated by dropSafe unless `force` (a last-resort so a car is never abandoned).
 local function putBackOnLine(sim, i, progress, center, force, skipGate)
     if not center then return false end
+    -- same-spot escape: dropped here before (twice within DROP_SAME_M)? go DROP_SKIP_M further on, past whatever it cannot take
+    local spots = dropSpots[i]
+    if spots and #spots >= 2 then
+        local near = 0
+        for _, sp in ipairs(spots) do if math.abs((sp - progress + 0.5) % 1 - 0.5) * trackLen < R.DROP_SAME_M then near = near + 1 end end
+        if near >= 2 then
+            progress = (progress + R.DROP_SKIP_M / trackLen) % 1
+            center = ac.trackProgressToWorldCoordinate(progress, false)
+            if not center then return false end
+        end
+    end
     local gated = false
     if R.GATE_MODE ~= 'off' and not skipGate then
         local gp
@@ -547,6 +563,8 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
         drops[#drops + 1] = { i = i, t = os.clock(), ok = nil, spl = progress }   -- judged over the next DROP_JUDGE_T
         pendingDrop[i] = { pos = pos, dir = dir, apiDir = apiDir, t = os.clock(), tries = 0 }   -- verify its heading next frame
         R.dropN = R.dropN + 1
+        dropCount[i] = (dropCount[i] or 0) + 1
+        local sp = dropSpots[i] or {}; sp[#sp + 1] = progress; if #sp > 6 then table.remove(sp, 1) end; dropSpots[i] = sp
     end
     return okp
 end
@@ -1119,6 +1137,7 @@ function R.reset()
     for i in pairs(overriding) do releaseControls(i) end   -- hand every car's controls back at a session change
     overridesCleared = false     -- and release every throttle / top-speed / stop-counter hold on the next update (they persist across sessions)
     drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}
+    dropCount, dropSpots = {}, {}
     R.dropN, R.dropOK, R.dropsOff, R.dropFlips, R.gateMoves = 0, 0, false, 0, 0
     gateStage = {}
     scaled = false

@@ -30,6 +30,7 @@ import csv
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -550,7 +551,35 @@ def restore_csp_overrides(restore):
             print("  (csp override not restored:", e, ")")
 
 
+def preflight_track(args):
+    """Refuse a run the track cannot host: no AI line (the AI never moves - 'drift' 2026-09-20), or fewer pit boxes than
+    cars (AC retires the extras at the lights - Trento 4 boxes, 2026-09-20). Returns None or a reason string."""
+    track = getattr(args, "track", None)
+    if not track:
+        return None
+    root = os.path.join(AC_DIR, "content", "tracks", track)
+    layout = getattr(args, "layout", None) or ""
+    if not os.path.isdir(root):
+        return f"track folder missing: {track}"
+    ai_dirs = [os.path.join(root, layout, "ai"), os.path.join(root, "ai")]
+    if not any(os.path.isdir(d) and any(f.startswith("fast_lane") for f in os.listdir(d)) for d in ai_dirs if os.path.isdir(d)):
+        return f"no AI line (ai/fast_lane.ai) for {track}/{layout or '-'}: the AI cannot drive it"
+    uj = os.path.join(root, "ui", layout, "ui_track.json") if layout else os.path.join(root, "ui", "ui_track.json")
+    try:
+        m = re.search(r'"pitboxes"\s*:\s*"?(\d+)', open(uj, encoding="utf-8", errors="ignore").read())
+        boxes = int(m.group(1)) if m else None
+    except OSError:
+        boxes = None
+    if boxes is not None and getattr(args, "cars", None) and args.cars > boxes:
+        return f"{track}/{layout or '-'} has {boxes} pit boxes, {args.cars} cars asked: AC retires the extras at the lights"
+    return None
+
+
 def run_once(args, arm, run_idx):
+    why = preflight_track(args)
+    if why:
+        print(f"  !! pre-flight refused: {why}")
+        return None
     if acs_running():
         raise SystemExit("acs.exe is already running -- close the game first (a run must own it)")
     os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -669,6 +698,15 @@ def run_once(args, arm, run_idx):
             print(f"  replay kept: {os.path.basename(dst)} ({os.path.getsize(dst) / 1e6:.0f} MB)")
     except OSError as e:
         print("  (replay not kept:", e, ")")
+    # keep AC's own log per run (log.txt is overwritten by the next launch; an early exit's cause was lost, 2026-09-21)
+    try:
+        ldir = os.path.join(RESULTS_DIR, "aclogs"); os.makedirs(ldir, exist_ok=True)
+        src = os.path.join(DOCS, "logs", "log.txt")
+        if os.path.exists(src):
+            with open(src, encoding="utf-8", errors="replace") as fi, open(os.path.join(ldir, f"{time.strftime('%Y%m%d_%H%M')}_{label}.log"), "w", encoding="utf-8") as fo:
+                fo.writelines(l for l in fi if "Starting light should show" not in l)
+    except OSError as e:
+        print("  (ac log not kept:", e, ")")
     diag = newest_diag(t_launch)
     if diag and (getattr(args, "practice", 0) or getattr(args, "quali", 0)):
         # a weekend writes one file per session; score the race's
