@@ -433,6 +433,44 @@ def apply_csp_overrides(spec):
     return restore
 
 
+
+
+ARCHIVE_DIR = "D:/verve_archive" if os.path.isdir("D:/") else None
+KEEP_DAYS = 2.0          # diag files and race feeds older than this are moved to the archive drive
+MIN_FREE_GB = 4.0        # refuse to launch with less free space than this on the drive holding the app
+
+
+def free_gb(path):
+    try:
+        return shutil.disk_usage(path).free / (1024 ** 3)
+    except OSError:
+        return 1e9
+
+
+def housekeeping():
+    """Keep the app drive from filling up (C: hit zero free space mid-batch, 2026-09-22): move old diag files and
+    race feeds to the archive drive. Returns the free space left, in GB."""
+    if ARCHIVE_DIR:
+        cut = time.time() - KEEP_DAYS * 86400
+        moved = 0
+        for src, sub, pref in ((VERVE, "diag", "diag_race_"), (os.path.join(DOCS, "verve_feed"), "verve_feed", "")):
+            if not os.path.isdir(src):
+                continue
+            dst = os.path.join(ARCHIVE_DIR, sub)
+            os.makedirs(dst, exist_ok=True)
+            for f in os.listdir(src):
+                if pref and not f.startswith(pref):
+                    continue
+                fp = os.path.join(src, f)
+                try:
+                    if os.path.isfile(fp) and os.path.getmtime(fp) < cut:
+                        shutil.move(fp, os.path.join(dst, f)); moved += 1
+                except OSError:
+                    pass
+        if moved:
+            print(f"  housekeeping: archived {moved} old diag/feed files to {ARCHIVE_DIR}")
+    return free_gb(VERVE)
+
 PURE_SETTINGS = os.path.join(AC_DIR, "extension", "weather-controllers", "pureCtrl", "settings.ini")
 RAINY = {3, 4, 5, 6, 7, 8, 0, 1, 2, 9, 10, 11, 29}   # CSP types that should start on a wet track
 
@@ -593,6 +631,9 @@ def run_once(args, arm, run_idx):
     backup = RACE_INI + ".harness-backup"
     if not os.path.exists(backup):
         shutil.copy2(RACE_INI, backup)
+    free = housekeeping()
+    if free < MIN_FREE_GB:
+        raise SystemExit(f"  !! only {free:.1f} GB free on the app drive (need {MIN_FREE_GB}): not launching")
     ini, ncars = build_race_ini(args, backup if args.grid is None else RACE_INI)
     force_ai_level(ini, getattr(args, "ai_level", 0))
     write_ini(ini, RACE_INI)
