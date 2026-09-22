@@ -188,6 +188,11 @@ local function releaseControls(i)
 end
 local drops = {}           -- recent repositions being judged: { i, t, ok, spl }
 local dropCount, dropSpots, escapeLogged = {}, {}, {}   -- per car: repositions this race, and the spline of each (same-spot escape)
+R.STALL_RESTART = false    -- a stalled AI engine (rpm < STALL_RPM for STALL_T s) is restarted in place instead of waiting for a drop
+                           -- (26 % of all repositions on 2026-09-20/21 were engine-off cars, mostly F3 and the Huracan). Harness A/B.
+R.STALL_RPM = 150; R.STALL_T = 1.0; R.STALL_IDLE = 1500
+R.stallEngT, R.stallRestarts = {}, {}   -- per car: seconds with the engine off; restarts this race (R fields: no new upvalues)
+R.stallRestartN = 0
 R.DROP_MAX_PER_CAR = 6     -- repositions per car per race; past it the car is AC's (Imola F3 2026-09-21: 92 drops in 4 laps)
 R.DROP_SAME_M = 200        -- two drops within this many metres = the same CORNER (the gate scatters requests 50-150 m; 60 missed most repeats, Imola 2026-09-21)...
 R.DROP_SKIP_M = 150        -- ...the next one goes this much further along the track (past the corner it cannot take)
@@ -642,6 +647,17 @@ function R.update(dt)
                 end
             end
             if not car.isAIControlled then return end
+            if R.STALL_RESTART and R.raceSession and not car.isInPitlane and not car.isRetired and not car.isRaceFinished then
+                -- engine off on the road (a spin, AC's own stall): restart it where it stands, the drop is not needed
+                if (car.rpm or 1000) < R.STALL_RPM then R.stallEngT[i] = (R.stallEngT[i] or 0) + dt else R.stallEngT[i] = 0 end
+                if (R.stallEngT[i] or 0) > R.STALL_T then
+                    R.stallEngT[i] = 0
+                    if pcall(physics.setEngineRPM, i, R.STALL_IDLE) then
+                        R.stallRestarts[i] = (R.stallRestarts[i] or 0) + 1; R.stallRestartN = R.stallRestartN + 1
+                        if R.stallRestarts[i] <= 2 then pcall(function() ac.log(string.format('Verve: car %d engine restarted (%d)', i, R.stallRestarts[i])) end) end
+                    end
+                end
+            end
             if car.isRaceFinished then endRec(i); return end   -- past the flag: AC is taking it to the pits, whatever that looks like (Baku 2026-09-20)
             if parked[i] then return end                -- retired by us: sitting in its pit box, leave it be
             local pt = pendingTemps[i]
@@ -1141,6 +1157,7 @@ function R.reset()
     overridesCleared = false     -- and release every throttle / top-speed / stop-counter hold on the next update (they persist across sessions)
     drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}
     dropCount, dropSpots, escapeLogged = {}, {}, {}
+    R.stallEngT, R.stallRestarts = {}, {}; R.stallRestartN = 0
     R.dropN, R.dropOK, R.dropsOff, R.dropFlips, R.gateMoves = 0, 0, false, 0, 0
     gateStage = {}
     scaled = false
