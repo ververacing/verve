@@ -198,6 +198,7 @@ R.TOW_ATTACK = 0              -- >0: on a STRAIGHT (steer < 0.1), above TOW_MIN 
                               -- TOW_EDGE, the applied caution is floored at -this (corners untouched). Tow diagnostic 2026-09-21: a veteran
                               -- in the tow LOSES 0.6-1.2 m/s to the car ahead - AC's AI following distance, and Verve never got under 1.0
 R.TOW_MIN = 150; R.TOW_M = 60; R.TOW_EDGE = 0.15
+R.TOW_CORNER = 0              -- >0: the tow attack floor is off when a corner begins within this many seconds of travel (straight-only, for real)
 R.PASS_FINISH = 0             -- >0: a committed quicker driver (PASS_COMMIT) offline beside the car ahead, within this many car lengths of level,
                               -- finishes the pass: caution floored at PASS_CAUT, full aggression, later braking on the inside (A/B 2026-09-19)
 R.PASS_BH = 1.06              -- ...brake hint multiplier on the inside line into the corner (> 1 = later braking; 1 = off)
@@ -1101,7 +1102,12 @@ function R.evaluate(i, dt)
             local st = me.steer
             if type(st) == 'number' and math.abs(st) < 0.1 and prof then
                 local ap = Drivers.statsOf(aheadIdx)
-                if ap and prof.pace - ap.pace >= R.TOW_EDGE and caut > -R.TOW_ATTACK then caut = -R.TOW_ATTACK; R.towN = (R.towN or 0) + 1 end
+                local clear = true
+            if R.TOW_CORNER > 0 then
+                local look = spd / 3.6 * R.TOW_CORNER / math.max(1, trackLen)
+                clear = not (cornerAhead(mySpline) or cornerAhead(mySpline + look * 0.5) or cornerAhead(mySpline + look))
+            end
+            if clear and ap and prof.pace - ap.pace >= R.TOW_EDGE and caut > -R.TOW_ATTACK then caut = -R.TOW_ATTACK; R.towN = (R.towN or 0) + 1 end
             end
         end
 

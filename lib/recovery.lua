@@ -456,6 +456,7 @@ end
 -- gets it to REJOIN. Gated by dropSafe unless `force` (a last-resort so a car is never abandoned).
 local function putBackOnLine(sim, i, progress, center, force, skipGate)
     if not center then return false end
+    local reqProgress = progress     -- where the car got stuck (the gate moves the landing spot; the escape must see the corner)
     -- same-spot escape: dropped here before (twice within DROP_SAME_M)? go DROP_SKIP_M further on, past whatever it cannot take
     local spots = dropSpots[i]
     if spots and #spots >= 2 then
@@ -566,7 +567,7 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
         pendingDrop[i] = { pos = pos, dir = dir, apiDir = apiDir, t = os.clock(), tries = 0 }   -- verify its heading next frame
         R.dropN = R.dropN + 1
         dropCount[i] = (dropCount[i] or 0) + 1
-        local sp = dropSpots[i] or {}; sp[#sp + 1] = progress; if #sp > 6 then table.remove(sp, 1) end; dropSpots[i] = sp
+        local sp = dropSpots[i] or {}; sp[#sp + 1] = reqProgress; if #sp > 6 then table.remove(sp, 1) end; dropSpots[i] = sp   -- the requested spot, not the gated one (2026-09-21)
     end
     return okp
 end
