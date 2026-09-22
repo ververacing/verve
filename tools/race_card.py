@@ -135,7 +135,9 @@ def build(path, label="Race A", ref_format=False):
             chart[L] = {c["pos"]: c["i"] for c in r["grid"] if not c["ret"] and not c.get("park")}
     laps_done = sorted(chart)
     # anonymous car names: by grid slot -> "#n" is fine (a car number), keep 1..n
-    def name(i): return f"#{i + 1}"
+    # car numbers = starting order (#1 = pole), as the real reference cards are numbered
+    start_rank = {c["i"]: k + 1 for k, c in enumerate(sorted(rows[0]["grid"], key=lambda c: c["pos"]))}
+    def name(i): return f"#{start_rank.get(i, i + 1)}"
 
     # results at the flag
     fin = sorted((c for c in last["grid"]), key=lambda c: c["pos"])

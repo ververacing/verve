@@ -439,8 +439,10 @@ RAINY = {3, 4, 5, 6, 7, 8, 0, 1, 2, 9, 10, 11, 29}   # CSP types that should sta
 
 PURE_PLANS = os.path.join(AC_DIR, "extension", "config-ext", "PurePlanner", "Plans")
 # Pure weather-slot index (the "index" a plan container carries) per CSP weather type; rain fields per type
-PURE_INDEX = {12: 2, 13: 3, 14: 4, 15: 5, 16: 6, 17: 17, 18: 18, 3: 30, 6: 40, 7: 50, 8: 60, 1: 70, 27: 2, 26: 2, 28: 2}
-PURE_RAIN = {3: (0.10, 0.25, 0.05), 6: (0.20, 0.45, 0.12), 7: (0.45, 0.85, 0.30), 8: (0.85, 1.0, 0.6), 1: (1.0, 1.0, 0.8)}   # amount, wetness, water
+PURE_INDEX = {12: 2, 13: 3, 14: 4, 15: 5, 16: 6, 17: 17, 18: 18, 3: 8, 6: 8, 7: 8, 8: 8, 1: 8, 27: 2, 26: 2, 28: 2}
+# rain slot 8 is the one that actually rains here (the owner's hand-made "rain heavy" plan, 2026-09-22); the amount
+# scales the intensity within it. amount, wetness, water:
+PURE_RAIN = {3: (0.15, 0.25, 0.30), 6: (0.30, 0.40, 0.60), 7: (0.45, 0.50, 0.80), 8: (0.60, 0.60, 1.0), 1: (0.85, 0.75, 1.0)}
 
 
 def apply_pure_for_weather(wt):
@@ -453,18 +455,23 @@ def apply_pure_for_weather(wt):
     # template: tools/pure_plan_template.json, a copy of the DAYCYCLE plan (control type 1, looping, one 24 h container)
     # that is the only kind seen to rain on this machine; a Timed (type 2) plan with a timestamp never fired
     tmpl = None
-    for cand in (os.path.join(os.path.dirname(os.path.abspath(__file__)), "pure_plan_template.json"), os.path.join(PURE_PLANS, "last_used.json")):
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (os.path.join(here, "pure_plan_rain_heavy.json"), os.path.join(here, "pure_plan_template.json"), os.path.join(PURE_PLANS, "last_used.json")):
         if os.path.exists(cand):
             tmpl = json.load(open(cand, encoding="utf-8")); break
     if not tmpl or not tmpl.get("container"):
         print("  (no Pure plan template; weather left to the CM type)")
         return None
-    plan = {"control": {"timemulti": 1, "type": 1, "loop": True}, "container": [dict(tmpl["container"][0])]}
+    # a TIMED plan (type 2) starting NOW is what rains: a looping day-cycle plan, or a timed one carrying the
+    # template's old timestamp, renders dry (four attempts, 2026-09-19) because the plan sits in the past.
+    plan = {"control": {"timemulti": 1, "type": 2, "loop": False}, "container": [dict(tmpl["container"][0])]}
     c = plan["container"][0]; c["data"] = dict(c["data"]); w = dict(c["data"]["weather"])
-    c["data"]["duration"] = 86400
+    c["data"]["duration"] = 7200
+    c["data"]["timestamp"] = int(time.time())
     amount, wetness, water = PURE_RAIN.get(wt, (0.0, 0.0, 0.0))
     w.update({"index": PURE_INDEX.get(wt, 2), "rain_amount": amount, "rain_wetness": wetness, "rain_water": water,
-              "rain_probability": 1.0 if amount > 0 else 0, "rain_variance": 0, "mist": 0.6 if wt in (17, 18) else 0,
+              "rain_probability": 0.9 if amount > 0 else 0, "rain_variance": 0.4 if amount > 0 else 0,
+              "humidity": 0.8 if amount > 0 else w.get("humidity", 0.5), "mist": 0.6 if wt in (17, 18) else 0,
               "rain_amount_dyn": False, "rain_wetness_dyn": False, "rain_water_dyn": False, "mist_dyn": False,
               "rain_amount_range": 0, "rain_wetness_range": 0, "rain_water_range": 0, "rain_probability_range": 0, "mist_range": 0})
     c["data"]["weather"] = w

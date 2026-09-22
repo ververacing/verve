@@ -57,16 +57,19 @@ def main():
     rnd = random.Random(a.seed)
     sides = {}
     for side, pat in (("A", a.a), ("B", a.b)):
-        files = sorted(glob.glob(pat), key=os.path.getmtime)[-a.per_side:]
+        files = sorted(glob.glob(pat), key=os.path.getmtime)
         cards = []
         for f in files:
+            if len(cards) >= a.per_side and not f.endswith('.md'):
+                cards = cards[-a.per_side:]
+
             if f.endswith(".md"):
                 cards.append((f, open(f, encoding="utf-8").read()))
             else:
                 c = race_card.build(f, label="RACE", ref_format=a.ref_format or any(x.endswith(".md") for x in glob.glob(a.b)))
                 if c:
                     cards.append((f, c))
-        sides[side] = cards
+        sides[side] = cards[-a.per_side:]
     items = [(s, f, c) for s, cards in sides.items() for f, c in cards]
     rnd.shuffle(items)
     key, body = [], []
