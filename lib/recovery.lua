@@ -58,7 +58,8 @@ local REJOIN_RAMP = 3.0       -- seconds of throttle ramp after a teleport (a ca
 local REJOIN_THROTTLE_CUT = 0.40 -- throttle starts at (1 - this) of full and ramps up over REJOIN_RAMP. Eased from a
                               -- 6 s / 35 % ramp under which cars never got going at all (0 of 30 rejoined)
 local PIT_STUCK_T = 15.0      -- stopped in the pit LANE (not the box) this long -> it's done, let AC retire it
-local BOX_LIMBO_T = 75.0      -- stationary in the BOX this long mid-race (AC damage-pit, never retired) -> retired
+local BOX_LIMBO_T = 150.0     -- stationary in the BOX this long mid-race (AC damage-pit, never retired) -> retired.
+                              -- 75 s retired two healthy cars mid wet-tyre stop in a 19-car queue (2026-09-22)
 local boxT = {}
 local boxFuel = {}         -- fuel last seen in the box: rising fuel = a live pit stop, not limbo (an AI Escalade retired mid-stop, 2026-09-18)
 local DANGER_MAX  = 5.0       -- longest a recovering car waits for traffic before it goes anyway (on a busy straight
@@ -188,6 +189,13 @@ local function releaseControls(i)
 end
 local drops = {}           -- recent repositions being judged: { i, t, ok, spl }
 local dropCount, dropSpots, escapeLogged = {}, {}, {}   -- per car: repositions this race, and the spline of each (same-spot escape)
+R.WET_TYRES = false        -- OFF until the harness rain A/B says otherwise. On: hint the AI onto rain tyres
+                           -- (physics.setAIRainTyres) whenever the road is wet, for a race that BEGINS wet.
+                           -- (2026-09-22: the field pitting for wets at the end of lap 1 in the owner's race was
+                           -- correct - the rain arrived after the lights, so they started on slicks rightly.)
+R.WET_ON = 0.25            -- road wetness above this -> rain tyres hinted on
+R.WET_OFF = 0.10           -- ...and below this -> hinted off again (a drying track)
+R.wetHint = {}             -- per car: what we last hinted (nil = never)
 R.STALL_RESTART = false    -- a stalled AI engine (rpm < STALL_RPM for STALL_T s) is restarted in place instead of waiting for a drop
                            -- (26 % of all repositions on 2026-09-20/21 were engine-off cars, mostly F3 and the Huracan). Harness A/B.
 R.STALL_RPM = 150; R.STALL_T = 1.0; R.STALL_IDLE = 1500
@@ -324,6 +332,7 @@ end
 -- recovery and its retirement-prevention in a loop.
 local parked = {}          -- cars we've RETIRED ourselves (parked in the pits for good) -- never touched again
 local dmgBase = {}         -- car.damage reading at each car's last repair (see effImpact)
+R.boxCmp, R.boxWear = {}, {}   -- per car, in its box: tyre compound and wear (a stop that changes either is live)
 local episodeT = {}        -- seconds spent working a car's CURRENT stuck episode, across every retry
 local lastRepairSpl = {}   -- where each car was last repaired (repairs in the same spot are ONE incident)
 local rescueN, rescueWaitT = {}, {}   -- rescues used this episode / seconds waited for a safe drop
@@ -648,7 +657,17 @@ function R.update(dt)
                     end
                 end
             end
-            if not car.isAIControlled then return end
+            if not car.isAIControlled then return end
+            if R.WET_TYRES and physics.setAIRainTyres then
+                local wet = 0
+                pcall(function() wet = sim.rainWetness or sim.roadWetness or 0 end)
+                local want = R.wetHint[i]
+                if wet >= R.WET_ON then want = true elseif wet <= R.WET_OFF then want = false end
+                if want ~= nil and want ~= R.wetHint[i] then
+                    R.wetHint[i] = want
+                    pcall(physics.setAIRainTyres, i, want)
+                end
+            end
             if R.STALL_RESTART and R.raceSession and not car.isInPitlane and not car.isRetired and not car.isRaceFinished then
                 -- engine off on the road (a spin, AC's own stall): restart it where it stands, the drop is not needed
                 if (car.rpm or 1000) < R.STALL_RPM then R.stallEngT[i] = (R.stallEngT[i] or 0) + dt else R.stallEngT[i] = 0 end
@@ -742,12 +761,24 @@ function R.update(dt)
                 -- (Zandvoort + Silverstone GPs, 2026-09-14). A real stop is under a minute; longer than that in
                 -- a race with laps on the board is a retirement: mark it so bookkeeping, feed and reports agree.
                 if inBox and spd < STOP_SPEED and (car.lapCount or 0) >= 1 and car.isAIControlled and R.raceSession then
+                    -- a stop is LIVE if anything is being done to the car: fuel going in, a compound change, or
+                    -- fresh rubber (wear dropping). Fuel alone missed every tyre-only stop - a wet race is nothing
+                    -- but tyre-only stops, and two healthy cars were retired mid-change (2026-09-22).
                     local fuel = car.fuel or 0
-                    if boxFuel[i] and fuel > boxFuel[i] + 0.01 then boxT[i] = 0 else boxT[i] = (boxT[i] or 0) + dt end   -- refuelling: the stop is live
+                    local cmp, wear = -1, 0
+                    pcall(function()
+                        cmp = car.compoundIndex or -1
+                        if car.wheels then for k = 0, 3 do local w = car.wheels[k]; local tw = w and w.tyreWear; if type(tw) == 'number' and tw > wear then wear = tw end end end
+                    end)
+                    local working = (boxFuel[i] and fuel > boxFuel[i] + 0.01)
+                        or (R.boxCmp[i] ~= nil and cmp ~= R.boxCmp[i])
+                        or (R.boxWear[i] ~= nil and wear < R.boxWear[i] - 0.01)
+                    if working then boxT[i] = 0 else boxT[i] = (boxT[i] or 0) + dt end
+                    R.boxCmp[i] = cmp; R.boxWear[i] = wear   -- refuelling: the stop is live
                     boxFuel[i] = fuel
                     if boxT[i] > BOX_LIMBO_T then parkInPits(i); boxT[i] = 0 end
                 else
-                    boxT[i] = 0
+                    boxT[i] = 0; R.boxCmp[i] = nil; R.boxWear[i] = nil
                 end
                 -- (hasMoved: the grid slots by the pit wall count as "in the pit lane" -- a car waiting for the lights
                 -- is not stuck. Zandvoort 2026-09-16: two healthy cars parked at the pit entry at the end of lap 0
@@ -1146,7 +1177,7 @@ function R.reset()
     reported = {}
     parked = {}
     dmgBase = {}
-    episodeT = {}
+    episodeT = {}; R.boxCmp = {}; R.boxWear = {}
     pendingTemps = {}
     lastRepairSpl = {}
     rescueN, rescueWaitT = {}, {}
@@ -1159,7 +1190,8 @@ function R.reset()
     overridesCleared = false     -- and release every throttle / top-speed / stop-counter hold on the next update (they persist across sessions)
     drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}
     dropCount, dropSpots, escapeLogged = {}, {}, {}
-    R.stallEngT, R.stallRestarts = {}, {}; R.stallRestartN = 0
+    R.stallEngT, R.stallRestarts = {}, {}; R.stallRestartN = 0
+    R.wetHint = {}
     R.dropN, R.dropOK, R.dropsOff, R.dropFlips, R.gateMoves = 0, 0, false, 0, 0
     gateStage = {}
     scaled = false
