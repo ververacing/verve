@@ -425,8 +425,10 @@ end
 -- it off the racing line for the rest of the race, the limp logic thought it never healed, and the
 -- repair penalty kept growing. Track the reading at the last repair and use damage SINCE then.
 local function effImpact(car, i) return math.max(0, maxImpact(car) - (dmgBase[i] or 0)) end
+R.REPAIR_BODY = true       -- user option repairOnTrack: on = the body is healed in place (today); off = the damage stays, the car goes
+                           -- back on the line and AC's AI pits for it as stock does (community ask 2026-09-21)
 local function repairBody(i, car)
-    pcall(function() physics.setCarBodyDamage(i, vec4(0, 0, 0, 0)) end)
+    if R.REPAIR_BODY then pcall(function() physics.setCarBodyDamage(i, vec4(0, 0, 0, 0)) end) end
     dmgBase[i] = maxImpact(car)
 end
 
