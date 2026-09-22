@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERVE = os.path.dirname(HERE)
 DOCS = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa")
 CLASS_WORDS = {
-    "gt3": "GT3", "gt4": "GT4", "sf70h": "Formula 1", "formula": "Formula 1", "f317": "Formula 3", "f312": "Formula 3",
+    "gt3": "GT3", "gt4": "GT4", "sf70h": "Formula", "formula": "Formula", "f317": "Formula 3", "f312": "Formula 3",
     "dallara": "Formula 3", "tatuus": "Formula 4", "499p": "Hypercar", "valkyrie": "Hypercar", "sc63": "Hypercar",
     "919": "LMP1", "r18": "LMP1", "ts040": "LMP1", "787b": "Group C", "962": "Group C", "nascar": "Stock car",
     "camaro": "Stock car", "tcr": "Touring", "dtm": "Touring", "btcc": "Touring", "gokart": "Kart", "rally": "Rally",
@@ -77,9 +77,14 @@ def sibling(path, kind):
     if kind == "race_out":
         # written at the END of the race: match by the label in the file name instead of the timestamp
         lab = re.sub(r"^diag_race_\d{8}_\d{6}_", "", os.path.basename(path)).replace(".jsonl", "")
-        lab = lab.split("_", 1)[1] if "_" in lab else lab      # drop the track prefix
-        cands = [c for c in glob.glob(os.path.join(HERE, "harness_results", f"race_out_{day}_*.json")) if c.endswith(f"_{lab}.json")]
-        return max(cands, key=os.path.getmtime) if cands else None
+        allc = glob.glob(os.path.join(HERE, "harness_results", f"race_out_{day}_*.json"))
+        parts = lab.split("_")
+        for k in range(1, len(parts)):          # drop the track prefix, however many words it has
+            suffix = "_".join(parts[k:])
+            cands = [c for c in allc if c.endswith(f"_{suffix}.json")]
+            if cands:
+                return max(cands, key=os.path.getmtime)
+        return None
     else:
         cands = glob.glob(os.path.join(DOCS, "verve_feed", f"{day}_*.jsonl"))
     best, bd = None, 181
@@ -100,8 +105,13 @@ def build(path, label="Race A", ref_format=False):
     vote against tools/ref_card_f1.py cards."""
     hdr, rows, contacts = load_diag(path)
     # a weekend file can start with the tail of qualifying (session 2): the card is the race (session 3) only
-    if rows and any(r.get('session') == 3 for r in rows):
-        rows = [r for r in rows if r.get('session', 3) == 3]
+    if rows and 'session' in rows[-1]:
+        if not any(r.get('session') == 3 for r in rows):
+            return None   # a practice / qualifying file
+        rows = [r for r in rows if r.get('session') == 3]
+        # the first race snapshots can still carry the previous session's lap count: start at the first lap-0 row
+        k0 = next((k for k, r in enumerate(rows) if r['leaderLap'] == 0), 0)
+        rows = rows[k0:]
         t_race = rows[0]['t'] if rows else 0
         contacts = [c for c in contacts if c['t'] >= t_race]
     if not rows or len(rows) < 3:
@@ -289,8 +299,13 @@ def build(path, label="Race A", ref_format=False):
         if len(meds) >= 4:
             out.append(f"Lap-time spread: median laps from {meds[0]:.1f} s (quickest car) to {meds[len(meds)//2]:.1f} s (mid-field) to {meds[-1]:.1f} s (slowest).")
     if ref_format:
-        drop = ("Cars taking damage", "Car-to-car contacts", "Cars that stopped", "First thirty seconds", "Retired:")
+        drop = ("Cars taking damage", "Car-to-car contacts", "Cars that stopped", "First thirty seconds")
         out = [l for l in out if not l.startswith(drop)]
+        for k, l in enumerate(out):
+            if l.startswith("Overtakes for position:"):
+                out[k] = "Overtakes for position (net, per lap): " + l.split(": ", 1)[1].split("); where:")[0] + ")."
+            elif l.startswith("Retired:"):
+                out[k] = l.replace("Retired: none.", "Retired or off the lead lap: 0.").replace("Retired: ", "Retired or off the lead lap: ")
     return "\n".join(out) + "\n"
 
 

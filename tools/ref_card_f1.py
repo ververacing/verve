@@ -73,6 +73,8 @@ def main():
     lapped = sorted([d for d in order if 0 < done[d] < last_lap], key=lambda d: -done[d])
     # position changes per lap (a driver gaining places on a driver still running = an overtake, net per lap)
     changes = {}
+    # lap 1: places gained from the grid slot (the anonymised number IS the grid order)
+    changes[1] = sum(max(0, grid[d] - pos[(d, 1)]) for d in order if (d, 1) in pos and grid[d] < 99)
     for L in range(2, last_lap + 1):
         k = 0
         for d in order:
