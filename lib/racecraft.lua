@@ -139,6 +139,7 @@ R.cv2 = cv2                                                               -- (re
 -- same line loses throttle in proportion to the gap; the field is released from the lights row by row.
 R.CONVOY2_ON = true 
 R.ROWCAUT_X = 1.0             -- row-caution multiplier (A/B for big grids, 2026-09-19)
+R.START_T1_M = 0              -- >0: a first corner closer than this (m) to the line keeps the Calm easing whatever raceStart says (Spa's La Source)
 R.START_X = 1.0               -- RACE START (user option raceStart): scales the whole opening-lap easing. 1 = Calm (the default: caution,
                               -- staggered release, convoy throttle), 0.5 = Racing (half of it), 0 = Stock (none of it, brake guard off too).
                               -- Two OverTake users asked for faster backmarker launches (2026-09-21); measured by lap1_tally's start gain.
@@ -412,6 +413,15 @@ function R.evaluate(i, dt)
         if spd < K.SPEED_MIN or me.isInPitlane then return end
         local mySpline = me.splinePosition
         if mySpline == nil then return end
+        local startX = R.START_X
+        if R.START_T1_M > 0 and startX < 1 then
+            if cv2.t1 == nil then          -- once per load: the distance from the line to the first corner
+                cv2.t1 = 1e9
+                for k = 0.004, 0.2, 0.002 do if cornerAhead(k) then cv2.t1 = k * trackLen; break end end
+                pcall(function() ac.log(string.format('Verve: first corner %.0f m from the line (START_T1_M %d)', cv2.t1, R.START_T1_M)) end)
+            end
+            if cv2.t1 < R.START_T1_M then startX = 1 end
+        end
 
         local classKey = Classes.keyOf(i)
         local t = TACTICS[classKey] or TACTICS.road
@@ -529,7 +539,7 @@ function R.evaluate(i, dt)
             if cv2.clock and cv2.back[i] then
                 local tl0 = os.clock() - cv2.clock
                 if tl0 < (cv2.react[i] or 0) then thr = math.min(thr, CV.REACT_THR)   -- reaction time: not on the gas yet
-                elseif tl0 < (cv2.react[i] or 0) + CV.ROW_T * R.ROW_T_X * R.START_X * (cv2.back[i] / CV.ROW_M) then thr = math.min(thr, CV.THR + (1 - CV.THR) * (1 - R.START_X)) end   -- staggered release
+                elseif tl0 < (cv2.react[i] or 0) + CV.ROW_T * R.ROW_T_X * startX * (cv2.back[i] / CV.ROW_M) then thr = math.min(thr, CV.THR + (1 - CV.THR) * (1 - startX)) end   -- staggered release
             end
             local cvGap, cvNear = CV.GAP_M, CV.NEAR_M
             if R.CV_TGAP > 0 then cvGap = math.max(CV.GAP_M, spd / 3.6 * R.CV_TGAP); cvNear = cvGap * (CV.NEAR_M / CV.GAP_M) end   -- a time gap: the faster I arrive, the further out I ease
@@ -539,7 +549,7 @@ function R.evaluate(i, dt)
                 if aCar and math.abs(latOf(aCar.position) - latOf(me.position)) < CV.LAT then
                     local gm = gapA * trackLen
                     local lim = clamp(CV.THR_MIN + (1 - CV.THR_MIN) * (gm - cvNear) / (cvGap - cvNear), CV.THR_MIN, 1)
-                    thr = math.min(thr, lim + (1 - lim) * (1 - R.START_X))   -- Racing / Stock: less of the convoy hold
+                    thr = math.min(thr, lim + (1 - lim) * (1 - startX))   -- Racing / Stock: less of the convoy hold
                 end
             end
             -- SIDE YIELD: two-abreast into a corner on lap 0 is how same-row pairs touch (Barcelona F1 2026-09-16:
@@ -558,7 +568,7 @@ function R.evaluate(i, dt)
                 pcall(function() cv2.base[i] = ac.INIConfig.carData(i, 'ai.ini'):get('PEDALS', 'BRAKE_HINT', 1.0) end)
             end
             local mul = R.BG_ALL > 0 and R.BG_ALL or 1.0
-            if R.OL_BRAKEGUARD and R.START_X > 0 and myLap <= 1 and aheadIdx >= 0 and not (Recovery.stateOf(i) or {}).rec then
+            if R.OL_BRAKEGUARD and startX > 0 and myLap <= 1 and aheadIdx >= 0 and not (Recovery.stateOf(i) or {}).rec then
                 local gm = gapA * trackLen
                 local reach = CV.BG_M
                 if R.OL_FUEL_K > 0 then reach = reach * (1 + R.OL_FUEL_K * clamp(((me.fuel or 20) - 20) / 50, 0, 1.5)) end   -- heavier car, longer braking
@@ -839,7 +849,7 @@ function R.evaluate(i, dt)
         if crowd >= 1 then
             if myLap == 0 then openingLap = clamp(1 - math.max(0, olS) * (1 - K.OPENLAP_FLOOR), K.OPENLAP_FLOOR, 1)   -- 1.0 at the lights (and on the grid before the line) -> 0.3 at the line
             elseif myLap == 1 then openingLap = K.OPENLAP_FLOOR * clamp(1 - mySpline / K.OPENLAP_TAIL, 0, 1) end   -- tail into lap 1
-            openingLap = openingLap * R.START_X
+            openingLap = openingLap * startX
         end
         if openingLap > 0 then
             -- caution by the gap ahead: extra caution only matters with a car a few lengths ahead; the leaders keep
