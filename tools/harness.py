@@ -48,7 +48,8 @@ RESULTS_DIR = os.path.join(VERVE, "tools", "harness_results")
 REPLAY_DIR = "D:/Verve/harness_replays" if os.path.isdir("D:/") else os.path.join(RESULTS_DIR, "replays")
 
 sys.path.insert(0, os.path.join(VERVE, "tools"))
-from race_metrics import metrics  # noqa: E402
+from race_metrics import metrics
+import realtime  # noqa: E402
 
 
 class Ini(configparser.RawConfigParser):
@@ -785,6 +786,14 @@ def run_once(args, arm, run_idx):
     m["player_best_lap_s"] = round(best[0], 2) if 0 in best else ""
     if best:
         shutil.copy2(RACE_OUT, os.path.join(RESULTS_DIR, f"race_out_{time.strftime('%Y%m%d_%H%M%S')}_{label}.json"))
+    # did the machine keep real time? (AC's CPU occupancy: when the physics thread runs out of budget the sim
+    # advances slower than the wall clock and every wall-clock judgement here drifts with it)
+    rt_med, rt_worst, rt_laps, _ = realtime.ratio(diag, RACE_OUT if best else None)
+    m["realtime_ratio"] = rt_med if rt_med is not None else ""
+    m["realtime_worst"] = rt_worst if rt_worst is not None else ""
+    if rt_med is not None and rt_med < realtime.SUSPECT:
+        print(f"  !! the sim ran at {rt_med:.2f}x real time over {rt_laps} laps (CPU occupancy): "
+              f"treat this race's timings as suspect")
     m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots", "fault", "csp", "human")}, sort_keys=True)
     m["weather"] = args.weather or ""
     csv_path = os.path.join(RESULTS_DIR, "results.csv")
