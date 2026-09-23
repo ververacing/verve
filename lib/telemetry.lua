@@ -36,7 +36,8 @@ local flagT = 0
 local function newStats(sim)
     local s = { t0 = os.time(), laps = {}, lastPrev = {}, inc = {}, incContact = 0, incSolo = 0, incLap1 = 0,
                 dmgPrev = {}, pits = {}, wasInPit = {}, startPos = {}, leadCar = nil, leadChanges = 0,
-                fps = 0, fpsN = 0, maxDmg = {}, finished = {}, samples = 0 }
+                fps = 0, fpsN = 0, maxDmg = {}, finished = {}, samples = 0,
+                leaderLaps = 0, sawGreen = false }
     for i = 0, sim.carsCount - 1 do s.laps[i] = {}; s.inc[i] = 0; s.pits[i] = 0; s.maxDmg[i] = 0 end
     return s
 end
@@ -49,6 +50,7 @@ end
 
 local function sample(sim)
     st.samples = st.samples + 1
+    if sim.isSessionStarted then st.sawGreen = true end
     -- damage off in the launcher: damage never jumps, so incidents come from CSP's collision state instead; with damage
     -- on the damage path stays (comparable with every row sent so far). The row carries damage_setting either way.
     if st.damageOff == nil then st.damageOff = (assist('damageRate') == 0) end
@@ -71,6 +73,7 @@ local function sample(sim)
     for i = 0, sim.carsCount - 1 do
         local c = ac.getCar(i)
         if c then
+            if (c.lapCount or 0) > st.leaderLaps then st.leaderLaps = c.lapCount end
             -- laps
             local prev = c.previousLapTimeMs
             if type(prev) == 'number' and prev > 0 and prev ~= st.lastPrev[i] then
@@ -191,6 +194,8 @@ function T.buildReport(sim, ctx, completed, abortReason)
         '"player_finished":' .. jbool(st.finished[0] == true),
         '"completed":' .. jbool(completed), '"abort_reason":' .. jstr(abortReason),
         '"duration_s":' .. jint(os.time() - st.t0),
+        '"leader_laps":' .. jint(st.leaderLaps),
+        '"left_before_green":' .. jbool(not st.sawGreen),
         '"profiles_used":' .. jint(ctx.profilesUsed), '"archetypes_used":' .. jint(ctx.archetypesUsed),
         '"trouble_spots":' .. jint(ctx.troubleSpots),
         '"fps_avg":' .. jnum(st.fpsN > 0 and st.fps / st.fpsN or nil),

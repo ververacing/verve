@@ -18,3 +18,8 @@ __pycache__/
 # agent instructions and local docs -- never shipped or committed
 CLAUDE.md
 docs/
+
+# secrets and local agent config -- never committed
+.env
+.env.*
+.claude/settings.local.json
