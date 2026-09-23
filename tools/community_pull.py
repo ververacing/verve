@@ -55,13 +55,56 @@ def password():
 
 
 def connect():
+    """Verified TLS only, trying each trust source this machine might have.
+
+    Python's own store rejects the pooler here with "self-signed certificate in certificate chain" - something local
+    is terminating TLS - so certifi's bundle and the Windows trust store are tried as well. Verification is never
+    turned off: if all of them fail, that is a finding about the machine, not something to paper over."""
     try:
         import pg8000.dbapi
     except ImportError:
         raise SystemExit("pg8000 is not installed: pip install pg8000")
     import ssl
-    ctx = ssl.create_default_context()
-    return pg8000.dbapi.Connection(user=USER, password=password(), host=HOST, port=PORT, database=DB, ssl_context=ctx)
+    ca = os.path.join(HERE, os.pardir, "supabase-ca.crt")   # Supabase signs database connections with its own root
+    attempts = []
+    if os.path.exists(ca):
+        def pinned():
+            """Verify against Supabase's own root, pinned - signature, chain, expiry and hostname all enforced.
+
+            Python 3.13+ turns on VERIFY_X509_STRICT by default, and Supabase's 2021 root predates it: the root
+            carries no keyUsage extension, so strict RFC 5280 checking rejects a chain that is otherwise perfectly
+            valid (openssl s_client -CAfile against this same root returns 0/ok). Only that strictness flag is
+            cleared, and only for this pinned-root context; nothing about who we trust changes."""
+            ctx = ssl.create_default_context(cafile=ca)
+            ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
+            return ctx
+        attempts.append(("Supabase Root 2021 CA (pinned)", pinned))
+    attempts.append(("python default store", lambda: ssl.create_default_context()))
+    try:
+        import certifi
+        attempts.append(("certifi bundle", lambda: ssl.create_default_context(cafile=certifi.where())))
+    except ImportError:
+        pass
+    try:
+        import truststore
+        attempts.append(("windows trust store", lambda: truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)))
+    except ImportError:
+        pass
+    last = None
+    for name, make in attempts:
+        try:
+            conn = pg8000.dbapi.Connection(user=USER, password=password(), host=HOST, port=PORT,
+                                           database=DB, ssl_context=make())
+            if name != "python default store":
+                print(f"  (TLS verified via {name})")
+            return conn
+        except ssl.SSLError as e:
+            last = f"{name}: {e}"
+            print(f"  [tls] {name} did not verify: {str(e)[:110]}")
+        except Exception as e:                      # pg8000 wraps some handshake failures
+            last = f"{name}: {type(e).__name__}: {e}"
+    raise SystemExit("TLS to the reports database failed every verified way: " + str(last)[:140]
+                     + " -- try: pip install truststore certifi")
 
 
 def query(sql, args=None):
@@ -96,12 +139,49 @@ def clean(rows):
     return out
 
 
+
+def tls_check():
+    """Why TLS fails to the pooler: does verified HTTPS to the same project work on 443?
+
+    If 443 verifies and 5432 does not, something local is intercepting the database port specifically (antivirus TLS
+    scanning does this), which is a machine finding - not something to fix by trusting less."""
+    import socket
+    import ssl
+    import urllib.request
+    print("verified HTTPS to the project on 443:")
+    try:
+        req = urllib.request.Request("https://qcdnlochctwfsvslnqxo.supabase.co/rest/v1/", method="HEAD")
+        with urllib.request.urlopen(req, timeout=15) as r:
+            print(f"  ok ({r.status}) - public CAs verify fine from this Python")
+    except urllib.error.HTTPError as e:
+        print(f"  ok (HTTP {e.code}) - TLS verified, the endpoint just refused the request")
+    except Exception as e:
+        print(f"  FAILED: {type(e).__name__}: {str(e)[:120]}")
+    print(f"verified TLS to {HOST}:{PORT} (the database port):")
+    ctx = ssl.create_default_context()
+    try:
+        with socket.create_connection((HOST, PORT), timeout=15) as sock:
+            with ctx.wrap_socket(sock, server_hostname=HOST) as ss:
+                print(f"  ok - {ss.version()}")
+    except ssl.SSLError as e:
+        print(f"  FAILED: {str(e)[:140]}")
+    except Exception as e:
+        print(f"  FAILED: {type(e).__name__}: {str(e)[:120]}")
+    print("  (note: Postgres on 5432 starts in the clear and upgrades with STARTTLS, so a bare TLS handshake here")
+    print("   failing is expected - the line above only tells you whether something answers and how)")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--since", help="window like 6h / 2d, instead of 'since the last pull'")
     ap.add_argument("--sql", help="run one read-only query and print the rows as JSON")
+    ap.add_argument("--tls-check", action="store_true", help="diagnose the TLS failure, change nothing")
     a = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
+
+    if a.tls_check:
+        tls_check()
+        return
 
     if a.sql:
         for row in query(a.sql):
