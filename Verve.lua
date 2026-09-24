@@ -347,7 +347,7 @@ function script.update(dt)
             hotSpots = Troublespots.hotCount(), crashRisk = Troublespots.crashiness(), isOval = Racecraft.isOval,
             peak = Troublespots.peakHeat(), storeLen = Troublespots.storeLen, saveOk = Troublespots.lastSaveOk,
             per = diagPer, rc = Racecraft.last, recState = Recovery.stateOf, cv2 = Racecraft.cv2, episodes = Strategy.episodes,
-            recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, dropsOff = Recovery.dropsOff,
+            recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, boxRescueN = Recovery.boxRescueN, boxSeenN = Recovery.boxSeenN, boxTryN = Recovery.boxTryN, boxOkN = Recovery.boxOkN, dropsOff = Recovery.dropsOff,
             mvN = Strategy.attempts, mvOK = Strategy.ok, mvT = Strategy.byTypeString(), gateN = Recovery.gateMoves,
             fwdSign = (Recovery.fwdSign and Recovery.fwdSign() or 0), dropFlips = Recovery.dropFlips,
             suspPits = Recovery.suspPitCount, faults = Fault.count, penalties = Fault.penCount, contacts = Contacts.count,

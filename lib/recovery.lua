@@ -58,7 +58,7 @@ local REJOIN_RAMP = 3.0       -- seconds of throttle ramp after a teleport (a ca
 local REJOIN_THROTTLE_CUT = 0.40 -- throttle starts at (1 - this) of full and ramps up over REJOIN_RAMP. Eased from a
                               -- 6 s / 35 % ramp under which cars never got going at all (0 of 30 rejoined)
 local PIT_STUCK_T = 15.0      -- stopped in the pit LANE (not the box) this long -> it's done, let AC retire it
-local BOX_LIMBO_T = 150.0     -- stationary in the BOX this long mid-race (AC damage-pit, never retired) -> retired.
+local BOX_LIMBO_T = 150.0     -- stationary in the BOX this long mid-race (AC damage-pit, never retired) -> rescue, then retire.
                               -- 75 s retired two healthy cars mid wet-tyre stop in a 19-car queue (2026-09-22)
 local boxT = {}
 local boxFuel = {}         -- fuel last seen in the box: rising fuel = a live pit stop, not limbo (an AI Escalade retired mid-stop, 2026-09-18)
@@ -773,10 +773,29 @@ function R.update(dt)
                     local working = (boxFuel[i] and fuel > boxFuel[i] + 0.01)
                         or (R.boxCmp[i] ~= nil and cmp ~= R.boxCmp[i])
                         or (R.boxWear[i] ~= nil and wear < R.boxWear[i] - 0.01)
-                    if working then boxT[i] = 0 else boxT[i] = (boxT[i] or 0) + dt end
+                    if working then boxT[i] = 0 else
+                        if (boxT[i] or 0) == 0 then R.boxSeenN = R.boxSeenN + 1 end
+                        boxT[i] = (boxT[i] or 0) + dt
+                    end
                     R.boxCmp[i] = cmp; R.boxWear[i] = wear   -- refuelling: the stop is live
                     boxFuel[i] = fuel
-                    if boxT[i] > BOX_LIMBO_T then parkInPits(i); boxT[i] = 0 end
+                    if boxT[i] > BOX_LIMBO_T then
+                        -- AC parked it here and forgot it (stock AC does this too: Baku 2026-09-24, Verve off,
+                        -- 2 and 5 cars stranded). forceRecover repairs and puts it back on the racing line --
+                        -- and unlike AC's resetCarState it does move a car out of the pit lane. Give it two
+                        -- goes before accepting the car is done; a car that keeps ending up back in the box
+                        -- is genuinely broken and parking it is then the honest outcome.
+                        local tries = R.boxRescued[i] or 0
+                        R.boxTryN = R.boxTryN + 1
+                        if R.BOX_RESCUE and tries < R.BOX_RESCUE_MAX and R.forceRecover(i) then
+                            R.boxOkN = R.boxOkN + 1
+                            R.boxRescued[i] = tries + 1
+                            R.boxRescueN = (R.boxRescueN or 0) + 1
+                        else
+                            parkInPits(i)
+                        end
+                        boxT[i] = 0
+                    end
                 else
                     boxT[i] = 0; R.boxCmp[i] = nil; R.boxWear[i] = nil
                 end
@@ -1137,6 +1156,13 @@ end
 -- still crawling on track SUSP_PIT_T later, retire it as a suspension DNF. Everything lives on R (R.update is at the
 -- upvalue limit).
 R.SUSP_LIMP = 0; R.SUSP_LIMP_T = 20.0; R.SUSP_LIMP_SPD = 60.0; R.SUSP_PIT_T = 90.0
+R.BOX_RESCUE = true        -- a car AC abandoned in its box is repaired and put back on track...
+R.BOX_RESCUE_MAX = 2       -- ...at most this many times, then it is parked for real
+R.boxRescued = {}          -- per-car rescue count
+R.boxSeenN = 0             -- cars seen stationary in their own box (the condition that starts the timer)
+R.boxTryN = 0              -- rescues attempted
+R.boxOkN = 0               -- rescues that returned success
+R.boxRescueN = 0           -- session tally (diagnostics)
 R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0
 function R.suspLimp(i, car, spd, dt)
     if R.SUSP_LIMP <= 0 or parked[i] then return end
@@ -1158,6 +1184,7 @@ function R.suspLimp(i, car, spd, dt)
 end
 
 function R.reset()
+    R.boxRescued = {}; R.boxRescueN = 0; R.boxSeenN = 0; R.boxTryN = 0; R.boxOkN = 0
     R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0
     R.pointToPoint = nil
     boxT = {}; boxFuel = {}
