@@ -36,6 +36,7 @@ local shiftSet = {}                              -- per car: shift thresholds ap
 local harnessStartT, harnessStarted = 0, false   -- "press Drive" on AC's pre-session screen (ac.tryToStart)
 local harnessEndT = 0                            -- seconds a timed session (practice/quali) has been over
 local harnessDoneT, harnessQuit = 0, false       -- race-over timer / already asked AC to quit
+local harnessStopT = 0                           -- stop-at-lap reached: grace so the final lap gets recorded
 local harnessCamT = 0                            -- last time the chase camera was re-asserted
 
 -- defaults for the global settings (also used for "reset to defaults")
@@ -194,8 +195,14 @@ function script.update(dt)
             local leaderLaps = 0
             if type(Harness.stopAtLap) == 'number' and Harness.stopAtLap > 0 then for i = 0, simH.carsCount - 1 do local c = ac.getCar(i); if c and (c.lapCount or 0) > leaderLaps then leaderLaps = c.lapCount end end end
             if type(Harness.stopAtLap) == 'number' and Harness.stopAtLap > 0 and leaderLaps >= Harness.stopAtLap and not harnessQuit then
-                harnessQuit = true
-                pcall(function() ac.log('Verve harness: stop-at-lap reached, shutting AC down (replay autosave)'); ac.shutdownAssettoCorsa() end)
+                -- don't quit in the same frame as the crossing: the feed's lap event for this lap and the next
+                -- diag snapshot have not been written yet, so every tool that counts laps from them would
+                -- under-read the race by one (PC #2, 2026-09-24). The diag writes every 8 s, so clear that.
+                if harnessStopT == 0 then harnessStopT = os.clock() end
+                if os.clock() - harnessStopT >= 10 then
+                    harnessQuit = true
+                    pcall(function() ac.log('Verve harness: stop-at-lap reached, shutting AC down (replay autosave)'); ac.shutdownAssettoCorsa() end)
+                end
             end
             if allParked and anyLap then
                 harnessDoneT = harnessDoneT + dt
