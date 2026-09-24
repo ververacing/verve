@@ -36,6 +36,7 @@ local shiftSet = {}                              -- per car: shift thresholds ap
 local harnessStartT, harnessStarted = 0, false   -- "press Drive" on AC's pre-session screen (ac.tryToStart)
 local harnessEndT = 0                            -- seconds a timed session (practice/quali) has been over
 local harnessDoneT, harnessQuit = 0, false       -- race-over timer / already asked AC to quit
+local harnessCamT = 0                            -- last time the chase camera was re-asserted
 
 -- defaults for the global settings (also used for "reset to defaults")
 -- Core behaviour (humanVar, classPhys, racecraft, recovery, crashRepair, troubleSpots) is what Verve IS: it's
@@ -148,7 +149,6 @@ function script.update(dt)
             if type(Harness.settings) == 'table' then
                 for k, v in pairs(Harness.settings) do if DEFAULTS[k] ~= nil then G[k] = v end end   -- session only, never saved
             end
-            Recovery.classOf = Classes.keyOf   -- open-wheel clearance needs a car's class
             if type(Harness.recovery) == 'table' then for k, v in pairs(Harness.recovery) do Recovery[k] = v end end
             if type(Harness.racecraft) == 'table' then for k, v in pairs(Harness.racecraft) do Racecraft[k] = v end end
             if type(Harness.fault) == 'table' then for k, v in pairs(Harness.fault) do Fault[k] = v end end
@@ -348,7 +348,7 @@ function script.update(dt)
             hotSpots = Troublespots.hotCount(), crashRisk = Troublespots.crashiness(), isOval = Racecraft.isOval,
             peak = Troublespots.peakHeat(), storeLen = Troublespots.storeLen, saveOk = Troublespots.lastSaveOk,
             per = diagPer, rc = Racecraft.last, recState = Recovery.stateOf, cv2 = Racecraft.cv2, episodes = Strategy.episodes,
-            recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, boxRescueN = Recovery.boxRescueN, dropRetryN = Recovery.dropRetryN, boxSeenN = Recovery.boxSeenN, boxTryN = Recovery.boxTryN, boxOkN = Recovery.boxOkN, dropsOff = Recovery.dropsOff,
+            recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, boxRescueN = Recovery.boxRescueN, boxSeenN = Recovery.boxSeenN, boxTryN = Recovery.boxTryN, boxOkN = Recovery.boxOkN, dropsOff = Recovery.dropsOff,
             mvN = Strategy.attempts, mvOK = Strategy.ok, mvT = Strategy.byTypeString(), gateN = Recovery.gateMoves,
             fwdSign = (Recovery.fwdSign and Recovery.fwdSign() or 0), dropFlips = Recovery.dropFlips,
             suspPits = Recovery.suspPitCount, faults = Fault.count, penalties = Fault.penCount, contacts = Contacts.count,
@@ -365,6 +365,14 @@ function script.update(dt)
     Telemetry.ENABLED = G.shareData == true
     Telemetry.VERSION = Update.LOCAL_VERSION or '0.0.0'
     Telemetry.UNATTENDED = Harness ~= nil and Harness.autopilot == true
+    -- AC puts the camera back to cockpit when a weekend moves from practice to the race, and the chase camera
+    -- was set once, 2 s into the FIRST session only - so every weekend race ran the heavier cockpit render
+    -- unattended (PC #2 spotted it by eye, 2026-09-24). Re-asserting beats detecting the change: a timer
+    -- cannot miss an event it never has to notice.
+    if Harness and Harness.autopilot and os.clock() - harnessCamT > 1.0 then
+        harnessCamT = os.clock()
+        pcall(function() ac.setCurrentCamera(ac.CameraMode.Drivable); ac.setCurrentDrivableCamera(ac.DrivableCamera.Chase) end)
+    end
     if Telemetry.ENABLED then pcall(Telemetry.update, dt, telemetryCtx()) end
     local tFrame1 = os.preciseClock and os.preciseClock() or os.clock()
     frameMs = frameMs + (tFrame1 - tFrame0) * 1000; frameN = frameN + 1

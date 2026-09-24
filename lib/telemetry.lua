@@ -134,21 +134,25 @@ local function jbool(v) if v == nil then return 'null' end; return v and 'true' 
 -- build the report row (a JSON object string) from the current stats + the context Verve hands us
 function T.buildReport(sim, ctx, completed, abortReason)
     ctx = ctx or {}
+    -- the mirror tables come from newStats, but buildReport runs inside pcall: a session shape that predates
+    -- them (a resumed session, a hot reload mid-race - CSP reloads this app on any file write) would lose the
+    -- WHOLE report to a nil index, silently. Local aliases cost nothing and fail visibly instead.
+    local mRet, mPark, mPos, mCls = st.mRet or {}, st.mPark or {}, st.mPos or {}, st.mCls or {}
     local n = sim.carsCount
     local classes, models, detail = {}, {}, {}
     local running, retired, aiBest, aiMed, meds = 0, 0, nil, {}, {}
     for i = 0, n - 1 do
         local c = ac.getCar(i)
         local model = ''; pcall(function() model = ac.getCarID(i) or '' end)
-        local cls = st.mCls[i] or (ctx.classOf and ctx.classOf(i)) or 'unknown'
+        local cls = mCls[i] or (ctx.classOf and ctx.classOf(i)) or 'unknown'
         classes[cls] = (classes[cls] or 0) + 1
         models[#models + 1] = jstr(model)
         local best, med = minOf(st.laps[i]), median(st.laps[i])
         -- prefer the in-race mirror: on an abort the live grid is already the NEXT session
-        local ret = st.mRet[i]
+        local ret = mRet[i]
         if ret == nil then ret = c and c.isRetired == true or false end
         local rs = ctx.recState and ctx.recState(i) or {}
-        local parked = st.mPark[i]
+        local parked = mPark[i]
         if parked == nil then parked = rs.parked == true end
         if ret or parked then retired = retired + 1 else running = running + 1 end
         if i > 0 and best then aiBest = (aiBest == nil or best < aiBest) and best or aiBest end
@@ -187,7 +191,7 @@ function T.buildReport(sim, ctx, completed, abortReason)
         '"laps":' .. jint(ctx.laps), '"cars":' .. jint(n),
         '"car_classes":{' .. table.concat(clsParts, ',') .. '}',
         '"car_models":[' .. table.concat(models, ',') .. ']',
-        '"player_car":' .. jstr(ctx.playerModel), '"player_class":' .. jstr(st.mCls[0] or (ctx.classOf and ctx.classOf(0)) or nil),
+        '"player_car":' .. jstr(ctx.playerModel), '"player_class":' .. jstr(mCls[0] or (ctx.classOf and ctx.classOf(0)) or nil),
         '"is_wet":' .. jbool(wet),
         '"ambient_c":' .. jint(sim.ambientTemperature), '"road_c":' .. jint(sim.roadTemperature),
         '"time_of_day":' .. jstr(sim.timeHours and string.format('%02d:00', sim.timeHours) or nil),
@@ -202,7 +206,7 @@ function T.buildReport(sim, ctx, completed, abortReason)
         '"lead_changes":' .. jint(st.leadChanges), '"pit_stops":' .. jint(totalPits),
         '"ai_best_lap_s":' .. jnum(aiBest), '"ai_median_lap_s":' .. jnum(median(aiMed)), '"field_spread_pct":' .. jnum((function() local r = false; pcall(function() r = sim.raceSessionType == ac.SessionType.Race end); return r and spread or nil end)()),
         '"player_start_pos":' .. jint(st.startPos[0]),
-        '"player_finish_pos":' .. jint(st.mPos[0] or (p and p.racePosition) or nil),
+        '"player_finish_pos":' .. jint(mPos[0] or (p and p.racePosition) or nil),
         '"player_laps":' .. jint(#st.laps[0]), '"player_best_lap_s":' .. jnum(pBest), '"player_median_lap_s":' .. jnum(pMed),
         '"player_incidents":' .. jint(st.inc[0]), '"player_max_damage":' .. jint(st.maxDmg[0]), '"player_pit_stops":' .. jint(st.pits[0]),
         '"player_finished":' .. jbool(st.finished[0] == true),
