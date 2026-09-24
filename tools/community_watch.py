@@ -25,17 +25,34 @@ STATE = os.path.join(HERE, "harness_results", "community_state.json")
 RAN = 600          # seconds: a race that ran long enough for its lap-1 share to mean anything
 
 
+PULLS = os.path.join(HERE, "harness_results", "community")      # what community_pull.py fetched directly
+DEDUPE = ("inst", "session_type", "track", "cars", "duration_s", "player_best_lap_s", "incidents")
+
+
 def load():
-    if not os.path.exists(EXPORT):
-        return []
-    out = []
-    with open(EXPORT, encoding="utf-8") as f:
-        for line in f:
-            try:
-                out.append(json.loads(line))
-            except ValueError:
-                pass
-    return [r for r in out if not r.get("unattended")]
+    """The desk export plus anything pulled directly, deduped. The export can be up to an hour stale and the
+    direct pulls are live, so reading both means the check-in never works from the older of the two."""
+    import glob
+    paths = ([EXPORT] if os.path.exists(EXPORT) else []) + sorted(glob.glob(os.path.join(PULLS, "pull_*.jsonl")))
+    out, seen = [], set()
+    for path in paths:
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        r = json.loads(line)
+                    except ValueError:
+                        continue
+                    if r.get("unattended"):
+                        continue
+                    key = tuple(str(r.get(k)) for k in DEDUPE)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    out.append(r)
+        except OSError:
+            pass
+    return out
 
 
 def views(rows):
