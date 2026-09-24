@@ -15,12 +15,15 @@ restore has succeeded.
     python tools/video_profile.py --status
 """
 import argparse
+import hashlib
+import json
 import os
 import shutil
 
 CFG = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa", "cfg")
 VIDEO = os.path.join(CFG, "video.ini")
 BACKUP = os.path.join(CFG, "video_owner.ini.bak")
+STATE = os.path.join(CFG, "video_owner.state.json")   # when we took over, and the bytes we left
 MARKER = "__VERVE_HARNESS_PROFILE"
 
 # Only the settings that cost frames. Resolution, windowed mode and the effects that a chase camera does not need;
@@ -63,44 +66,97 @@ def _apply(lines, changes):
     return out
 
 
-def taken_over(lines=None):
-    """The BACKUP FILE is the authority, not a marker inside video.ini.
+def _state():
+    """What we wrote and when, kept OUTSIDE video.ini.
 
-    AC rewrites video.ini itself while it runs - it stores the window size and position there - so a marker line
-    inside the file survives only until the first race resizes the window. Found the hard way on 2026-09-24: AC
-    dropped the marker and left WIDTH/HEIGHT at its own window size, which made restore() believe the file was
-    already the owner's and delete the backup. That would have destroyed their real settings.
+    Three attempts at this have now failed, each for the same reason: anything stored inside video.ini is not ours.
+    AC rewrites that file while it runs (it keeps the window geometry there), so a marker line vanishes; and
+    shutil.copy2 preserves mtime, so the backup's timestamp is when the OWNER last saved their settings, not when we
+    took over. A sidecar records both facts unambiguously: when the takeover happened, and the exact bytes we left
+    in video.ini. If video.ini still holds those bytes, nobody has touched it and the backup is safe to restore. If
+    it does not, the owner (or AC) changed something and we must not clobber it."""
+    try:
+        with open(STATE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
 
-    So: the backup existing IS the takeover. The marker is kept only as a human-readable hint inside the file."""
-    return os.path.exists(BACKUP)
+
+def taken_over():
+    return os.path.exists(BACKUP) and _state() is not None
 
 
-def lean():
-    if taken_over():
-        lines = _apply(_read(VIDEO), LEAN)          # re-assert the profile; AC may have rewritten parts of it
-        with open(VIDEO, "w", encoding="utf-8") as f:
-            f.write(chr(10).join(lines) + chr(10))
-        return "already lean (backup held from an earlier run; profile re-asserted)"
-    lines = _read(VIDEO)
-    shutil.copy2(VIDEO, BACKUP)                      # only ever written when NOT already taken over
-    lines = _apply(lines, LEAN)
-    lines.insert(0, f"{MARKER}=1")
+def _digest(path):
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def lean(now=None):
+    """Borrow video.ini. Safe to call when a previous run died without handing back."""
+    st = _state()
+    if st and os.path.exists(BACKUP):
+        # a takeover is already in force. Only re-assert if video.ini is still EXACTLY what we left; if the owner
+        # changed it since, their file is the one worth keeping - back that up instead of overwriting the backup
+        # with our own lean copy, which is how a night of drift used to eat their settings.
+        if _digest(VIDEO) != st.get("wrote"):
+            shutil.copy2(VIDEO, BACKUP)
+            st = None
+        else:
+            return "already lean (backup held from an earlier run)"
+    if not st:
+        shutil.copy2(VIDEO, BACKUP)
+    lines = _apply(_read(VIDEO), LEAN)
     with open(VIDEO, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-    return "lean profile applied (1280x720 windowed, effects off); yours is in video_owner.ini.bak"
+        f.write(chr(10).join(lines) + chr(10))
+    with open(STATE, "w", encoding="utf-8") as f:
+        json.dump({"took_over_at": now or 0, "wrote": _digest(VIDEO)}, f)
+    return "lean profile applied (1280x720 windowed); yours is in video_owner.ini.bak"
 
 
 def restore():
+    """Hand video.ini back. Never clobbers a file the owner has changed since we wrote it."""
+    st = _state()
     if not os.path.exists(BACKUP):
+        if os.path.exists(STATE):
+            os.remove(STATE)
         return "nothing to restore (no backup)"
-    shutil.copy2(BACKUP, VIDEO)      # the backup is the owner's file by construction; always prefer it
+    if st and _digest(VIDEO) != st.get("wrote"):
+        # AC rewrites the window geometry on exit, which is expected and ours to absorb; anything else means the
+        # file is not the one we left, so the backup may be older than the owner's real settings. Keep both.
+        if _lean_apart_from_geometry():
+            pass                                   # just AC's window size: still ours, safe to hand back
+        else:
+            return ("NOT restoring: video.ini has changed since the harness took it over, so the backup may be "
+                    "older than your settings. Both files kept - " + BACKUP + " is the harness's copy.")
+    shutil.copy2(BACKUP, VIDEO)
     os.remove(BACKUP)
+    if os.path.exists(STATE):
+        os.remove(STATE)
     return "your video settings are back"
+
+
+def _lean_apart_from_geometry():
+    """Is video.ini still the lean profile except for the keys AC itself rewrites (window size/placement)?"""
+    volatile = {("VIDEO", "WIDTH"), ("VIDEO", "HEIGHT"), ("VIDEO", "FULLSCREEN"), ("VIDEO", "_EXT_PLACEMENT")}
+    section, differ = "", 0
+    for line in _read(VIDEO):
+        t = line.strip()
+        if t.startswith("[") and t.endswith("]"):
+            section = t[1:-1]
+        elif "=" in t and section in LEAN:
+            k = t.split("=", 1)[0].strip()
+            want = LEAN[section].get(k)
+            if want is not None and (section, k) not in volatile and t.split("=", 1)[1].strip() != want:
+                differ += 1
+    return differ == 0
 
 
 def status():
     lines = _read(VIDEO) if os.path.exists(VIDEO) else []
-    who = "HARNESS (lean)" if taken_over(lines) else "owner"
+    who = "HARNESS (lean)" if taken_over() else "owner"
     res = {}
     section = ""
     for line in lines:

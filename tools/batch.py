@@ -11,7 +11,23 @@ import sys
 import time
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
-import video_profile  # a killed harness never runs its finally block; sweep here as well
+import atexit, signal
+import video_profile
+# A killed harness never runs its finally block, and the documented way to stop a batch is to kill batch.py
+# (CLAUDE.md), so a plain call at the end of the file never runs on the path that needs it most. atexit plus
+# a SIGTERM handler covers both; SIGINT/SIGTERM is what taskkill without /F sends.
+def _hand_video_back(*_a):
+    try:
+        video_profile.restore()
+    except Exception:  # noqa: BLE001 - never let the sweep mask the real exit
+        pass
+atexit.register(_hand_video_back)
+for _sig in (getattr(signal, 'SIGTERM', None), getattr(signal, 'SIGINT', None)):
+    if _sig is not None:
+        try:
+            signal.signal(_sig, lambda *a: (_hand_video_back(), _os._exit(1)))
+        except (ValueError, OSError):
+            pass
 
 here = os.path.dirname(os.path.abspath(__file__))
 root = os.path.dirname(here)
@@ -72,5 +88,3 @@ with open(log_path, "a", encoding="utf-8") as log:
         time.sleep(5)
     log.write(f"=== batch done {time.strftime('%H:%M:%S')}\n")
 
-# whatever happened above, AC's video settings end up back with the owner
-print('  ' + video_profile.restore())

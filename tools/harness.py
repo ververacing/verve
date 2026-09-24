@@ -41,6 +41,17 @@ DOCS = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa")
 CFG = os.path.join(DOCS, "cfg")
 RACE_INI = os.path.join(CFG, "race.ini")
 DEFAULT_AMBIENT, DEFAULT_ROAD = 26, 34   # AC's usual conditions, and what PC #2 runs: keep the machines comparable
+# Everything else that decides how a car goes round. It was all whatever Content Manager last left in race.ini,
+# differing silently between machines and between one batch and the next; DYNAMIC_TRACK is the one that matters as
+# much as temperature, because it decides how much rubber is down. Overridable per run with --condition.
+RACE_CONDITIONS = (
+    ("DYNAMIC_TRACK", "SESSION_START", 100), ("DYNAMIC_TRACK", "SESSION_TRANSFER", 100),
+    ("DYNAMIC_TRACK", "LAP_GAIN", 1), ("DYNAMIC_TRACK", "RANDOMNESS", 0), ("DYNAMIC_TRACK", "PRESET", 5),
+    ("GROOVE", "VIRTUAL_LAPS", 10), ("GROOVE", "MAX_LAPS", 30), ("GROOVE", "STARTING_LAPS", 0),
+    ("LIGHTING", "SUN_ANGLE", -16), ("LIGHTING", "TIME_MULT", 1),
+    ("RACE", "PENALTIES", 1), ("RACE", "JUMP_START_PENALTY", 0), ("RACE", "FIXED_SETUP", 0),
+    ("LAP_INVALIDATOR", "ALLOWED_TYRES_OUT", -1),
+)
 RACE_OUT = os.path.join(DOCS, "out", "race_out.json")
 VERVE = os.path.join(AC_DIR, "apps", "lua", "Verve")
 HARNESS_LUA = os.path.join(VERVE, "harness.lua")
@@ -287,15 +298,17 @@ def build_race_ini(args, base_path):
     # last left, differing silently between machines and between one batch and the next. Grip is the big one -
     # DYNAMIC_TRACK controls how much rubber is down - and a low sun changes nothing physical but is one more thing
     # that was never chosen. Overridable per run, but never unset.
-    for section, key, value in (
-        ("DYNAMIC_TRACK", "SESSION_START", 100), ("DYNAMIC_TRACK", "SESSION_TRANSFER", 100),
-        ("DYNAMIC_TRACK", "LAP_GAIN", 1), ("DYNAMIC_TRACK", "RANDOMNESS", 0), ("DYNAMIC_TRACK", "PRESET", 5),
-        ("GROOVE", "VIRTUAL_LAPS", 10), ("GROOVE", "MAX_LAPS", 30), ("GROOVE", "STARTING_LAPS", 0),
-        ("LIGHTING", "SUN_ANGLE", -16), ("LIGHTING", "TIME_MULT", 1),
-        ("RACE", "PENALTIES", 1), ("RACE", "JUMP_START_PENALTY", 0), ("RACE", "FIXED_SETUP", 0),
-        ("LAP_INVALIDATOR", "ALLOWED_TYRES_OUT", -1),
-    ):
+    for section, key, value in RACE_CONDITIONS:
         ini.set(section, key, str(value))
+    # ...but a test that wants a green track or no penalties must be able to say so: --condition SECTION.KEY=VALUE,
+    # repeatable. Without this the pins are a wall nobody can see past, which is the same fault as leaving them unset.
+    for spec in (getattr(args, "condition", None) or []):
+        try:
+            path, value = spec.split("=", 1)
+            section, key = path.split(".", 1)
+        except ValueError:
+            raise SystemExit(f"--condition wants SECTION.KEY=VALUE, got {spec!r}")
+        ini.set(section.strip().upper(), key.strip().upper(), value.strip())
     return ini, len(cars) + 1
 
 
@@ -334,7 +347,7 @@ def parse_profiles(spec, ncars):
     return out
 
 
-def write_harness_lua(arm, ttl_s, ncars=0, laps=0):
+def write_harness_lua(arm, ttl_s, ncars=0, laps=0, weekend=False):
     body = {
         "expires": int(time.time()) + ttl_s,
         "autopilot": True,
@@ -348,7 +361,10 @@ def write_harness_lua(arm, ttl_s, ncars=0, laps=0):
         # 0 of 8 on CSP 3465 too, so it is the track, not the build). An unflagged race accumulates an extra
         # lap of incidents, contacts and repositions, so every absolute number was over a distance nobody
         # chose. This makes the requested distance the distance actually raced, everywhere.
-        "stopAtLap": arm.get("stop_laps") or laps or 0,
+        # NOT defaulted on a weekend: Verve compares the leader's lap count with no session check, and a
+        # 15-minute practice at Baku passes six laps easily, so a default stop would shut the run down
+        # before the race even started. An explicit --stop-laps still applies (the caller asked for it).
+        "stopAtLap": arm.get("stop_laps") or (0 if weekend else (laps or 0)),
         # raceFeed is a Verve setting (1-2 Hz feed in Documents/Assetto Corsa/verve_feed): the 8 s diag can't resolve who hit whom
         "settings": {"raceFeed": True, "shareData": True, **arm.get("settings", {})},   # shareData: exercises the opt-in report path; rows are flagged unattended
         "recovery": arm.get("recovery", {}),
@@ -673,7 +689,8 @@ def run_once(args, arm, run_idx):
         budget = args.minutes * 60 + 2 * args.lap_budget_s + 240      # the clock, the extra lap, the load
     # a weekend: the timed sessions, plus their loads (the terms were lost in a comment for one night, 2026-09-21)
     budget += 60 * (getattr(args, "practice", 0) + getattr(args, "quali", 0)) + (120 if (getattr(args, "practice", 0) or getattr(args, "quali", 0)) else 0)
-    write_harness_lua(arm, ttl_s=int(budget) + 120, ncars=ncars, laps=getattr(args, 'laps', 0) or 0)
+    write_harness_lua(arm, ttl_s=int(budget) + 120, ncars=ncars, laps=getattr(args, 'laps', 0) or 0,
+                      weekend=bool(getattr(args, 'practice', 0) or getattr(args, 'quali', 0)))
     label = arm.get("label", "A")
     print(f"[{label} #{run_idx}] {ini.get('RACE', 'TRACK')} x{args.laps} laps, {ncars} cars, budget {budget:.0f}s")
 
@@ -756,13 +773,22 @@ def run_once(args, arm, run_idx):
                     time.sleep(5)
                 break
     finally:
-        if not getattr(args, 'keep_video', False):
-            video_profile.restore()        # the owner's settings back, however this run ended
         restore_pure(pure_bak)
         restore_assists(assists_bak)
         restore_csp_overrides(csp_restore)
         if ours:
             subprocess.run(["taskkill", "/IM", "acs.exe", "/F"], capture_output=True)
+        # video LAST, and only once AC is gone: AC rewrites video.ini as it exits (it stores the window
+        # geometry there), so restoring while it is still alive gets overwritten a second later. Observed
+        # 2026-09-24: the restore ran, AC then wrote 1022x646 windowed over it, and the backup was already
+        # deleted - the owner's resolution was lost.
+        for _ in range(20):
+            if "acs.exe" not in subprocess.run(["tasklist", "/FI", "IMAGENAME eq acs.exe"],
+                                               capture_output=True, text=True).stdout:
+                break
+            time.sleep(1)
+        if not getattr(args, 'keep_video', False):
+            video_profile.restore()
         if os.path.exists(HARNESS_LUA):
             os.remove(HARNESS_LUA)
     time.sleep(3)
@@ -870,6 +896,8 @@ def main():
     ap.add_argument("--practice", type=int, default=0, help="minutes of practice before the race (a weekend)")
     ap.add_argument("--quali", type=int, default=0, help="minutes of qualifying before the race (a weekend)")
     ap.add_argument("--ambient", type=int); ap.add_argument("--road", type=int)
+    ap.add_argument("--condition", action="append",
+                    help="override a pinned race.ini value, e.g. --condition DYNAMIC_TRACK.SESSION_START=0 (repeatable)")
     ap.add_argument("--keep-video", action="store_true",
                     help="do not swap AC's video settings to the lean harness profile for this run")
     ap.add_argument("--weather", help="CSP weather type by name (clear, clouds, overcast, fog, mist, drizzle, lightrain, rain, heavyrain, storm, hot, cold, windy) or number; Pure must be the weather controller")
