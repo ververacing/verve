@@ -333,7 +333,7 @@ def parse_profiles(spec, ncars):
     return out
 
 
-def write_harness_lua(arm, ttl_s, ncars=0):
+def write_harness_lua(arm, ttl_s, ncars=0, laps=0):
     body = {
         "expires": int(time.time()) + ttl_s,
         "autopilot": True,
@@ -347,7 +347,7 @@ def write_harness_lua(arm, ttl_s, ncars=0):
         # 0 of 8 on CSP 3465 too, so it is the track, not the build). An unflagged race accumulates an extra
         # lap of incidents, contacts and repositions, so every absolute number was over a distance nobody
         # chose. This makes the requested distance the distance actually raced, everywhere.
-        "stopAtLap": arm.get("stop_laps") or (args.laps if getattr(args, "laps", 0) else 0),
+        "stopAtLap": arm.get("stop_laps") or laps or 0,
         # raceFeed is a Verve setting (1-2 Hz feed in Documents/Assetto Corsa/verve_feed): the 8 s diag can't resolve who hit whom
         "settings": {"raceFeed": True, "shareData": True, **arm.get("settings", {})},   # shareData: exercises the opt-in report path; rows are flagged unattended
         "recovery": arm.get("recovery", {}),
@@ -666,7 +666,7 @@ def run_once(args, arm, run_idx):
         budget = args.minutes * 60 + 2 * args.lap_budget_s + 240      # the clock, the extra lap, the load
     # a weekend: the timed sessions, plus their loads (the terms were lost in a comment for one night, 2026-09-21)
     budget += 60 * (getattr(args, "practice", 0) + getattr(args, "quali", 0)) + (120 if (getattr(args, "practice", 0) or getattr(args, "quali", 0)) else 0)
-    write_harness_lua(arm, ttl_s=int(budget) + 120, ncars=ncars)
+    write_harness_lua(arm, ttl_s=int(budget) + 120, ncars=ncars, laps=getattr(args, 'laps', 0) or 0)
     label = arm.get("label", "A")
     print(f"[{label} #{run_idx}] {ini.get('RACE', 'TRACK')} x{args.laps} laps, {ncars} cars, budget {budget:.0f}s")
 
