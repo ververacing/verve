@@ -37,7 +37,10 @@ local function newStats(sim)
     local s = { t0 = os.time(), laps = {}, lastPrev = {}, inc = {}, incContact = 0, incSolo = 0, incLap1 = 0,
                 dmgPrev = {}, pits = {}, wasInPit = {}, startPos = {}, leadCar = nil, leadChanges = 0,
                 fps = 0, fpsN = 0, maxDmg = {}, finished = {}, samples = 0,
-                leaderLaps = 0, sawGreen = false }
+                leaderLaps = 0, sawGreen = false,
+                -- mirror of everything the report reads off the live grid, kept current while the race runs so
+                -- an abort reports the race that happened rather than the session that replaced it
+                mRet = {}, mPark = {}, mPos = {}, mCls = {}, mTrack = nil, mLayout = nil, mLen = nil }
     for i = 0, sim.carsCount - 1 do s.laps[i] = {}; s.inc[i] = 0; s.pits[i] = 0; s.maxDmg[i] = 0 end
     return s
 end
@@ -51,6 +54,10 @@ end
 local function sample(sim)
     st.samples = st.samples + 1
     if sim.isSessionStarted then st.sawGreen = true end
+    if st.mTrack == nil then
+        pcall(function() st.mTrack = ac.getTrackID() or ''; st.mLayout = ac.getTrackLayout() or '' end)
+        st.mLen = sim.trackLengthM
+    end
     -- damage off in the launcher: damage never jumps, so incidents come from CSP's collision state instead; with damage
     -- on the damage path stays (comparable with every row sent so far). The row carries damage_setting either way.
     if st.damageOff == nil then st.damageOff = (assist('damageRate') == 0) end
@@ -103,6 +110,8 @@ local function sample(sim)
             st.wasInPit[i] = inPit
             if c.racePosition == 1 then leader = i end
             if c.isRaceFinished then st.finished[i] = true end
+            st.mRet[i] = (c.isRetired == true)
+            st.mPos[i] = c.racePosition or st.mPos[i]
         end
     end
     if leader ~= nil and st.leadCar ~= nil and leader ~= st.leadCar then st.leadChanges = st.leadChanges + 1 end
@@ -131,13 +140,16 @@ function T.buildReport(sim, ctx, completed, abortReason)
     for i = 0, n - 1 do
         local c = ac.getCar(i)
         local model = ''; pcall(function() model = ac.getCarID(i) or '' end)
-        local cls = ctx.classOf and ctx.classOf(i) or 'unknown'
+        local cls = st.mCls[i] or (ctx.classOf and ctx.classOf(i)) or 'unknown'
         classes[cls] = (classes[cls] or 0) + 1
         models[#models + 1] = jstr(model)
         local best, med = minOf(st.laps[i]), median(st.laps[i])
-        local ret = c and c.isRetired == true or false
+        -- prefer the in-race mirror: on an abort the live grid is already the NEXT session
+        local ret = st.mRet[i]
+        if ret == nil then ret = c and c.isRetired == true or false end
         local rs = ctx.recState and ctx.recState(i) or {}
-        local parked = rs.parked == true
+        local parked = st.mPark[i]
+        if parked == nil then parked = rs.parked == true end
         if ret or parked then retired = retired + 1 else running = running + 1 end
         if i > 0 and best then aiBest = (aiBest == nil or best < aiBest) and best or aiBest end
         if i > 0 and med then aiMed[#aiMed + 1] = med end
@@ -156,6 +168,7 @@ function T.buildReport(sim, ctx, completed, abortReason)
     for i = 0, n - 1 do totalInc = totalInc + st.inc[i]; totalPits = totalPits + st.pits[i] end
     local track, layout = '', ''
     pcall(function() track = ac.getTrackID() or ''; layout = ac.getTrackLayout() or '' end)
+    if st.mTrack then track = st.mTrack; layout = st.mLayout or layout end   -- the track the race was run on
     local stype = 'other'
     pcall(function()
         local tt = sim.raceSessionType
@@ -170,11 +183,11 @@ function T.buildReport(sim, ctx, completed, abortReason)
         '"session_type":' .. jstr(stype),
         '"unattended":' .. jbool(T.UNATTENDED),
         '"track":' .. jstr(track), '"layout":' .. jstr(layout),
-        '"track_length_m":' .. jint(sim.trackLengthM),
+        '"track_length_m":' .. jint(st.mLen or sim.trackLengthM),
         '"laps":' .. jint(ctx.laps), '"cars":' .. jint(n),
         '"car_classes":{' .. table.concat(clsParts, ',') .. '}',
         '"car_models":[' .. table.concat(models, ',') .. ']',
-        '"player_car":' .. jstr(ctx.playerModel), '"player_class":' .. jstr(ctx.classOf and ctx.classOf(0) or nil),
+        '"player_car":' .. jstr(ctx.playerModel), '"player_class":' .. jstr(st.mCls[0] or (ctx.classOf and ctx.classOf(0)) or nil),
         '"is_wet":' .. jbool(wet),
         '"ambient_c":' .. jint(sim.ambientTemperature), '"road_c":' .. jint(sim.roadTemperature),
         '"time_of_day":' .. jstr(sim.timeHours and string.format('%02d:00', sim.timeHours) or nil),
@@ -188,7 +201,8 @@ function T.buildReport(sim, ctx, completed, abortReason)
         '"repositions":' .. jint(ctx.drops), '"repositions_ok":' .. jint(ctx.dropsOk),
         '"lead_changes":' .. jint(st.leadChanges), '"pit_stops":' .. jint(totalPits),
         '"ai_best_lap_s":' .. jnum(aiBest), '"ai_median_lap_s":' .. jnum(median(aiMed)), '"field_spread_pct":' .. jnum((function() local r = false; pcall(function() r = sim.raceSessionType == ac.SessionType.Race end); return r and spread or nil end)()),
-        '"player_start_pos":' .. jint(st.startPos[0]), '"player_finish_pos":' .. jint(p and p.racePosition or nil),
+        '"player_start_pos":' .. jint(st.startPos[0]),
+        '"player_finish_pos":' .. jint(st.mPos[0] or (p and p.racePosition) or nil),
         '"player_laps":' .. jint(#st.laps[0]), '"player_best_lap_s":' .. jnum(pBest), '"player_median_lap_s":' .. jnum(pMed),
         '"player_incidents":' .. jint(st.inc[0]), '"player_max_damage":' .. jint(st.maxDmg[0]), '"player_pit_stops":' .. jint(st.pits[0]),
         '"player_finished":' .. jbool(st.finished[0] == true),
@@ -267,7 +281,18 @@ function T.update(dt, ctx)
     if not sim.isSessionStarted then return end
     if st == nil then st = newStats(sim) end
     local now = os.clock()
-    if now - lastT >= 1.0 then lastT = now; pcall(sample, sim) end
+    if now - lastT >= 1.0 then
+        lastT = now; pcall(sample, sim)
+        if st and ctx and ctx.recState then                 -- mirror 'parked' while the race is still live
+            pcall(function()
+                for i = 0, sim.carsCount - 1 do
+                    local rs = ctx.recState(i)
+                    if rs then st.mPark[i] = rs.parked == true end
+                    if st.mCls[i] == nil and ctx.classOf then st.mCls[i] = ctx.classOf(i) end
+                end
+            end)
+        end
+    end
     if sentThis then return end
     -- race over: every car finished or is parked and still, for 15 s
     local isRace = false; pcall(function() isRace = sim.raceSessionType == ac.SessionType.Race end)

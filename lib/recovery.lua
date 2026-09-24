@@ -205,6 +205,11 @@ R.DROP_MAX_PER_CAR = 6     -- repositions per car per race; past it the car is A
 R.DROP_SAME_M = 200        -- two drops within this many metres = the same CORNER (the gate scatters requests 50-150 m; 60 missed most repeats, Imola 2026-09-21)...
 R.DROP_SKIP_M = 150        -- ...the next one goes this much further along the track (past the corner it cannot take)
 local dropFailed = {}      -- cars whose last reposition did NOT rejoin: no second drop -- they retire
+R.DROP_RETRY = 0           -- extra attempts after a failed reposition (0 = today's behaviour: one strike and out)
+R.OW_CLEAR = 1.0           -- clearance multiplier when dropping an OPEN-WHEEL car (1.0 = same as every other class)
+R.OW_CLASSES = { formula = true, formula_jr = true, kart = true, vintage_formula = true }
+R.dropRetried = {}         -- per car: retries used
+R.dropRetryN = 0           -- session tally (diagnostics)
 R.dropN, R.dropOK = 0, 0   -- session tally (for the UI / diagnostics)
 R.DROP_API = 'car'         -- 'car' = physics.setCarPosition, 'ai' = physics.setAICarPosition (A/B 2026-09-14: same lap counting; 'car' rejoined cleaner)
 R.gateMoves = 0            -- drops moved back before the last timing split so AC counts the lap (see gateSafe)
@@ -286,7 +291,15 @@ R.dropsOff = false         -- repositioning switched off for this session (rate 
 
 -- may this car be repositioned automatically right now?
 local function dropsAllowed(i)
-    if dropFailed[i] then return false end
+    if dropFailed[i] then
+        -- a failed drop is final only when we have run out of retries. At a walled circuit the usual reason a
+        -- reposition does not take is the landing spot, not the car, and the retry lands further along.
+        local used = R.dropRetried[i] or 0
+        if used >= (R.DROP_RETRY or 0) then return false end
+        R.dropRetried[i] = used + 1
+        R.dropRetryN = R.dropRetryN + 1
+        dropFailed[i] = nil
+    end
     if (dropCount[i] or 0) >= R.DROP_MAX_PER_CAR then return false end
     if R.dropsOff then return false end
     return true
@@ -451,7 +464,17 @@ end
 -- basically on the spot, or a FAST car closing on it from just behind (would collect it). A car ahead,
 -- or a slow/distant one, doesn't block -- so this succeeds far more often than a blanket "spot clear",
 -- which is why beached cars used to never actually get repositioned.
+-- exposed wheels interlock, so an open-wheel car needs more room than a GT car set down in the same place:
+-- two touching wheels launch each other instead of rubbing, and the dropped car never gets going.
+local function clearanceMult(i)
+    if (R.OW_CLEAR or 1) <= 1 then return 1 end
+    local ok, cls = pcall(function() return R.classOf and R.classOf(i) end)
+    if ok and cls and R.OW_CLASSES[cls] then return R.OW_CLEAR end
+    return 1
+end
+
 local function dropSafe(sim, i, prog)
+    local mult = clearanceMult(i)
     for j = 0, sim.carsCount - 1 do
         if j ~= i then
             local oc = ac.getCar(j)
@@ -459,8 +482,8 @@ local function dropSafe(sim, i, prog)
                 local g = oc.splinePosition - prog
                 if g > 0.5 then g = g - 1 elseif g < -0.5 then g = g + 1 end   -- signed: >0 ahead, <0 behind
                 local ag = math.abs(g)
-                if ag < DROP_NEAR then return false end                         -- someone right on the spot
-                if g < 0 and ag < DROP_BEHIND and (oc.speedKmh or 0) > DANGER_SPEED then return false end  -- fast car closing from behind
+                if ag < DROP_NEAR * mult then return false end                  -- someone right on the spot
+                if g < 0 and ag < DROP_BEHIND * mult and (oc.speedKmh or 0) > DANGER_SPEED then return false end  -- fast car closing from behind
             end
         end
     end
@@ -474,6 +497,13 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
     if not center then return false end
     local reqProgress = progress     -- where the car got stuck (the gate moves the landing spot; the escape must see the corner)
     -- same-spot escape: dropped here before (twice within DROP_SAME_M)? go DROP_SKIP_M further on, past whatever it cannot take
+    if (R.dropRetried[i] or 0) > 0 and not skipGate then
+        -- this car's previous reposition did not take: do not put it back in the same place
+        progress = (progress + (R.dropRetried[i] * R.DROP_SKIP_M) / trackLen) % 1
+        skipGate = true
+        center = ac.trackProgressToWorldCoordinate(progress, false)
+        if not center then return false end
+    end
     local spots = dropSpots[i]
     if spots and #spots >= 2 then
         local near = 0
@@ -1216,6 +1246,7 @@ function R.reset()
     for i in pairs(overriding) do releaseControls(i) end   -- hand every car's controls back at a session change
     overridesCleared = false     -- and release every throttle / top-speed / stop-counter hold on the next update (they persist across sessions)
     drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}
+    R.dropRetried = {}; R.dropRetryN = 0
     dropCount, dropSpots, escapeLogged = {}, {}, {}
     R.stallEngT, R.stallRestarts = {}, {}; R.stallRestartN = 0
     R.wetHint = {}
