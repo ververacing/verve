@@ -35,23 +35,56 @@ def _rows(diag_path):
     return out
 
 
+def _sim_laps_from_feed(diag_path, car):
+    """{lap number: sim seconds} for one car, from the race feed.
+
+    AC only writes race_out when a session ends cleanly, and some tracks never do - no Baku race on either machine
+    has produced one. The feed's lap events carry the sim lap time, and its own `t` is SIM time (verified: the gap
+    between consecutive lap events equals the lap time to 0.1 s), so the feed alone cannot give a real-time ratio -
+    but combined with the diag's wall-clock `t` it can.
+    """
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import race_card
+    feed = race_card.sibling(diag_path, "feed")
+    if not feed or not os.path.exists(feed):
+        return {}
+    out = {}
+    with open(feed, encoding="utf-8") as f:
+        for line in f:
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if (d.get("e") or d.get("type")) != "lap" or d.get("car") != car:
+                continue
+            t = d.get("time_s") or d.get("time")
+            n = d.get("lap") or d.get("n")
+            if t and n:
+                t = float(t)
+                out[int(n)] = t / 1000.0 if t > 1000 else t
+    return out
+
+
 def ratio(diag_path, race_out_path):
     """(median, worst, laps_measured, cars) for the leader's laps, or (None, None, 0, 0) if not measurable."""
-    if not race_out_path or not os.path.exists(race_out_path):
-        return None, None, 0, 0
+    use_feed = not race_out_path or not os.path.exists(race_out_path)
     rows = _rows(diag_path)
     if len(rows) < 8:
         return None, None, 0, 0
-    try:
-        with open(race_out_path, encoding="utf-8") as f:
-            session = json.load(f)["sessions"][-1]
-    except (ValueError, KeyError, IndexError, OSError):
-        return None, None, 0, 0
     last = rows[-1]
-    leader = max(last["grid"], key=lambda c: c.get("lap", 0) + c.get("spline", 0))
+    # spline is recorded x1000, so normalise before using it to pick the leader
+    leader = max(last["grid"], key=lambda c: c.get("lap", 0) + min((c.get("spline", 0) or 0) / 1000.0, 1.0))
     car = leader.get("i")
-    sim = {l["lap"]: l["time"] / 1000 for l in session.get("laps", [])
-           if l.get("car") == car and l.get("time", 0) > 10000}
+    if use_feed:
+        sim = _sim_laps_from_feed(diag_path, car)
+    else:
+        try:
+            with open(race_out_path, encoding="utf-8") as f:
+                session = json.load(f)["sessions"][-1]
+        except (ValueError, KeyError, IndexError, OSError):
+            return None, None, 0, 0
+        sim = {l["lap"]: l["time"] / 1000 for l in session.get("laps", [])
+               if l.get("car") == car and l.get("time", 0) > 10000}
     if len(sim) < MIN_LAPS:
         return None, None, 0, len(last["grid"])
     crossed, prev = {}, None                      # wall-clock time of each lap increment
