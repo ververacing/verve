@@ -58,11 +58,13 @@ def classify(path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("feeds", nargs="*", help="feed files; with none, every feed in the usual folders")
     ap.add_argument("--glob", default="")
     a = ap.parse_args()
-    paths = []
-    for d in (FEED_DIR, ARCHIVE):
-        paths += sorted(glob.glob(os.path.join(d, f"*{a.glob}*.jsonl")))
+    paths = list(a.feeds)
+    if not paths:
+        for d in (FEED_DIR, ARCHIVE):
+            paths += sorted(glob.glob(os.path.join(d, f"*{a.glob}*.jsonl")))
     ended = over = 0
     print(f"{'feed':<36} {'cars':>4} {'leader':>7} {'max boxed':>10}  verdict")
     for p in paths:
