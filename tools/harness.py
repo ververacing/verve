@@ -661,6 +661,9 @@ def run_once(args, arm, run_idx):
     # the owner's video settings are theirs: borrow them for the race, give them back whatever happens
     if not getattr(args, 'keep_video', False):
         print('  ' + video_profile.lean())
+    pinned = video_profile.pin_replay()      # the replay is recorded at race time; the lean look costs it nothing
+    if pinned:
+        print('  ' + pinned)
     ini, ncars = build_race_ini(args, backup if args.grid is None else RACE_INI)
     force_ai_level(ini, getattr(args, "ai_level", 0))
     write_ini(ini, RACE_INI)

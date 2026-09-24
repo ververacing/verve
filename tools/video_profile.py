@@ -104,14 +104,46 @@ def status():
             f"{'  | backup present' if os.path.exists(BACKUP) else ''}")
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# Replay recording. A replay stores physics state, not rendered frames, so how a race LOOKED while it was recorded
+# does not affect how it looks played back - the lean profile above costs the broadcast side nothing. What does
+# affect it is recorded at race time and was, until now, one more piece of ambient state nobody set:
+#   QUALITY LEVEL  - the sample rate (0 = ~7 Hz ... 4 = ~60 Hz). Low levels make a juddery replay that no amount of
+#                    playback quality can rescue.
+#   MAX_SIZE_MB    - the ring buffer. Too small and a long race keeps only its last minutes; the start is gone.
+# Both are pinned before every harness race so a race that turns out to be worth cutting is always recordable.
+REPLAY = os.path.join(CFG, "replay.ini")
+REPLAY_PINS = {"QUALITY": {"LEVEL": "3"},            # ~30 Hz: smooth enough to cut, half the size of 60
+               "REPLAY": {"MAX_SIZE_MB": "600"},     # a 25-minute 24-car race fits; raised from AC's 26 long ago
+               "AUTOSAVE": {"ENABLED": "1", "RACE": "2", "MIN_TIME_SECONDS": "30"}}
+
+
+def pin_replay():
+    """Make sure the replay is worth keeping. Returns a one-line description of what it changed, or ''."""
+    if not os.path.exists(REPLAY):
+        return ""
+    lines = _read(REPLAY)
+    before = list(lines)
+    lines = _apply(lines, REPLAY_PINS)
+    if lines == before:
+        return ""
+    with open(REPLAY, "w", encoding="utf-8") as f:
+        f.write(chr(10).join(lines) + chr(10))
+    return "replay recording pinned (30 Hz, 600 MB buffer, autosave on)"
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--lean", action="store_true")
     g.add_argument("--restore", action="store_true")
     g.add_argument("--status", action="store_true")
+    g.add_argument("--pin-replay", action="store_true")
     a = ap.parse_args()
-    print(lean() if a.lean else restore() if a.restore else status())
+    if a.pin_replay:
+        print(pin_replay() or 'replay settings already correct')
+    else:
+        print(lean() if a.lean else restore() if a.restore else status())
 
 
 if __name__ == "__main__":
