@@ -9,6 +9,9 @@ import os
 import subprocess
 import sys
 import time
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import video_profile  # a killed harness never runs its finally block; sweep here as well
 
 here = os.path.dirname(os.path.abspath(__file__))
 root = os.path.dirname(here)
@@ -68,3 +71,6 @@ with open(log_path, "a", encoding="utf-8") as log:
         log.flush()
         time.sleep(5)
     log.write(f"=== batch done {time.strftime('%H:%M:%S')}\n")
+
+# whatever happened above, AC's video settings end up back with the owner
+print('  ' + video_profile.restore())

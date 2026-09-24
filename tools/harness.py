@@ -51,6 +51,7 @@ REPLAY_DIR = "D:/Verve/harness_replays" if os.path.isdir("D:/") else os.path.joi
 sys.path.insert(0, os.path.join(VERVE, "tools"))
 from race_metrics import metrics
 import realtime  # noqa: E402
+import video_profile  # noqa: E402
 
 
 class Ini(configparser.RawConfigParser):
@@ -657,6 +658,9 @@ def run_once(args, arm, run_idx):
     free = housekeeping()
     if free < MIN_FREE_GB:
         raise SystemExit(f"  !! only {free:.1f} GB free on the app drive (need {MIN_FREE_GB}): not launching")
+    # the owner's video settings are theirs: borrow them for the race, give them back whatever happens
+    if not getattr(args, 'keep_video', False):
+        print('  ' + video_profile.lean())
     ini, ncars = build_race_ini(args, backup if args.grid is None else RACE_INI)
     force_ai_level(ini, getattr(args, "ai_level", 0))
     write_ini(ini, RACE_INI)
@@ -749,6 +753,8 @@ def run_once(args, arm, run_idx):
                     time.sleep(5)
                 break
     finally:
+        if not getattr(args, 'keep_video', False):
+            video_profile.restore()        # the owner's settings back, however this run ended
         restore_pure(pure_bak)
         restore_assists(assists_bak)
         restore_csp_overrides(csp_restore)
@@ -861,6 +867,8 @@ def main():
     ap.add_argument("--practice", type=int, default=0, help="minutes of practice before the race (a weekend)")
     ap.add_argument("--quali", type=int, default=0, help="minutes of qualifying before the race (a weekend)")
     ap.add_argument("--ambient", type=int); ap.add_argument("--road", type=int)
+    ap.add_argument("--keep-video", action="store_true",
+                    help="do not swap AC's video settings to the lean harness profile for this run")
     ap.add_argument("--weather", help="CSP weather type by name (clear, clouds, overcast, fog, mist, drizzle, lightrain, rain, heavyrain, storm, hot, cold, windy) or number; Pure must be the weather controller")
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--label", default="A")
