@@ -341,7 +341,13 @@ def write_harness_lua(arm, ttl_s, ncars=0):
         "randomizeDrivers": bool(arm.get("drivers") == "random"),
         "profiles": parse_profiles(arm.get("profiles"), ncars),   # fixed grid: {all=key, slots={[i]=key}} (nil = untouched)
         "shutdownAtEnd": True,        # Verve quits AC ~20 s after the flag so the replay autosaves
-        "stopAtLap": arm.get("stop_laps") or 0,      # heavy sprint: Verve quits once the leader has done N laps (a long race's fuel, a sprint's length)
+        # Verve quits once the leader has done N laps. Given explicitly for a heavy sprint; otherwise it is the
+        # race distance itself, because AC does not always end the race: 256 of 819 races in the feed history
+        # were never flagged and ran on until the harness budget, and baku_2022 is 0 for 44 (PC #2 measures
+        # 0 of 8 on CSP 3465 too, so it is the track, not the build). An unflagged race accumulates an extra
+        # lap of incidents, contacts and repositions, so every absolute number was over a distance nobody
+        # chose. This makes the requested distance the distance actually raced, everywhere.
+        "stopAtLap": arm.get("stop_laps") or (args.laps if getattr(args, "laps", 0) else 0),
         # raceFeed is a Verve setting (1-2 Hz feed in Documents/Assetto Corsa/verve_feed): the 8 s diag can't resolve who hit whom
         "settings": {"raceFeed": True, "shareData": True, **arm.get("settings", {})},   # shareData: exercises the opt-in report path; rows are flagged unattended
         "recovery": arm.get("recovery", {}),
