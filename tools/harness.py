@@ -40,6 +40,7 @@ AC_DIR = r"C:\Program Files (x86)\Steam\steamapps\common\assettocorsa"
 DOCS = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa")
 CFG = os.path.join(DOCS, "cfg")
 RACE_INI = os.path.join(CFG, "race.ini")
+DEFAULT_AMBIENT, DEFAULT_ROAD = 26, 34   # AC's usual conditions, and what PC #2 runs: keep the machines comparable
 RACE_OUT = os.path.join(DOCS, "out", "race_out.json")
 VERVE = os.path.join(AC_DIR, "apps", "lua", "Verve")
 HARNESS_LUA = os.path.join(VERVE, "harness.lua")
@@ -275,10 +276,12 @@ def build_race_ini(args, base_path):
         ini.set("LIGHTING", "__CM_WEATHER_TYPE", str(wt))
         args.weather_type = wt
         ini.set("LIGHTING", "__CM_WEATHER_CONTROLLER", "pureCtrl")
-    if args.ambient is not None:
-        ini.set("TEMPERATURE", "AMBIENT", str(args.ambient))
-    if args.road is not None:
-        ini.set("TEMPERATURE", "ROAD", str(args.road))
+    # ALWAYS write the temperature. It used to be written only when --ambient/--road were passed, so whatever
+    # Content Manager last left in race.ini persisted into every race: this machine sat at 11 C ambient / 16 C road
+    # for 60 races while PC #2 ran 26/34, which is most of the 2.3 s a lap between them (2026-09-24). Cold tyres are
+    # not a property of the track or the AI, and an uncontrolled variable that big invalidates any pace comparison.
+    ini.set("TEMPERATURE", "AMBIENT", str(args.ambient if args.ambient is not None else DEFAULT_AMBIENT))
+    ini.set("TEMPERATURE", "ROAD", str(args.road if args.road is not None else DEFAULT_ROAD))
     return ini, len(cars) + 1
 
 
@@ -784,6 +787,13 @@ def run_once(args, arm, run_idx):
     m["ai_best_lap_s"] = round(ai_best[0], 2) if ai_best else ""
     m["ai_median_best_lap_s"] = round(ai_best[len(ai_best) // 2], 2) if ai_best else ""
     m["player_best_lap_s"] = round(best[0], 2) if 0 in best else ""
+    # field spread from AC's own lap times, to the millisecond. race_metrics' laptime_median_spread_s is built from
+    # 8 s diag snapshots, so it quantises to 0 / 8 / 24 s and cannot see a 1-2% difference between arms at all.
+    if len(ai_best) >= 8:
+        m["spread_median_pct"] = round((ai_best[len(ai_best) // 2] / ai_best[0] - 1) * 100, 2)
+        m["spread_full_pct"] = round((ai_best[-1] / ai_best[0] - 1) * 100, 2)
+    else:
+        m["spread_median_pct"] = m["spread_full_pct"] = ""
     if best:
         shutil.copy2(RACE_OUT, os.path.join(RESULTS_DIR, f"race_out_{time.strftime('%Y%m%d_%H%M%S')}_{label}.json"))
     # did the machine keep real time? (AC's CPU occupancy: when the physics thread runs out of budget the sim
@@ -796,6 +806,8 @@ def run_once(args, arm, run_idx):
               f"treat this race's timings as suspect")
     m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots", "fault", "csp", "human")}, sort_keys=True)
     m["weather"] = args.weather or ""
+    m["ambient_c"] = args.ambient if args.ambient is not None else DEFAULT_AMBIENT
+    m["road_c"] = args.road if args.road is not None else DEFAULT_ROAD
     csv_path = os.path.join(RESULTS_DIR, "results.csv")
     new = not os.path.exists(csv_path)
     if not new:   # the columns changed (2026-09-13: ai_level + exact lap times): rotate the old file rather than misalign rows
