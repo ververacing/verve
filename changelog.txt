@@ -13,6 +13,20 @@ Verve - changelog
   at every track.
 - A car Verve had given up on could sit stationary on the track for the rest of the race (a "frozen car"); fixed.
 - Verve never retires or parks the player's car.
+- New setting, Race start (Calm / Racing / Stock). Calm is the default and is what you have now: the opening-lap
+  easing that keeps turn 1 tidy. Racing gives a sharper getaway and closer first laps at the cost of a few more
+  touches; Stock leaves the start entirely to Assetto Corsa. Tracks whose first corner is very close to the line
+  (Spa's La Source) keep the calm easing whatever you pick, because there is no room for anything else.
+- New setting, Repair damage on track (on by default = unchanged). Turn it off and a car put back on track keeps its
+  damage and has to pit for it, the way stock AC would.
+- The difficulty slider now moves in lap-time steps, so 95 means roughly the same pace deficit at every track and in
+  every class instead of meaning something different in a kart and an F1 car.
+- Cars no longer get stranded mid pit stop. A stop was judged "live" only by fuel going in, so a tyre-only stop
+  looked idle and a healthy car could be retired in the middle of a tyre change - wet races, which are nothing but
+  tyre-only stops, were the worst case. A compound change or fresh rubber now counts as work in progress.
+- A car that cannot take a particular corner is now put back PAST it rather than into it again, and the "same spot"
+  window covers a corner rather than a point, so a car stops re-crashing in a loop at places like Imola's chicane.
+- Opening lap: the grid-depth easing is on by default.
 - Harness (maintainers): timed races (--minutes), heavy sprints (--stop-laps), the constants of the racecraft module in
   one table (the app was five switches from LuaJIT's upvalue limit).
 
