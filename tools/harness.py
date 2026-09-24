@@ -282,6 +282,19 @@ def build_race_ini(args, base_path):
     # not a property of the track or the AI, and an uncontrolled variable that big invalidates any pace comparison.
     ini.set("TEMPERATURE", "AMBIENT", str(args.ambient if args.ambient is not None else DEFAULT_AMBIENT))
     ini.set("TEMPERATURE", "ROAD", str(args.road if args.road is not None else DEFAULT_ROAD))
+    # Everything else that decides how a car goes round, for the same reason: it was all whatever Content Manager
+    # last left, differing silently between machines and between one batch and the next. Grip is the big one -
+    # DYNAMIC_TRACK controls how much rubber is down - and a low sun changes nothing physical but is one more thing
+    # that was never chosen. Overridable per run, but never unset.
+    for section, key, value in (
+        ("DYNAMIC_TRACK", "SESSION_START", 100), ("DYNAMIC_TRACK", "SESSION_TRANSFER", 100),
+        ("DYNAMIC_TRACK", "LAP_GAIN", 1), ("DYNAMIC_TRACK", "RANDOMNESS", 0), ("DYNAMIC_TRACK", "PRESET", 5),
+        ("GROOVE", "VIRTUAL_LAPS", 10), ("GROOVE", "MAX_LAPS", 30), ("GROOVE", "STARTING_LAPS", 0),
+        ("LIGHTING", "SUN_ANGLE", -16), ("LIGHTING", "TIME_MULT", 1),
+        ("RACE", "PENALTIES", 1), ("RACE", "JUMP_START_PENALTY", 0), ("RACE", "FIXED_SETUP", 0),
+        ("LAP_INVALIDATOR", "ALLOWED_TYRES_OUT", -1),
+    ):
+        ini.set(section, key, str(value))
     return ini, len(cars) + 1
 
 
