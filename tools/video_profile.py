@@ -28,7 +28,11 @@ MARKER = "__VERVE_HARNESS_PROFILE"
 LEAN = {
     "VIDEO": {"WIDTH": "1280", "HEIGHT": "720", "FULLSCREEN": "0", "VSYNC": "0", "FPS_CAP_MS": "0",
               "AASAMPLES": "1", "AAQUALITY": "0", "ANISOTROPIC": "1", "SHADOW_MAP_SIZE": "128"},
-    "POST_PROCESS": {"ENABLED": "0", "QUALITY": "0", "FXAA": "0", "GLARE": "0", "DOF": "0", "RAYS_OF_GOD": "0",
+    # post-processing stays ON at its lowest quality. Switching it off entirely removes AC's tone mapping, which
+    # makes the race look blown out and glaring (the owner spotted it immediately, 2026-09-24); the expensive parts
+    # are the effects underneath it, and those are off. Physics is unaffected either way - this is purely so a race
+    # someone glances at, or records, looks like a race.
+    "POST_PROCESS": {"ENABLED": "1", "QUALITY": "0", "FXAA": "0", "GLARE": "0", "DOF": "0", "RAYS_OF_GOD": "0",
                      "HEAT_SHIMMER": "0"},
     "EFFECTS": {"FXAA": "0", "MOTION_BLUR": "0", "SMOKE": "0", "RENDER_SMOKE_IN_MIRROR": "0"},
     "MIRROR": {"HQ": "0", "SIZE": "256"},
@@ -59,14 +63,25 @@ def _apply(lines, changes):
     return out
 
 
-def taken_over(lines):
-    return any(l.strip().startswith(MARKER) for l in lines)
+def taken_over(lines=None):
+    """The BACKUP FILE is the authority, not a marker inside video.ini.
+
+    AC rewrites video.ini itself while it runs - it stores the window size and position there - so a marker line
+    inside the file survives only until the first race resizes the window. Found the hard way on 2026-09-24: AC
+    dropped the marker and left WIDTH/HEIGHT at its own window size, which made restore() believe the file was
+    already the owner's and delete the backup. That would have destroyed their real settings.
+
+    So: the backup existing IS the takeover. The marker is kept only as a human-readable hint inside the file."""
+    return os.path.exists(BACKUP)
 
 
 def lean():
+    if taken_over():
+        lines = _apply(_read(VIDEO), LEAN)          # re-assert the profile; AC may have rewritten parts of it
+        with open(VIDEO, "w", encoding="utf-8") as f:
+            f.write(chr(10).join(lines) + chr(10))
+        return "already lean (backup held from an earlier run; profile re-asserted)"
     lines = _read(VIDEO)
-    if taken_over(lines):
-        return "already lean (a previous run did not restore; the backup is still yours)"
     shutil.copy2(VIDEO, BACKUP)                      # only ever written when NOT already taken over
     lines = _apply(lines, LEAN)
     lines.insert(0, f"{MARKER}=1")
@@ -78,10 +93,7 @@ def lean():
 def restore():
     if not os.path.exists(BACKUP):
         return "nothing to restore (no backup)"
-    if not taken_over(_read(VIDEO)):
-        os.remove(BACKUP)
-        return "video.ini was already yours; stale backup removed"
-    shutil.copy2(BACKUP, VIDEO)
+    shutil.copy2(BACKUP, VIDEO)      # the backup is the owner's file by construction; always prefer it
     os.remove(BACKUP)
     return "your video settings are back"
 
