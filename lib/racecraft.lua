@@ -227,6 +227,8 @@ R.SHIFT_DOWN = 0.5            -- ...and the shift-down threshold that goes with 
 R.OL_CROSSED = true           -- DEFAULT 0.14.3: the lap-0 grid wrap (olS = spline - 1 for a grid before the line) applies only until the car has
                               -- CROSSED the line. Off = today: the wrap also fires in the second half of lap 0, so the lanes,
                               -- grid hold, convoy and row caution re-engage at full speed (54% of Baku's heavy hits, 2026-09-24)
+R.BLOCK_MIN_HALF = 0          -- m: no blockage sweep when the half-width here is below this - stop behind the obstacle (0 = today;
+                              -- 5.0 = two F1s must fit). Amalfi 2026-09-25: the sweep's 'open side' on a 3 m road is the wall.
 R.LANE_MIN_HALF = 0           -- m: no turn-1 lanes when the half-width at the front row is below this (0 = today; 5.0 = two F1s must fit).
                               -- Amalfi review 2026-09-24: a 0.45 lane on a 3 m road is the wall.
 R.GRID_HOLD_MAXLAT = 0        -- track units: a car whose grid lateral is beyond this is not held at it (0 = today; 0.6 = the road-space
@@ -760,7 +762,11 @@ function R.evaluate(i, dt)
                 -- ONLY sweep around an obstacle that's actually on the racing surface / in the path. A car
                 -- already parked well off to the side needs no berth -- just pass it on the line, don't
                 -- swerve all the way to the far side of the road for it.
-                if math.abs(aLat) < K.BLOCK_EDGE then
+                local roomForSweep = true
+                if R.BLOCK_MIN_HALF > 0 then                                         -- a one-car road: no side to sweep to
+                    pcall(function() local sd = ac.getTrackAISplineSides(mySpline); if sd and math.max(3.0, (sd.x + sd.y) * 0.5) < R.BLOCK_MIN_HALF then roomForSweep = false end end)
+                end
+                if roomForSweep and math.abs(aLat) < K.BLOCK_EDGE then
                     if math.abs(aLat) > 0.1 then blockSide = -sgn(aLat)             -- obstacle off to a side -> go the other way (the open track)
                     elseif sgn(myLat) ~= 0 then blockSide = -sgn(myLat)             -- obstacle mid-track -> head toward the roomier half
                     else blockSide = (hash01(i * 5 + 2) < 0.5) and -1 or 1 end      -- dead-centre -> pick a side and commit
