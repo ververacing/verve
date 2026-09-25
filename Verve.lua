@@ -215,6 +215,10 @@ function script.update(dt)
             end
         end
         if Harness.autopilot and not autopilotArmed then
+            -- harness `fuel` (litres): every car gets this load once, so a pace probe runs a quali fuel, not the AI's race fuel
+            if type(Harness.fuel) == 'number' and Harness.fuel > 0 and physics.setCarFuel then
+                pcall(function() local sF = ac.getSim(); for k = 0, sF.carsCount - 1 do physics.setCarFuel(k, Harness.fuel) end end)
+            end
             -- armed 2 s after the Drive press (the countdown), not after the session starts: armed at the green
             -- light the player car sat driverless for 2 s and the car behind ran into it (2026-09-16)
             if okS and simH and (harnessStarted or simH.isSessionStarted) then
