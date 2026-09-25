@@ -201,7 +201,7 @@ R.SHIFT_DOWN = 0.5            -- ...and the shift-down threshold that goes with 
 -- lane of turn 1 and even rows the OUTSIDE, then the normal grid funnel takes over. Nobody moves sideways in the pack --
 -- each car only holds a lane (every lateral rule that MOVED cars in the pack made F1 opening laps worse). Real F1 starts
 -- look like this for the first 300 m. Owner's pick 2026-09-17.
-R.OL_CROSSED = false          -- the lap-0 grid wrap (olS = spline - 1 for a grid before the line) applies only until the car has
+R.OL_CROSSED = true           -- DEFAULT 0.14.3: the lap-0 grid wrap (olS = spline - 1 for a grid before the line) applies only until the car has
                               -- CROSSED the line. Off = today: the wrap also fires in the second half of lap 0, so the lanes,
                               -- grid hold, convoy and row caution re-engage at full speed (54% of Baku's heavy hits, 2026-09-24)
 R.OL_LANES = true             -- DEFAULT 2026-09-18 (owner): regression suite passed (Spa 8.7 vs 9.7, Barcelona 8.3 vs 8.7, Monza 12 laps not worse); stars at meter >= RS_OL_METER exempt

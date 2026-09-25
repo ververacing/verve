@@ -1,3 +1,16 @@
+0.14.3
+- Opening lap: the turn-1 lane hold ended at turn 1 as designed only on paper. A grid-wrap fix from 0.14.1 also fired
+  for cars still on their first lap in the second half of the lap, so the lanes (half a car off the racing line), the
+  grid hold and the convoy throttle switched back on at full speed. At Baku that lane ran into the 250 km/h kink onto
+  the back straight and made half of all heavy crashes; at Spa and Monza it put a third of the field off-line through
+  the fast second-half corners. Fixed: a car that has crossed the line is on its lap. Measured on two machines and two
+  CSP builds: heavy hits at Baku halved, the kink empty on the opening lap. Retirements at Baku are not lower yet - a
+  car crawling on broken suspension still holds the field up; that is the next fix.
+- Every parked car now records why it was parked (and its damage before the pit teleport wiped it) in the diagnostics.
+- Tools: real-time ratio fixed (two bugs), a race that never starts is abandoned after 150 s, crawler-queue and
+  ablation scorers, a --fuel harness arm for quali-load pace probes. Harness switches added, all off: CRAWL_PASS (v2),
+  CAUT_BASE.
+
 Verve - changelog
 
 0.14.2
