@@ -169,6 +169,16 @@ R.BG_ALL = 0                  -- >0: every AI car's brake hint x this all race (
 -- conversion 1/52 -> 8/60. Off on laps 0-1 for the pack (ungated it started pile-ups: 13/18 x2 vs 7-11); a top-tier
 -- driver is exempt above RS_OL_METER.
 R.ROADSPACE = true
+-- CRAWLER PASS (harness A/B: R.CRAWL_PASS > 0). The blockage rule is keyed to ABSOLUTE speeds (24 km/h, or a limper
+-- under 55 that I am arriving on 50 km/h faster). Baku 2026-09-24 warm race 1: a car with a broken suspension crawled
+-- the whole 2 km straight at 30 km/h and the entire field queued behind it at 30 km/h for 160 s - a follower that has
+-- matched the crawler's speed has no closing run (every pass rule needs one), and the offset is written every frame,
+-- so AC's own overtake never gets a vote; AC then retired eight of the queue at once. Relative rule instead: a car
+-- ahead below CRAWL_PASS x the pace this bit of road has been driven at this session (max speed per 1% bin, least of
+-- the three bins around it so a braking zone reads as its apex) is a blockage wherever two cars fit side by side.
+R.CRAWL_PASS = 0              -- 0 = off (today's rule only); 0.45 = a car under 45% of local pace is an obstacle
+CV.CRAWL_PACE_MIN = 80        -- km/h: a bin must have seen at least this before it can call anyone a crawler
+CV.CRAWL_HALF_M = 5.0         -- m half-width: narrower than this, two open-wheelers do not fit -> queue as today
 -- ALONE ON TRACK (owner 2026-09-16: a lone star crawled through the Bus Stop with a car 140 m ahead). Two switches:
 R.ISO_PACE = true             -- bring-it-home is pace-aware: a top-tier driver (tier 2) with a car within CV.ISO_REACH_M ahead does
                               -- not ease off -- that car is a target, not clear track. DEFAULT 2026-09-17 (owner): star from last
@@ -292,6 +302,7 @@ K.YELLOW_CAP = 60    -- ...this (km/h). 80 let cars arrive at a blocked road at 
 K.YELLOW_FAR = 250   -- the zone starts this far out...
 K.YELLOW_CAP_FAR = 200   -- ...at this cap (km/h), easing linearly to YELLOW_CAP
 K.FREEPASS_CAUT = 0.15  -- caution taken OFF a car lapping a yielding backmarker
+R.CAUT_BASE = 0.0       -- flat caution offset on every AI car (harness: is there pace in braking later? 0 = as today)
 K.YELLOW_LAT = 1.3   -- a stopped car this far from the centre line still counts (edge/kerb); deep in the gravel doesn't
 
 -- TRACK-LENGTH SCALING: every gap above is a spline FRACTION, and the tuning was done on ~4.5 km circuits.
@@ -631,9 +642,33 @@ function R.evaluate(i, dt)
                     end
                 end
             end
-            if slowIdx >= 0 and spd > slowSpd + K.BLOCK_MARGIN
-               and (slowSpd < K.BLOCK_SPEED or (slowSpd < K.BLOCK_LIMP and (spd - slowSpd) > K.BLOCK_DELTA)) then
+            -- CRAWLER (R.CRAWL_PASS): learn the pace of each 1% of the lap from every healthy car, then judge the slow
+            -- car against the road it is on - not against me, since queued behind it I am exactly as slow.
+            cv2.crawlNeed = nil
+            if R.CRAWL_PASS > 0 then
+                cv2.pace = cv2.pace or {}
+                local b = math.floor(mySpline * 100) % 100
+                if spd > (cv2.pace[b] or 0) and myDmg < K.DAMAGE_YIELD then cv2.pace[b] = spd end
+                if slowIdx >= 0 and spd >= slowSpd - K.BLOCK_MARGIN then
+                    local sb = math.floor((ac.getCar(slowIdx).splinePosition or mySpline) * 100) % 100
+                    local pb = math.min(cv2.pace[(sb + 99) % 100] or 1e9, cv2.pace[sb] or 1e9, cv2.pace[(sb + 1) % 100] or 1e9)
+                    if pb < 1e9 and pb > CV.CRAWL_PACE_MIN and slowSpd < pb * R.CRAWL_PASS then
+                        local half = 6.0
+                        pcall(function() local sd = ac.getTrackAISplineSides(mySpline); if sd then half = math.max(3.0, (sd.x + sd.y) * 0.5) end end)
+                        if half >= CV.CRAWL_HALF_M then
+                            local carW = CV.RS_CARW_M
+                            pcall(function() local ab = me.aabbSize; if ab and ab.x > 0.8 and ab.x < 4.0 then carW = ab.x end end)
+                            cv2.crawlNeed = (carW + CV.RS_MARGIN_M) / half      -- centre-to-centre lateral gap that clears it
+                            R.crawlN = (R.crawlN or 0) + 1
+                        end
+                    end
+                end
+            end
+            if slowIdx >= 0 and (cv2.crawlNeed
+               or (spd > slowSpd + K.BLOCK_MARGIN
+                   and (slowSpd < K.BLOCK_SPEED or (slowSpd < K.BLOCK_LIMP and (spd - slowSpd) > K.BLOCK_DELTA)))) then
                 local aLat = latOf(ac.getCar(slowIdx).position)
+                cv2.crawlLat = aLat
                 -- ONLY sweep around an obstacle that's actually on the racing surface / in the path. A car
                 -- already parked well off to the side needs no berth -- just pass it on the line, don't
                 -- swerve all the way to the far side of the road for it.
@@ -1097,7 +1132,8 @@ function R.evaluate(i, dt)
             if (blockSide > 0 and myLat > K.EDGE_SOFT) or (blockSide < 0 and myLat < -K.EDGE_SOFT) then
                 blockSide = -blockSide                                   -- that side's against the edge -> take the other
             end
-            target = blockSide * K.BLOCK_OFFSET
+            if cv2.crawlNeed then target = clamp(cv2.crawlLat + blockSide * cv2.crawlNeed, -CV.RS_EDGE, CV.RS_EDGE)   -- a crawler: just clear of it
+            else target = blockSide * K.BLOCK_OFFSET end
             holdSign[i] = blockSide; holdUntil[i] = os.clock() + K.BLOCK_HOLD
         end
 
@@ -1140,7 +1176,7 @@ function R.evaluate(i, dt)
     end)
     if state == 1 then R.attacking = R.attacking + 1
     elseif state == 2 then R.defending = R.defending + 1 end
-    return caut
+    return caut + (R.CAUT_BASE or 0)
 end
 
 R.last = {}                 -- per-car applied values (offset/aggr/caution/state) -- diagnostics only
@@ -1212,6 +1248,7 @@ function R.reset()
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     letbyT, letbyDone, letbyFor = {}, {}, {}
     cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0 }; R.cv2 = cv2
+    R.crawlN = 0
     R.last = {}
     pcall(Strategy.reset)
     scaled = false

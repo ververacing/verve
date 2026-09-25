@@ -401,7 +401,7 @@ telemetryCtx = function()
         laps = Career.laps, playerModel = playerModel, cspBuild = cspBuild,
         retiredByVerve = Recovery.retiredCount, crashRepairs = Recovery.repairedCount, limpRepairs = Recovery.limpCount, suspPits = Recovery.suspPitCount,
         verveMs = frameN > 0 and frameMs / frameN or nil, luaErrors = luaErrors, track = (function() local t = ''; pcall(function() t = ac.getTrackID() or '' end); return t end)(),
-        drops = Recovery.dropN, dropsOk = Recovery.dropOK, troubleSpots = Troublespots.hotCount(),
+        drops = Recovery.dropN, dropsOk = Recovery.dropOK, troubleSpots = Troublespots.hotCount(), crawlN = Racecraft.crawlN or 0,
         faults = Fault.count, penalties = Fault.penCount,
         profilesUsed = pu, archetypesUsed = au,
         appliedJson = string.format('{"meter":%d,"career":%s,"curve":%s,"ramp":%.2f}', Career.meter or 100, tostring(Career.active), tostring(G.careerCurve == true), Career.ramp or 0),
