@@ -127,6 +127,12 @@ def metrics(path):
         cause[k] = cause.get(k, 0) + 1
     out.update(cause)
     out["heavy80"] = sum(1 for e in contacts if e.get("dmg", 0) >= 80)   # contact events at 80+ km/h: the write-off makers
+    # room map (R.ROOM, 2026-09-25): roomN = AI car-frames spent in tight room (the map's verdict), roomAct = car-frames a
+    # consumer changed something, evalN = AI car-frames evaluated; the share is fps-independent, the raw counts are not
+    ev, rn, ra = last.get("evalN", 0) or 0, last.get("roomN", 0) or 0, last.get("roomAct", 0) or 0
+    out["room_share"] = round(rn / ev, 3) if ev else 0
+    out["room_acts"] = ra
+    out["crawl_frames"] = last.get("crawlN", 0) or 0
     # laps 2+ only: a 6-lap Baku race is ~60% opening lap by construction, so the whole-race rate is mostly lap 0-1
     out["inc_per_car_100laps_lap2plus"] = round(len([l for l in inc if l >= 2]) / max(n, 1) / max(ll - 2, 1) * 100, 1)
     # planned manoeuvres (diag >= 2026-09-14 "mvN"/"mvOK" session tallies from lib/strategy.lua)
