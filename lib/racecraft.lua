@@ -177,6 +177,9 @@ R.ROADSPACE = true
 -- ahead below CRAWL_PASS x the pace this bit of road has been driven at this session (max speed per 1% bin, least of
 -- the three bins around it so a braking zone reads as its apex) is a blockage wherever two cars fit side by side.
 R.CRAWL_PASS = 0              -- 0 = off (today's rule only); 0.45 = a car under 45% of local pace is an obstacle
+R.CRAWL_DMG = 0               -- >0: only a DAMAGED slow car is a crawler (body damage >= this, or suspension >= 0.10); 0 = any
+R.CRAWL_CLOSE = 0             -- km/h, >0: closing on the crawler this fast takes the wider berth (plain 0.48 vs 'just clear')
+R.RS_SEE_STOPPED = false      -- road-space side choice counts cars under K.BLOCK_SPEED (Spa 2026-09-25: passes aimed at a wreck)
 R.CRAWL_T = 3.0               -- ...and has been for this many seconds (v2: the v1 A/B swerved for cars slow for a moment
                               -- in the start pack - off-line contacts 19 -> 33 on laps 0-1 - and moved followers into each other)
 CV.CRAWL_PACE_MIN = 80        -- km/h: a bin must have seen at least this before it can call anyone a crawler
@@ -742,7 +745,13 @@ function R.evaluate(i, dt)
                         cv2.slowSince[slowIdx] = cv2.slowSince[slowIdx] or os.clock()   -- first observer stamps it
                     end
                     if pb < 1e9 and pb > CV.CRAWL_PACE_MIN and slowSpd < pb * R.CRAWL_PASS
-                       and os.clock() - (cv2.slowSince[slowIdx] or os.clock()) >= R.CRAWL_T then
+                       and os.clock() - (cv2.slowSince[slowIdx] or os.clock()) >= R.CRAWL_T
+                       and (R.CRAWL_DMG <= 0 or (function()                 -- CRAWL_DMG: a limping DAMAGED car, not a healthy queue
+                            local oc, mx, su = ac.getCar(slowIdx), 0, 0
+                            local d = oc and oc.damage
+                            if d then for k = 0, 4 do local v = d[k]; if type(v) == 'number' and v > mx then mx = v end end end
+                            if oc and oc.wheels then for k = 0, 3 do local w = oc.wheels[k]; local v = w and w.suspensionDamage; if type(v) == 'number' and v > su then su = v end end end
+                            return mx >= R.CRAWL_DMG or su >= 0.10 end)()) then
                         local half = 6.0
                         pcall(function() local sd = ac.getTrackAISplineSides(mySpline); if sd then half = math.max(3.0, (sd.x + sd.y) * 0.5) end end)
                         if half >= CV.CRAWL_HALF_M then
@@ -759,6 +768,7 @@ function R.evaluate(i, dt)
                    and (slowSpd < K.BLOCK_SPEED or (slowSpd < K.BLOCK_LIMP and (spd - slowSpd) > K.BLOCK_DELTA)))) then
                 local aLat = latOf(ac.getCar(slowIdx).position)
                 cv2.crawlLat = aLat
+                cv2.crawlSpd = slowSpd
                 -- ONLY sweep around an obstacle that's actually on the racing surface / in the path. A car
                 -- already parked well off to the side needs no berth -- just pass it on the line, don't
                 -- swerve all the way to the far side of the road for it.
@@ -868,7 +878,7 @@ function R.evaluate(i, dt)
                 for j = 0, sim.carsCount - 1 do
                     if j ~= i and j ~= aheadIdx then
                         local oc = ac.getCar(j)
-                        if oc and oc.splinePosition and (oc.speedKmh or 0) > K.BLOCK_SPEED then
+                        if oc and oc.splinePosition and ((oc.speedKmh or 0) > K.BLOCK_SPEED or (R.RS_SEE_STOPPED and not oc.isInPitlane)) then
                             local sd = oc.splinePosition - mySpline; if sd < -0.5 then sd = sd + 1 elseif sd > 0.5 then sd = sd - 1 end
                             if sd > -back and sd < fwd then                       -- from just behind me to just past the car ahead
                                 local dl = (latNow[j] or 0) - dLat
@@ -1238,6 +1248,10 @@ function R.evaluate(i, dt)
                 blockSide = -blockSide                                   -- that side's against the edge -> take the other
             end
             if cv2.crawlNeed then target = clamp(cv2.crawlLat + blockSide * cv2.crawlNeed, -CV.RS_EDGE, CV.RS_EDGE)   -- a crawler: just clear of it
+                if R.CRAWL_CLOSE > 0 and spd - (cv2.crawlSpd or spd) >= R.CRAWL_CLOSE then   -- arriving fast: the wider of the two berths
+                    local wide = blockSide * K.BLOCK_OFFSET
+                    if math.abs(wide - cv2.crawlLat) > math.abs(target - cv2.crawlLat) then target = wide end
+                end
             else target = blockSide * K.BLOCK_OFFSET end
             holdSign[i] = blockSide; holdUntil[i] = os.clock() + K.BLOCK_HOLD
         end
