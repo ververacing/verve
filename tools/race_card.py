@@ -79,11 +79,20 @@ def sibling(path, kind):
         lab = re.sub(r"^diag_race_\d{8}_\d{6}_", "", os.path.basename(path)).replace(".jsonl", "")
         allc = glob.glob(os.path.join(HERE, "harness_results", f"race_out_{day}_*.json"))
         parts = lab.split("_")
-        for k in range(1, len(parts)):          # drop the track prefix, however many words it has
+        # A race_out is written at the END of the race, so its stamp is after the diag's and within the race's
+        # length; and the suffix must be the whole harness label, not its tail - "_3.json" matched a different race's
+        # race_out (warm_3 was handed crawl45_3's file, 2026-09-24) and every ratio built on it was wrong.
+        def stamp_ok(c):
+            mm = re.search(rf"race_out_{day}_(\d{{6}})", os.path.basename(c))
+            if not mm:
+                return False
+            t = int(mm.group(1)[:2]) * 3600 + int(mm.group(1)[2:4]) * 60 + int(mm.group(1)[4:])
+            return 0 <= t - stamp <= 3 * 3600
+        for k in range(1, len(parts) - 1):      # drop the track prefix, however many words it has; keep >= 2 words
             suffix = "_".join(parts[k:])
-            cands = [c for c in allc if c.endswith(f"_{suffix}.json")]
+            cands = [c for c in allc if c.endswith(f"_{suffix}.json") and stamp_ok(c)]
             if cands:
-                return max(cands, key=os.path.getmtime)
+                return min(cands, key=os.path.getmtime)   # the first one written after the diag opened
         return None
     else:
         cands = glob.glob(os.path.join(DOCS, "verve_feed", f"{day}_*.jsonl"))

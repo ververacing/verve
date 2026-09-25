@@ -82,7 +82,7 @@ def _sim_laps_from_feed(diag_path, car, lap_window=None):
             n = d.get("lap") or d.get("n")
             if t and n:
                 t = float(t)
-                laps.append((int(n), t / 1000.0 if t > 1000 else t))
+                laps.append((int(n), (t / 1000.0 if t > 1000 else t, d.get("t"))))   # (lap time, sim clock at the event)
     start = 0                                     # first index of the last run of increasing lap numbers
     for k in range(1, len(laps)):
         if laps[k][0] <= laps[k - 1][0]:
@@ -91,7 +91,49 @@ def _sim_laps_from_feed(diag_path, car, lap_window=None):
     if lap_window:
         lo, hi = lap_window
         out = {n: t for n, t in out.items() if lo <= n <= hi}
-    return out
+    return out   # {lap: (lap time s, feed sim clock s or None)}
+
+
+def _header_t(diag_path):
+    """Wall-clock time the diag header was written = the session reset the feed's sim clock counts from."""
+    try:
+        with open(diag_path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if d.get("hdr"):
+                    return d.get("t")
+                if isinstance(d.get("grid"), list):
+                    return None
+    except OSError:
+        return None
+    return None
+
+
+def _first_motion(diag_path, rows):
+    """(wall t, feed sim t) of the start: the first diag snapshot and the first feed state with a car above 20 km/h."""
+    wall = next((r["t"] for r in rows if any((c.get("spd") or 0) > 20 for c in r["grid"])), None)
+    if wall is None:
+        return None
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import race_card
+    feed = race_card.sibling(diag_path, "feed")
+    if not feed or not os.path.exists(feed):
+        return None
+    try:
+        with open(feed, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if d.get("type") == "state" and any((c.get("spd") or 0) > 20 for c in d.get("cars", [])):
+                    return wall, float(d.get("t") or 0)
+    except OSError:
+        return None
+    return None
 
 
 def _race_rows(rows):
@@ -116,7 +158,10 @@ def _race_rows(rows):
 
 
 def ratio(diag_path, race_out_path):
-    """(median, worst, laps_measured, cars) for the leader's laps, or (None, None, 0, 0) if not measurable."""
+    """(whole-race ratio, worst lap, laps_measured, cars) for the leader, or (None, None, 0, 0) if not measurable.
+
+    The first value is sim seconds over wall seconds across every measurable lap - the number to gate on; the worst
+    single lap is at the diag's 8 s resolution and only says whether one lap stalled."""
     use_feed = not race_out_path or not os.path.exists(race_out_path)
     rows = _rows(diag_path)
     if len(rows) < 8:
@@ -138,23 +183,57 @@ def ratio(diag_path, race_out_path):
                 session = json.load(f)["sessions"][-1]
         except (ValueError, KeyError, IndexError, OSError):
             return None, None, 0, 0
-        sim = {l["lap"]: l["time"] / 1000 for l in session.get("laps", [])
+        sim = {l["lap"]: (l["time"] / 1000, None) for l in session.get("laps", [])
                if l.get("car") == car and l.get("time", 0) > 10000}
     if len(sim) < MIN_LAPS:
         return None, None, 0, len(last["grid"])
-    crossed, prev = {}, None                      # wall-clock time of each lap increment
+    # Wall-clock time of each of the leader's LINE CROSSINGS, read from the spline wrapping (x1000 in the diag), not
+    # from AC's lap counter: AC drops a lap after a teleport about half the time, so pairing the feed's lap N (Verve's
+    # own count, spline-based) with the diag's lap-N increment went one lap out after any reposition and produced a
+    # uniformly wrong ratio - 0.767 median = worst on a race that ran at 0.999, PC #2 2026-09-24. A wrap counts as a
+    # crossing only after the car has been seen in the first and second halves of the lap since the previous one
+    # (the grid-before-the-line start at 0.998 -> 0.02 is not a lap), which is the same half-lap rule Verve's counter
+    # and therefore the feed's lap events use, so the two lists pair by ORDER.
+    crossings, prev_sp, seen_lo, seen_hi = [], None, False, False
     for r in rows:
         c = next((x for x in r["grid"] if x.get("i") == car), None)
         if c is None:
             continue
-        if prev is not None and c.get("lap", 0) > prev:
-            crossed[c["lap"]] = r["t"]
-        prev = c.get("lap", 0)
-    rs = [sim[k] / (crossed[k] - crossed[k - 1]) for k in sorted(crossed)
-          if k in sim and (k - 1) in crossed and crossed[k] - crossed[k - 1] > 5]
-    if len(rs) < MIN_LAPS:
+        sp = (c.get("spline") or 0) / 1000.0
+        if prev_sp is not None and prev_sp > 0.85 and sp < 0.15 and seen_lo and seen_hi:
+            crossings.append(r["t"]); seen_lo, seen_hi = False, False
+        if sp < 0.5: seen_lo = True
+        else: seen_hi = True
+        prev_sp = sp
+    events = [sim[k] for k in sorted(sim)]          # (lap time, sim clock) in order
+    n = min(len(crossings), len(events))
+    if n < MIN_LAPS:
+        return None, None, n, len(last["grid"])
+    # Pair from the END: the leader's last crossing is the same physical event in both files (nothing follows it),
+    # whereas the first can differ - the feed may not carry the first completed lap. Per-lap ratios at the 8 s
+    # resolution, laps 2..n of the paired tail.
+    cw, ev = crossings[-n:], events[-n:]
+    rs = [ev[j][0] / (cw[j] - cw[j - 1]) for j in range(1, n) if cw[j] - cw[j - 1] > 5]
+    if len(rs) < MIN_LAPS - 1:
         return None, None, len(rs), len(last["grid"])
-    return round(statistics.median(rs), 3), round(min(rs), 3), len(rs), len(last["grid"])
+    # The whole-race ratio, anchored on FIRST MOTION in both files (the start: the same physical moment, +-8 s in
+    # the diag, +-1 s in the feed) and on the leader's last crossing. The feed's sim clock does start at 0, but at
+    # a moment that is the track load plus the grid wait before the diag header - up to a minute, and it varies -
+    # so the reset is not an anchor (it read 1.056 on races that ran at 1.00). Which feed lap event is the last
+    # crossing is found by prediction (ratio ~1), never by counting laps: a dropped lap count or a missed 8 s wrap
+    # cannot shift it by 110 s.
+    span = None
+    motion = _first_motion(diag_path, rows)
+    if motion and ev[-1][1] is not None:
+        wall_m, sim_m = motion
+        predicted = sim_m + (cw[-1] - wall_m)
+        cand = [e for e in events if e[1] is not None and abs(e[1] - predicted) < 60]
+        if cand and cw[-1] - wall_m > 30:
+            e_last = min(cand, key=lambda e: abs(e[1] - predicted))
+            span = (e_last[1] - sim_m) / (cw[-1] - wall_m)
+    if span is None:                               # race_out path, or no usable anchor: sum the paired laps
+        span = sum(e[0] for e in ev[1:]) / (cw[-1] - cw[0])
+    return round(span, 3), round(min(rs), 3), len(rs), len(last["grid"])
 
 
 def _sibling(diag_path):
@@ -187,7 +266,7 @@ def main():
     if med is None:
         print(f"not measurable ({n} usable laps)")
         return
-    print(f"{cars} cars, {n} laps: real-time ratio median {med:.3f}, worst lap {worst:.3f}"
+    print(f"{cars} cars, {n} laps: real-time ratio {med:.3f} (whole race), worst lap {worst:.3f}"
           + ("  -- SLOWER THAN REAL TIME, treat this race's timings as suspect" if med < SUSPECT else ""))
 
 
