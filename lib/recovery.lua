@@ -153,6 +153,7 @@ local reported = {}        -- have we logged this incident to trouble-spots yet?
 R.repairedCount = 0    -- CRASH repairs: stuck/beached cars fixed + put back on track this session (for UI)
 R.limpCount = 0        -- LIMP repairs: damaged movers given a fresh body so they stop blocking (for UI)
 R.retiredCount = 0     -- cars we handed to AC as genuinely wrecked (terminal) this session (for UI)
+R.parkWhy, R.parkDmg, R.parkSusp, R.parkLap = {}, {}, {}, {}   -- the park ledger (see parkInPits): why, body km/h, susp, lap
 
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
 local function hash01(n)
@@ -378,28 +379,6 @@ local function giveUp(i)
     handedBack[i] = true
     endRec(i)
 end
--- Retire a car OURSELVES: teleport it to its pit box and hold it there (brakes on, no throttle). The old
--- way -- stop protecting it and wait for AC to retire it -- left wrecks sitting on the track for 100-200 s
--- (AC only retires a car after a long stop, and never one that's upright and "fine"), and every second
--- a hulk sits at a corner it collects the next car through. A real wreck is craned off; this is that.
--- Implementation: hold the car still and STOP protecting it -- AC retires a stationary, unprotected AI in
--- ~20 s through its own retirement (its own bookkeeping, its own pit box). We briefly teleported hopeless
--- cars to the pits ourselves; AC didn't know those boxes were occupied, and a car it sent in for repairs
--- then spent eight minutes crashing into two "retired" cars at pit exit. Native retirement it is; the
--- yellow flag + go-around cover the ~20 s the wreck sits there.
-local function parkInPits(i)
-    if parked[i] or not R.raceSession or i == 0 then return end   -- never the player's car: a human may take the wheel back
-    parked[i] = true
-    -- Move it to its pit box NOW. AC's own retirement of a stationary car took 160-540 s in the 07:05 race
-    -- (a wreck sat in view for six laps; a "frozen" car at the pit exit for seven minutes). Its box is where
-    -- AC's own retirement puts it anyway; AC's bookkeeping catches up when its timer fires.
-    pcall(function() physics.teleportCarTo(i, ac.SpawnSet.Pits) end)
-    pcall(function() physics.setAIStopCounter(i, 36000) end)      -- stay put (AC's own "brake and wait")
-    pcall(function() physics.setAIThrottleLimit(i, 0) end)        -- and no throttle, so it can't creep off
-    if not retiredMark[i] then retiredMark[i] = true; R.retiredCount = (R.retiredCount or 0) + 1 end
-    endRec(i)
-end
-
 -- worst impact recorded across the car's damage zones (km/h). Index range read defensively.
 local function maxImpact(car)
     local m = 0
@@ -427,10 +406,44 @@ local function maxSusp(car)
     return susp
 end
 
+-- Retire a car OURSELVES: teleport it to its pit box and hold it there (brakes on, no throttle). The old
+-- way -- stop protecting it and wait for AC to retire it -- left wrecks sitting on the track for 100-200 s
+-- (AC only retires a car after a long stop, and never one that's upright and "fine"), and every second
+-- a hulk sits at a corner it collects the next car through. A real wreck is craned off; this is that.
+-- Implementation: hold the car still and STOP protecting it -- AC retires a stationary, unprotected AI in
+-- ~20 s through its own retirement (its own bookkeeping, its own pit box). We briefly teleported hopeless
+-- cars to the pits ourselves; AC didn't know those boxes were occupied, and a car it sent in for repairs
+-- then spent eight minutes crashing into two "retired" cars at pit exit. Native retirement it is; the
+-- yellow flag + go-around cover the ~20 s the wreck sits there.
+local function parkInPits(i, why)
+    if parked[i] or not R.raceSession or i == 0 then return end   -- never the player's car: a human may take the wheel back
+    parked[i] = true
+    -- THE LEDGER: why, and the damage as it was. The teleport below zeroes car.damage, which is how 40 parked Baku
+    -- cars read "dmg 0" and were called repeat offenders (2026-09-24). Read first, kept on R for stateOf and the diag.
+    R.parkWhy[i] = why or 'unknown'
+    pcall(function()
+        local c = ac.getCar(i)
+        if c then R.parkDmg[i] = maxImpact(c); R.parkSusp[i] = maxSusp(c); R.parkLap[i] = c.lapCount or 0 end
+        ac.log(string.format('Verve: car %d parked (%s): body %.0f km/h, suspension %.2f, lap %d', i, R.parkWhy[i],
+            R.parkDmg[i] or 0, R.parkSusp[i] or 0, R.parkLap[i] or 0))
+    end)
+    -- Move it to its pit box NOW. AC's own retirement of a stationary car took 160-540 s in the 07:05 race
+    -- (a wreck sat in view for six laps; a "frozen" car at the pit exit for seven minutes). Its box is where
+    -- AC's own retirement puts it anyway; AC's bookkeeping catches up when its timer fires.
+    pcall(function() physics.teleportCarTo(i, ac.SpawnSet.Pits) end)
+    pcall(function() physics.setAIStopCounter(i, 36000) end)      -- stay put (AC's own "brake and wait")
+    pcall(function() physics.setAIThrottleLimit(i, 0) end)        -- and no throttle, so it can't creep off
+    if not retiredMark[i] then retiredMark[i] = true; R.retiredCount = (R.retiredCount or 0) + 1 end
+    endRec(i)
+end
+
 -- Is the car GENUINELY wrecked (race-ending in real life)? By actual damage, not just closing speed:
 -- a very hard body impact OR broken suspension. A light touch does neither.
 local function terminalDamage(car)
-    return maxImpact(car) >= TERMINAL_IMPACT or maxSusp(car) >= TERMINAL_SUSP
+    -- the KIND, so the park ledger can say which clause ended the car: at Baku it is the suspension (2026-09-24)
+    if maxSusp(car) >= TERMINAL_SUSP then return 'susp' end
+    if maxImpact(car) >= TERMINAL_IMPACT then return 'body' end
+    return false
 end
 
 -- `car.damage` is a RECORD of the worst collision per zone -- it never goes back down, not even when we
@@ -725,7 +738,7 @@ function R.update(dt)
                 end
             end
             -- GIVEN UP ON and still sitting there: park it (instant clear) rather than leave a frozen car
-            if hopeless[i] and (car.speedKmh or 0) < STOP_SPEED and (os.clock() - hopeless[i]) > HOPELESS_T then parkInPits(i); return end   -- (read `spd` before its local: a nil global, error swallowed by the pcall - frozen cars, fixed 2026-09-20)
+            if hopeless[i] and (car.speedKmh or 0) < STOP_SPEED and (os.clock() - hopeless[i]) > HOPELESS_T then parkInPits(i, 'hopeless'); return end   -- (read `spd` before its local: a nil global, error swallowed by the pcall - frozen cars, fixed 2026-09-20)
             local retired = false
             pcall(function() retired = (car.isRetired == true) end)
             if retired then
@@ -797,7 +810,7 @@ function R.update(dt)
                             R.boxRescued[i] = tries + 1
                             R.boxRescueN = (R.boxRescueN or 0) + 1
                         else
-                            parkInPits(i)
+                            parkInPits(i, 'box_limbo')
                         end
                         boxT[i] = 0
                     end
@@ -825,7 +838,7 @@ function R.update(dt)
                                 pitStuckT[i] = 0
                             end
                         elseif pitStuckT[i] > PIT_STUCK_T + 40 then
-                            parkInPits(i)
+                            parkInPits(i, 'pit_stuck')
                         end
                     end
                 else
@@ -967,7 +980,9 @@ function R.update(dt)
                 -- Wrecked or worked-on-for-ages: retire it. Otherwise hand it back to AC's AI unprotected --
                 -- if it can drive off, it will; if it can't, AC retires it in ~20 s. (Retiring every car whose
                 -- reposition failed cost six lightly-damaged cars in one race.)
-                if terminalDamage(car) or (episodeT[i] or 0) > PARK_TIME then parkInPits(i) else hopeless[i] = hopeless[i] or os.clock(); giveUp(i) end
+                if terminalDamage(car) then parkInPits(i, 'terminal_' .. terminalDamage(car))
+                elseif (episodeT[i] or 0) > PARK_TIME then parkInPits(i, 'park_time')
+                else hopeless[i] = hopeless[i] or os.clock(); giveUp(i) end
                 return
             end
             active = active + 1
@@ -976,14 +991,14 @@ function R.update(dt)
             -- to save it -- stop here so we quit blocking AC and it retires, and we don't waste a wing on
             -- it. (Body damage clears when we repair, so this only ever catches the ORIGINAL big hit,
             -- never a car we've already fixed and sent back out.)
-            if R.CRASH_REPAIR and terminalDamage(car) then parkInPits(i); return end
+            if R.CRASH_REPAIR and terminalDamage(car) then parkInPits(i, 'terminal_' .. terminalDamage(car)); return end
 
             -- REPEAT OFFENDER: a car we've already patched up many times that keeps wrecking itself is,
             -- realistically, a broken car -- in real racing it would retire. Stop saving it and let it go,
             -- so it clears the track instead of crash-looping all race (finishing 10+ laps down and piling
             -- up traffic). This is what brings retirements up from zero to a realistic handful, and it
             -- self-scales: a clean track rarely triggers it, a crash-heavy one retires its worst few.
-            if R.CRASH_REPAIR and (repairN[i] or 0) >= REPAIR_GIVEUP then parkInPits(i); return end
+            if R.CRASH_REPAIR and (repairN[i] or 0) >= REPAIR_GIVEUP then parkInPits(i, 'repeat'); return end
 
             -- HIJACK AC's retirement: while we're working this car, stop AC retiring it and release
             -- its post-incident "brake and wait" so it (and our recovery) can move. We keep calling
@@ -1184,7 +1199,7 @@ function R.suspLimp(i, car, spd, dt)
         pcall(function() ac.log(string.format('Verve: car %d suspension %.2f, crawling %.0f s: to the pits for repairs', i, maxSusp(car), t)) end)
     elseif R.suspPit[i] and t > R.SUSP_LIMP_T and os.clock() - R.suspPit[i] > R.SUSP_PIT_T then
         pcall(function() ac.log(string.format('Verve: car %d never made the pits on broken suspension: retired', i)) end)
-        parkInPits(i)
+        parkInPits(i, 'susp_limp')
     end
 end
 
@@ -1208,6 +1223,7 @@ function R.reset()
     retiredMark = {}
     reported = {}
     parked = {}
+    R.parkWhy, R.parkDmg, R.parkSusp, R.parkLap = {}, {}, {}, {}
     dmgBase = {}
     episodeT = {}; R.boxCmp = {}; R.boxWear = {}
     pendingTemps = {}
@@ -1251,6 +1267,7 @@ function R.stateOf(i)
         rescued = rescued[i] == true, handedBack = handedBack[i] == true, limpDone = limpDone[i] == true,
         parked = parked[i] == true, dmgBase = dmgBase[i] or 0, episodeT = episodeT[i] or 0,
         rescueN = rescueN[i] or 0, ramp = rampLimit(i), dropFailed = dropFailed[i] == true,
+        parkWhy = R.parkWhy[i], parkDmg = R.parkDmg[i] or 0, parkSusp = R.parkSusp[i] or 0, parkLap = R.parkLap[i] or 0,
     }
 end
 

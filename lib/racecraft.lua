@@ -421,7 +421,12 @@ function R.evaluate(i, dt)
         local me = ac.getCar(i)
         if not me or not me.isAIControlled then return end
         local spd = me.speedKmh or 0
-        if spd < K.SPEED_MIN or me.isInPitlane then return end
+        if spd < K.SPEED_MIN or me.isInPitlane then
+            -- clear last frame's flags: a car that stops or retires otherwise keeps its last yield/attack/block in the
+            -- diag for the rest of the race (Baku read 292 "yield congas", 12 once dead cars were excluded, 2026-09-24)
+            if R.last[i] then R.last[i].yield = false; R.last[i].state = 0; R.last[i].block = 0; R.last[i].rs = false end
+            return
+        end
         local mySpline = me.splinePosition
         if mySpline == nil then return end
         local startX = R.START_X
