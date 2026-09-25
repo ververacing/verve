@@ -177,6 +177,8 @@ R.ROADSPACE = true
 -- ahead below CRAWL_PASS x the pace this bit of road has been driven at this session (max speed per 1% bin, least of
 -- the three bins around it so a braking zone reads as its apex) is a blockage wherever two cars fit side by side.
 R.CRAWL_PASS = 0              -- 0 = off (today's rule only); 0.45 = a car under 45% of local pace is an obstacle
+R.CRAWL_T = 3.0               -- ...and has been for this many seconds (v2: the v1 A/B swerved for cars slow for a moment
+                              -- in the start pack - off-line contacts 19 -> 33 on laps 0-1 - and moved followers into each other)
 CV.CRAWL_PACE_MIN = 80        -- km/h: a bin must have seen at least this before it can call anyone a crawler
 CV.CRAWL_HALF_M = 5.0         -- m half-width: narrower than this, two open-wheelers do not fit -> queue as today
 -- ALONE ON TRACK (owner 2026-09-16: a lone star crawled through the Bus Stop with a car 140 m ahead). Two switches:
@@ -654,10 +656,19 @@ function R.evaluate(i, dt)
                 cv2.pace = cv2.pace or {}
                 local b = math.floor(mySpline * 100) % 100
                 if spd > (cv2.pace[b] or 0) and myDmg < K.DAMAGE_YIELD then cv2.pace[b] = spd end
+                cv2.slowSince = cv2.slowSince or {}
+                if cv2.slowSince[i] then
+                    local pbMe = math.min(cv2.pace[(b + 99) % 100] or 1e9, cv2.pace[b] or 1e9, cv2.pace[(b + 1) % 100] or 1e9)
+                    if pbMe < 1e9 and spd >= pbMe * R.CRAWL_PASS then cv2.slowSince[i] = nil end   -- back up to pace: not a crawler
+                end
                 if slowIdx >= 0 and spd >= slowSpd - K.BLOCK_MARGIN then
                     local sb = math.floor((ac.getCar(slowIdx).splinePosition or mySpline) * 100) % 100
                     local pb = math.min(cv2.pace[(sb + 99) % 100] or 1e9, cv2.pace[sb] or 1e9, cv2.pace[(sb + 1) % 100] or 1e9)
                     if pb < 1e9 and pb > CV.CRAWL_PACE_MIN and slowSpd < pb * R.CRAWL_PASS then
+                        cv2.slowSince[slowIdx] = cv2.slowSince[slowIdx] or os.clock()   -- first observer stamps it
+                    end
+                    if pb < 1e9 and pb > CV.CRAWL_PACE_MIN and slowSpd < pb * R.CRAWL_PASS
+                       and os.clock() - (cv2.slowSince[slowIdx] or os.clock()) >= R.CRAWL_T then
                         local half = 6.0
                         pcall(function() local sd = ac.getTrackAISplineSides(mySpline); if sd then half = math.max(3.0, (sd.x + sd.y) * 0.5) end end)
                         if half >= CV.CRAWL_HALF_M then

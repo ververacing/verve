@@ -351,7 +351,7 @@ function script.update(dt)
         Diag.update(dt, {
             managed = managed, attacking = Racecraft.attacking, defending = Racecraft.defending,
             recovering = Recovery.count, crashRepairs = Recovery.repairedCount,
-            limpRepairs = Recovery.limpCount, retired = Recovery.retiredCount,
+            limpRepairs = Recovery.limpCount, retired = Recovery.retiredCount, crawlN = Racecraft.crawlN or 0,
             hotSpots = Troublespots.hotCount(), crashRisk = Troublespots.crashiness(), isOval = Racecraft.isOval,
             peak = Troublespots.peakHeat(), storeLen = Troublespots.storeLen, saveOk = Troublespots.lastSaveOk,
             per = diagPer, rc = Racecraft.last, recState = Recovery.stateOf, cv2 = Racecraft.cv2, episodes = Strategy.episodes,
