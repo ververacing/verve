@@ -407,7 +407,10 @@ def any_motion(diag):
             tail = f.read().decode("utf-8", errors="replace").splitlines()
         for l in tail:
             if l.startswith('{"t"'):
-                r = json.loads(l)
+                try:
+                    r = json.loads(l)
+                except ValueError:
+                    continue          # a half-written line (append-only diag)
                 if any((c.get("spd") or 0) > 10 for c in r.get("grid", [])):
                     return True
         return False
@@ -424,7 +427,13 @@ def race_state(diag):
             size = f.tell()
             f.seek(max(0, size - 200000))
             tail = f.read().decode("utf-8", errors="replace").splitlines()
-        rows = [json.loads(l) for l in tail if l.startswith('{"t"')]
+        rows = []
+        for l in tail:                  # an append-only diag can be read mid-write: skip a half line, keep the rest
+            if l.startswith('{"t"'):
+                try:
+                    rows.append(json.loads(l))
+                except ValueError:
+                    pass
         if not rows:
             return None
         r = rows[-1]
@@ -871,6 +880,18 @@ def run_once(args, arm, run_idx):
         if os.path.exists(HARNESS_LUA):
             os.remove(HARNESS_LUA)
     time.sleep(3)
+    # keep the game's Verve log lines: CSP overwrites custom_shaders_patch.log on every launch, so a one-off error (the
+    # tyre-temperature restore after a drop, 2026-09-25: every drop trace reads 12 C core) is gone by the next race
+    try:
+        src = os.path.join(DOCS, "logs", "custom_shaders_patch.log")
+        if os.path.exists(src) and os.path.getmtime(src) >= t_launch:
+            keep = [ln for ln in open(src, encoding="utf-8", errors="replace") if "Verve" in ln]
+            if keep:
+                d = os.path.join(RESULTS_DIR, "csp_logs"); os.makedirs(d, exist_ok=True)
+                with open(os.path.join(d, time.strftime("%Y%m%d_%H%M", time.localtime(t_launch)) + "_" + re.sub(r"[^A-Za-z0-9_.-]", "_", str(label)) + ".log"), "w", encoding="utf-8") as f:
+                    f.writelines(keep)
+    except OSError as e:
+        print("  (csp log not kept:", e, ")")
     # keep the replay: AC's autosave only retains the last two race replays, and the broadcast pipeline
     # needs them later (Documents/Assetto Corsa/replay/temp -> tools/harness_results/replays/<label>.acreplay)
     try:

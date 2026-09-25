@@ -212,6 +212,11 @@ local dropFailed = {}      -- cars whose last reposition did NOT rejoin: no seco
 -- at Monza against GT3 7/7. Both removed rather than left switched off: dead switches cost upvalue headroom
 -- on a module three candidates from LuaJIT's limit, and this one carried two real bugs of its own.)
 R.dropN, R.dropOK = 0, 0   -- session tally (for the UI / diagnostics)
+R.DROP_RATE_V2 = false     -- switch-off rate over JUDGED drops of cars undamaged at the drop (false = dropOK/dropN, which counts
+R.DROP_RATE_SUSP = 0.20    -- pending drops and bent-suspension crawlers as failures: 4 false switch-offs in 535 races, 2026-09-25)
+R.rateOK, R.rateN = 0, 0   -- the V2 tally (judged, undamaged at the drop)
+R.TEMP_WHEELS = false      -- tyre restore: a 4-list {FL,FR,RL,RR} of the wheel argument to use (false = WHEEL_BITS, which restores
+                           -- 2 of 4 wheels - front-left always 12 C after a drop, 2026-09-25). Candidates {0,1,2,3}, {1,2,4,8}.
 R.DROP_API = 'car'         -- 'car' = physics.setCarPosition, 'ai' = physics.setAICarPosition (A/B 2026-09-14: same lap counting; 'car' rejoined cleaner)
 R.gateMoves = 0            -- drops moved back before the last timing split so AC counts the lap (see gateSafe)
 R.GATE_MODE = 'back'       -- 'back' = drop on a straight just before the last split; 'twostep' = touch down before the split for a
@@ -306,8 +311,10 @@ local function judgeDrops(now)
             local c = ac.getCar(d.i)
             if c and (c.speedKmh or 0) > DROP_OK_SPEED then
                 d.ok = true; R.dropOK = R.dropOK + 1
+                if (d.sus or 0) < R.DROP_RATE_SUSP then R.rateN = R.rateN + 1; R.rateOK = R.rateOK + 1 end
             elseif now - d.t > DROP_JUDGE_T or (c and c.isRetired) then
                 d.ok = false; dropFailed[d.i] = true
+                if (d.sus or 0) < R.DROP_RATE_SUSP then R.rateN = R.rateN + 1 end
             end
         end
         if d.ok == nil or now - d.t < DROP_JUDGE_T + 30 then keep[#keep + 1] = d end   -- (kept a bit longer for the diag trace)
@@ -316,7 +323,9 @@ local function judgeDrops(now)
     local judged = 0
     for _, d in ipairs(drops) do if d.ok ~= nil then judged = judged + 1 end end
     judged = math.max(judged, R.dropN - #drops)   -- (older ones dropped from the list were judged too)
-    if not R.dropsOff and R.dropN >= DROP_TRIAL and judged >= DROP_TRIAL and (R.dropOK / R.dropN) < DROP_MIN_RATE then
+    local poor = R.dropN >= DROP_TRIAL and judged >= DROP_TRIAL and (R.dropOK / R.dropN) < DROP_MIN_RATE
+    if R.DROP_RATE_V2 then poor = R.rateN >= DROP_TRIAL and (R.rateOK / R.rateN) < DROP_MIN_RATE end
+    if not R.dropsOff and poor then
         R.dropsOff = true
         pcall(function() ac.log(string.format('Verve: repositioning off for this session (%d of %d rejoined)', R.dropOK, R.dropN)) end)
     end
@@ -367,7 +376,7 @@ local apiLogged = false     -- one-time log of which reposition API this CSP bui
 local function applyTemps(i, temps)
     local ok, err = pcall(function()
         for k = 0, 3 do
-            if temps[k] then physics.setTyresTemperature(i, WHEEL_BITS[k], temps[k], 15) end   -- 15 = every layer + core
+            if temps[k] then physics.setTyresTemperature(i, (type(R.TEMP_WHEELS) == 'table' and R.TEMP_WHEELS[k + 1]) or WHEEL_BITS[k], temps[k], 15) end   -- 15 = every layer + core
         end
     end)
     if not ok and not tyreErrLogged then
@@ -597,7 +606,7 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
     end
     if okp then
         rejoinUntil[i] = os.clock() + REJOIN_RAMP            -- rejoin gently (see REJOIN_RAMP)
-        drops[#drops + 1] = { i = i, t = os.clock(), ok = nil, spl = progress }   -- judged over the next DROP_JUDGE_T
+        drops[#drops + 1] = { i = i, t = os.clock(), ok = nil, spl = progress, sus = maxSusp(ac.getCar(i)), tt = temps }   -- judged over the next DROP_JUDGE_T
         pendingDrop[i] = { pos = pos, dir = dir, apiDir = apiDir, t = os.clock(), tries = 0 }   -- verify its heading next frame
         R.dropN = R.dropN + 1
         dropCount[i] = (dropCount[i] or 0) + 1
@@ -1241,6 +1250,7 @@ function R.reset()
     R.stallEngT, R.stallRestarts = {}, {}; R.stallRestartN = 0
     R.wetHint = {}
     R.dropN, R.dropOK, R.dropsOff, R.dropFlips, R.gateMoves = 0, 0, false, 0, 0
+    R.rateOK, R.rateN = 0, 0
     gateStage = {}
     scaled = false
     R.count = 0; R.repairedCount = 0; R.limpCount = 0; R.retiredCount = 0
