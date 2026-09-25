@@ -114,6 +114,19 @@ def metrics(path):
     trains = sum(1 for r in rows if sum(1 for c in r["grid"] if c.get("yl") and not c.get("ret") and not c.get("pit")
                                         and (c.get("spd") or 0) > 60) >= 3)
     out["yield_train_snaps"] = trains
+    # dead by CAUSE (park ledger, diag >= 2026-09-24 "pw"): why Verve parked each car, read before the pit teleport
+    # wiped its damage; a retired car Verve never parked is AC's own retirement
+    cause = {}
+    for c in (rows[-1]["grid"] if rows else []):
+        if c.get("park"):
+            k = "dead_" + (c.get("pw") or "park_unknown")
+        elif c.get("ret"):
+            k = "dead_ac_retired"
+        else:
+            continue
+        cause[k] = cause.get(k, 0) + 1
+    out.update(cause)
+    out["heavy80"] = sum(1 for e in contacts if e.get("dmg", 0) >= 80)   # contact events at 80+ km/h: the write-off makers
     # planned manoeuvres (diag >= 2026-09-14 "mvN"/"mvOK" session tallies from lib/strategy.lua)
     out["gate_moves"] = last.get("gateN", 0)
     out["mv_attempts"] = last.get("mvN", 0)
