@@ -1202,7 +1202,8 @@ function R.evaluate(i, dt)
             holdSign[i] = side; holdUntil[i] = os.clock() + K.SIDE_HOLD
             laneHeld = true
         end
-        if not laneHeld and myLap == 0 and crowd >= 1 and olS < K.GRID_FADE_END * R.GRID_FADE_X then
+        if not laneHeld and myLap == 0 and crowd >= 1 and olS < K.GRID_FADE_END * R.GRID_FADE_X
+           and not (R.LANE_MIN_HALF > 0 and (cv2.halfMin or 6.0) < R.LANE_MIN_HALF) then   -- a one-car road has no columns to hold
             if gridLat[i] == nil and olS < K.GRID_CAPTURE then
                 gridLat[i] = myLat
                 if R.GRID_HOLD_MAXLAT > 0 and math.abs(myLat) > R.GRID_HOLD_MAXLAT then gridLat[i] = 0 end   -- off the road: aim for the line
@@ -1311,11 +1312,21 @@ function R.beginFrame()
                     local side = {}
                     for j in pairs(sp) do side[j] = sgn((latNow[j] or 0) - mid) end
                     local x = front
-                    -- LANE_MIN_HALF: on a road that does not fit two cars there are no lanes to hold (the one width read here)
-                    local halfFront = 6.0
+                    -- LANE_MIN_HALF: the road AHEAD decides. Sample the half-width along the window the lane scan walks and keep
+                    -- the minimum (cv2.halfMin, read by the grid hold too): a grid on a wide plaza before a 3 m road (Amalfi) has
+                    -- no lanes and no columns to hold. v1 read the front row only and passed there (2026-09-25).
+                    cv2.halfMin = 6.0
                     if R.LANE_MIN_HALF > 0 then
-                        pcall(function() local sd = ac.getTrackAISplineSides(front % 1); if sd then halfFront = math.max(3.0, (sd.x + sd.y) * 0.5) end end)
-                        if halfFront < R.LANE_MIN_HALF then x = front + CV.LANE_MAX_M / trackLen end   -- skip the scan: no lane
+                        pcall(function()
+                            local xs, hm = front, 99
+                            while xs < front + CV.LANE_MAX_M / trackLen do
+                                local sd = ac.getTrackAISplineSides(xs % 1)
+                                if sd then local h = math.max(3.0, (sd.x + sd.y) * 0.5); if h < hm then hm = h end end
+                                xs = xs + CV.LANE_SCAN_M / trackLen
+                            end
+                            if hm < 99 then cv2.halfMin = hm end
+                        end)
+                        if cv2.halfMin < R.LANE_MIN_HALF then x = front + CV.LANE_MAX_M / trackLen end   -- skip the scan: no lane
                     end
                     while x < front + CV.LANE_MAX_M / trackLen do
                         local isC, ins = cornerAhead(x % 1)
