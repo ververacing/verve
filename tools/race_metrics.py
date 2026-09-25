@@ -107,8 +107,12 @@ def metrics(path):
         "laptime_median_spread_s": (max(meds) - min(meds)) if len(meds) >= 2 else 0,
         "laptime_median_s": statistics.median(meds) if meds else 0,
     }
-    # yield trains: snapshots where 3+ cars were yielding at once (a conga line behind a lapper)
-    trains = sum(1 for r in rows if sum(1 for c in r["grid"] if c.get("yl")) >= 3)
+    # yield trains: snapshots where 3+ MOVING cars were yielding at once (a conga line behind a lapper). Moving only:
+    # R.last[i].yield is written at the end of R.evaluate, after the spd < 30 / pit-lane early return, so a car that
+    # stops or retires keeps its last flag forever - Baku read 292 "train" snapshots, 12 once dead cars were excluded
+    # (design panel 2026-09-24). tools/train.py measures the queue behind a crawler from motion instead.
+    trains = sum(1 for r in rows if sum(1 for c in r["grid"] if c.get("yl") and not c.get("ret") and not c.get("pit")
+                                        and (c.get("spd") or 0) > 60) >= 3)
     out["yield_train_snaps"] = trains
     # planned manoeuvres (diag >= 2026-09-14 "mvN"/"mvOK" session tallies from lib/strategy.lua)
     out["gate_moves"] = last.get("gateN", 0)
