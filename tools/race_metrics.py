@@ -127,6 +127,8 @@ def metrics(path):
         cause[k] = cause.get(k, 0) + 1
     out.update(cause)
     out["heavy80"] = sum(1 for e in contacts if e.get("dmg", 0) >= 80)   # contact events at 80+ km/h: the write-off makers
+    # laps 2+ only: a 6-lap Baku race is ~60% opening lap by construction, so the whole-race rate is mostly lap 0-1
+    out["inc_per_car_100laps_lap2plus"] = round(len([l for l in inc if l >= 2]) / max(n, 1) / max(ll - 2, 1) * 100, 1)
     # planned manoeuvres (diag >= 2026-09-14 "mvN"/"mvOK" session tallies from lib/strategy.lua)
     out["gate_moves"] = last.get("gateN", 0)
     out["mv_attempts"] = last.get("mvN", 0)

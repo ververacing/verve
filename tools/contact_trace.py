@@ -16,8 +16,11 @@ from collections import Counter
 
 
 def classify(ring):
+    # a ring under 3 rows (4 Hz) means the previous contact write was under ~0.75 s ago: this is a CHAIN hit - the car
+    # was hit again (or hit the next car) before the trace could refill - not "following too close". It was reported as
+    # "chain" until 2026-09-24 and read as tailgating; at Baku chains are 36-45% of contacts in the narrow bins.
     if len(ring) < 3:
-        return "short", {}
+        return "chain", {}
     last = ring[-1]
     tail = ring[-6:]                                     # last ~1.5 s
     # v2 rows carry the nearest car too: [.., near, nearDist, nearLong, nearLat]. No car ahead on my line (ahead == -1)

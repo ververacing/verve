@@ -133,7 +133,12 @@ def main():
     a = ap.parse_args()
     paths = []
     for pat in a.files:
-        paths += glob.glob(pat) or [pat]
+        hits = glob.glob(pat, recursive=True)
+        if not hits and os.path.exists(pat):
+            hits = [pat]
+        if not hits:
+            print(f"(no files match {pat})", file=sys.stderr)
+        paths += hits
     tot_c = tot_h = 0.0
     print(f"{'race':58s} {'crawl_s':>8s} {'held_s':>7s} {'queue':>5s}  worst crawler (s, car, km/h, spline)")
     for p in sorted(paths):
