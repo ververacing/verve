@@ -544,7 +544,13 @@ function D.clearAll()
     for i in pairs(assigned) do assigned[i] = nil; applyName(i) end
     assigned = {}; paceDirty = true
 end
-function D.reset() assigned = {}; baseLevel = {}; lastApplied = {}; fieldMaxPace = 1.0; paceDirty = true; lastSlot0AI = nil; named0 = false; origName = {}; matched = false end
+function D.reset(keepPicks)
+    -- keepPicks: the same weekend moved to its next session (practice -> qualifying -> race). The picks and AC's
+    -- original names stay; the levels are re-read (AC re-creates them per session) and the names re-applied.
+    if not keepPicks then assigned = {}; origName = {}; matched = false end
+    baseLevel = {}; lastApplied = {}; fieldMaxPace = 1.0; paceDirty = true; lastSlot0AI = nil; named0 = false
+    if keepPicks then for i in pairs(assigned) do applyName(i) end end
+end
 
 -- fixed grid ({all=key, slots={[i]=key}}) -- harness tests such as "a Rookie field with one star at the back"
 function D.applyFixed(spec)

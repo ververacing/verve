@@ -96,6 +96,15 @@ local managed = 0
 -- carried stale state into the new start (recovery saw a field that "had moved" now sitting still on the
 -- grid and crash-repaired every car in the first 8 s of the re-run -- seen 2026-09-13, Imola career).
 local telemetryCtx   -- defined below (needs the modules)
+local weekendSig = nil   -- track + car count + model per slot of the last session: the same signature = the same weekend
+local function gridSignature()
+    local ok, sig = pcall(function()
+        local s = ac.getSim(); local parts = { tostring(ac.getTrackFullID and ac.getTrackFullID('/') or ac.getTrackID()), tostring(s.carsCount) }
+        for i = 0, s.carsCount - 1 do local c = ac.getCar(i); parts[#parts + 1] = c and tostring(c.id or '') or '' end
+        return table.concat(parts, '|')
+    end)
+    return ok and sig or nil
+end
 local function sessionReset(restart)
     pcall(function() local okS, simR = pcall(ac.getSim); if okS and simR then Telemetry.abort(restart and 'restart' or 'session change', simR, telemetryCtx()) end end)
     pcall(Career.reset)
@@ -111,7 +120,13 @@ local function sessionReset(restart)
     pcall(Watch.reset)
     -- driver profiles are session-only: wipe every race. NOT on a restart: the picks should survive it, and
     -- the AI-level overrides persist in physics across a restart, so the remembered base levels stay valid
-    if not restart then pcall(Drivers.reset) end
+    if not restart then
+        -- a driver grid set up in practice survives qualifying and the race: keep the picks when the grid is the
+        -- same weekend (same track, car count and model per slot); a different grid wipes them as before
+        local sig = gridSignature()
+        pcall(Drivers.reset, sig ~= nil and sig == weekendSig)
+        weekendSig = sig
+    end
     pcall(Recovery.reset)         -- clear per-car recovery + pit-rescue state
     pcall(Troublespots.reset)     -- save the old track's learned hot spots, load the new track's
     pcall(Feed.reset)
@@ -236,7 +251,7 @@ function script.update(dt)
                     -- chase camera for unattended runs: markedly lighter on the GPU than the cockpit view
                     pcall(function() ac.setCurrentCamera(ac.CameraMode.Drivable); ac.setCurrentDrivableCamera(ac.DrivableCamera.Chase) end)
                     -- randomised driver profiles, the way a real grid will be run (same as the UI button)
-                    if Harness.randomizeDrivers then
+                    if Harness.randomizeDrivers and not Drivers.anyAssigned() then   -- once per weekend, not per session
                         pcall(function()
                             Drivers.randomizeGrid()
                             local parts = {}
@@ -356,6 +371,7 @@ function script.update(dt)
             managed = managed, attacking = Racecraft.attacking, defending = Racecraft.defending,
             recovering = Recovery.count, crashRepairs = Recovery.repairedCount,
             limpRepairs = Recovery.limpCount, retired = Recovery.retiredCount, crawlN = Racecraft.crawlN or 0,
+            roomN = Racecraft.roomN or 0, roomAct = Racecraft.roomAct or 0, evalN = Racecraft.evalN or 0,
             hotSpots = Troublespots.hotCount(), crashRisk = Troublespots.crashiness(), isOval = Racecraft.isOval,
             peak = Troublespots.peakHeat(), storeLen = Troublespots.storeLen, saveOk = Troublespots.lastSaveOk,
             per = diagPer, rc = Racecraft.last, recState = Recovery.stateOf, cv2 = Racecraft.cv2, episodes = Strategy.episodes,

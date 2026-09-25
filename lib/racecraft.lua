@@ -181,6 +181,29 @@ R.CRAWL_T = 3.0               -- ...and has been for this many seconds (v2: the 
                               -- in the start pack - off-line contacts 19 -> 33 on laps 0-1 - and moved followers into each other)
 CV.CRAWL_PACE_MIN = 80        -- km/h: a bin must have seen at least this before it can call anyone a crawler
 CV.CRAWL_HALF_M = 5.0         -- m half-width: narrower than this, two open-wheelers do not fit -> queue as today
+-- ROOM MAP + TIGHT-ROOM DISCIPLINE (harness A/B: R.ROOM = 1 with ROOM_FOLLOW / ROOM_LINE). Baku 2026-09-24: radius-under-50 m
+-- road is 5.7% of the lap and carries 43% of the contacts; the castle alone (3.2 m half-width, 40 km/h) 23%. Verve's traffic
+-- rules act there exactly as on Silverstone's 8 m straights. Once per session the lap is mapped in 400 bins (half-width from
+-- the AI line's sides, radius from three samples 12 m apart, pace learned from the healthy cars) and tight = slow x narrow
+-- (see R.roomAt). FOLLOW: in tight room the convoy throttle, the rear-end guard and the brake guard act in TIME every lap
+-- (a car pulling out, passing, on a manoeuvre, lapping a yielder or being recovered is exempt). LINE: in tight room with no
+-- road-space side and no manoeuvre, the reactive attack nudge and the defend cover are zeroed - nobody passes in a corridor,
+-- so nobody moves in one. Wide tracks read tight 0: nothing changes there.
+R.ROOM = 0                    -- 0 = off (no map, nothing changes); 1 = build the map and count tight frames (R.roomN); consumers below
+R.ROOM_FOLLOW = false         -- FOLLOW consumer (needs ROOM = 1)
+R.ROOM_LINE = false           -- LINE consumer (needs ROOM = 1)
+R.ROOM_WLO = 3.5; R.ROOM_WHI = 7.0      -- m half-width: narrow = 1 at WLO, 0 at WHI (Silverstone 6.6-10.3 -> 0; a bin without sides is inert by construction)
+R.ROOM_VLO = 60; R.ROOM_VHI = 140       -- km/h learned pace: slow = 1 at VLO, 0 at VHI
+R.ROOM_RLO = 30; R.ROOM_RHI = 150       -- m radius: slow = 1 at RLO, 0 at RHI (stands in until the pace is learned, inside a lap)
+R.ROOM_ON = 0.3               -- tight at or above this (here, or ROOM_LOOK s ahead) = tight room
+R.ROOM_VMAX = 120             -- ...and only below this speed (km/h): the fast bits of a narrow track are left alone
+R.ROOM_TG = 1.0               -- FOLLOW: convoy gap = max(CV.GAP_M, speed x this many s x tight)
+R.ROOM_RE_T = 1.2             -- FOLLOW: rear-end window = max(K.REAREND_GAP, speed x this many s x tight); closing threshold x (1 - 0.6 x tight)
+R.ROOM_BG = 0.5               -- FOLLOW: brake-guard reach x (1 + this x tight)
+R.ROOM_LOOK = 0.6             -- s of travel looked ahead for the tight read
+R.ROOM_WFLOOR = 0             -- narrow floor: 0.5 = wide slow corners count at half strength (owner question 6); 0 = width decides
+R.roomN = 0; R.roomAct = 0    -- diag: car-frames in tight room (the map's verdict, any speed) / car-frames a consumer changed something (session line roomN, roomAct)
+R.evalN = 0                   -- diag: AI car-frames R.evaluate ran (session line evalN): roomN / evalN = share of car-time in tight room, fps-independent
 -- ALONE ON TRACK (owner 2026-09-16: a lone star crawled through the Bus Stop with a car 140 m ahead). Two switches:
 R.ISO_PACE = true             -- bring-it-home is pace-aware: a top-tier driver (tier 2) with a car within CV.ISO_REACH_M ahead does
                               -- not ease off -- that car is a target, not clear track. DEFAULT 2026-09-17 (owner): star from last
@@ -204,6 +227,10 @@ R.SHIFT_DOWN = 0.5            -- ...and the shift-down threshold that goes with 
 R.OL_CROSSED = true           -- DEFAULT 0.14.3: the lap-0 grid wrap (olS = spline - 1 for a grid before the line) applies only until the car has
                               -- CROSSED the line. Off = today: the wrap also fires in the second half of lap 0, so the lanes,
                               -- grid hold, convoy and row caution re-engage at full speed (54% of Baku's heavy hits, 2026-09-24)
+R.LANE_MIN_HALF = 0           -- m: no turn-1 lanes when the half-width at the front row is below this (0 = today; 5.0 = two F1s must fit).
+                              -- Amalfi review 2026-09-24: a 0.45 lane on a 3 m road is the wall.
+R.GRID_HOLD_MAXLAT = 0        -- track units: a car whose grid lateral is beyond this is not held at it (0 = today; 0.6 = the road-space
+                              -- edge). A plaza start puts the grid box off the road; holding the car there is the crash.
 R.OL_LANES = true             -- DEFAULT 2026-09-18 (owner): regression suite passed (Spa 8.7 vs 9.7, Barcelona 8.3 vs 8.7, Monza 12 laps not worse); stars at meter >= RS_OL_METER exempt
 R.CONCEDE = 0                 -- >0: a defender concedes the line to a tier-2 driver behind whose pace rating beats his by this much (A/B)
 R.ACX_LAP = 0                 -- ATTACK_CAUT_X applies from this lap on (0 = always; 2 = keep the opening laps as they are) (A/B)
@@ -419,6 +446,22 @@ local function cornerAhead(prog)
     return isCorner, insideSign
 end
 
+-- ROOM MAP accessor (R.ROOM): 0 = wide or fast road, 1 = a slow corridor. tight = slow x max(narrow, ROOM_WFLOOR): narrow ramps
+-- from ROOM_WHI (7 m half-width -> 0) to ROOM_WLO (3.5 m -> 1); slow is the larger of the radius term (ROOM_RHI 150 m -> 0 ..
+-- ROOM_RLO 30 m -> 1) and the learned-pace term (ROOM_VHI 140 km/h -> 0 .. ROOM_VLO 60 -> 1). By construction Silverstone
+-- (7.1-8.3 m) reads 0 everywhere and Baku's castle (3.2 m, 40 km/h) reads 1; a track without sides reads 6.0 m -> 0.29 < ROOM_ON.
+function R.roomAt(s)
+    local rm = cv2.room
+    if not rm or not rm.done then return 0 end
+    local k = math.floor((s % 1) * rm.n) % rm.n
+    local h = rm.half[k]
+    if not h then return 0 end                                        -- no sides read for this bin (or never filled): inert, whatever the radius
+    local narrow = clamp((R.ROOM_WHI - h) / math.max(0.1, R.ROOM_WHI - R.ROOM_WLO), 0, 1)
+    local slow = clamp((R.ROOM_RHI - (rm.rad[k] or 1e4)) / math.max(1, R.ROOM_RHI - R.ROOM_RLO), 0, 1)
+    if rm.pace[k] then slow = math.max(slow, clamp((R.ROOM_VHI - rm.pace[k]) / math.max(1, R.ROOM_VHI - R.ROOM_VLO), 0, 1)) end
+    return slow * math.max(narrow, R.ROOM_WFLOOR or 0)
+end
+
 function R.evaluate(i, dt)
     if not R.ENABLED then return 0 end
     local caut, state = 0, 0
@@ -434,6 +477,7 @@ function R.evaluate(i, dt)
         end
         local mySpline = me.splinePosition
         if mySpline == nil then return end
+        R.evalN = (R.evalN or 0) + 1
         local startX = R.START_X
         if R.START_T1_M > 0 and startX < 1 then
             if cv2.t1 == nil then          -- once per load: the distance from the line to the first corner
@@ -539,6 +583,23 @@ function R.evaluate(i, dt)
                 end
             end
         end
+        -- ROOM (R.ROOM): how tight is the road here and ROOM_LOOK s ahead (0 = wide/fast, 1 = a slow corridor; see R.roomAt).
+        -- roomOn gates the LINE consumer; roomF adds the FOLLOW switch and its exemptions (P3: a car already pulling out, on a
+        -- road-space pass or a manoeuvre, lapping a yielder, or being recovered is never throttled).
+        -- roomN counts the MAP's verdict (any speed); roomOn adds the ROOM_VMAX gate for the convoy throttle, the rear-end guard and
+        -- LINE; roomB is the brake guard's gate: tight room at ANY speed, since its case is the braking zone INTO the corridor.
+        local tightHere, roomOn, roomF, roomB = 0, false, false, false
+        if cv2.roomEn then
+            tightHere = math.max(R.roomAt(mySpline), R.roomAt(mySpline + spd / 3.6 * R.ROOM_LOOK / trackLen))
+            if tightHere >= R.ROOM_ON then
+                R.roomN = (R.roomN or 0) + 1
+                local L0 = R.last[i]
+                roomB = (cv2.roomFollow and not lappedAhead and not (Recovery.stateOf(i) or {}).rec
+                        and not (L0 and (math.abs(L0.off or 0) > 0.25 or L0.rs or (L0.mv or 0) > 0))) or false
+                roomOn = spd < R.ROOM_VMAX
+                roomF = roomOn and roomB
+            end
+        end
         -- YELLOW FLAG speed cap (cleared -- 1e9 -- every frame it doesn't apply), combined with recovery's
         -- own cap for a car that's just been set back on the track (the two are the only writers of it)
         local cap = 1e9
@@ -559,26 +620,29 @@ function R.evaluate(i, dt)
         pcall(function() physics.setAITopSpeed(i, cap) end)
         -- CONVOY v2: throttle only (see the constants). Left alone for a car recovery is driving (its own throttle ramp).
         local thr = 1.0
-        if R.CONVOY2_ON and myLap == 0 and crowd >= 1 and not (Recovery.stateOf(i) or {}).rec then
-            if cv2.clock and cv2.back[i] then
+        if R.CONVOY2_ON and (myLap == 0 or roomF) and crowd >= 1 and not (Recovery.stateOf(i) or {}).rec then
+            if myLap == 0 and cv2.clock and cv2.back[i] then
                 local tl0 = os.clock() - cv2.clock
                 if tl0 < (cv2.react[i] or 0) then thr = math.min(thr, CV.REACT_THR)   -- reaction time: not on the gas yet
                 elseif tl0 < (cv2.react[i] or 0) + CV.ROW_T * R.ROW_T_X * startX * (cv2.back[i] / CV.ROW_M) then thr = math.min(thr, CV.THR + (1 - CV.THR) * (1 - startX)) end   -- staggered release
             end
             local cvGap, cvNear = CV.GAP_M, CV.NEAR_M
             if R.CV_TGAP > 0 then cvGap = math.max(CV.GAP_M, spd / 3.6 * R.CV_TGAP); cvNear = cvGap * (CV.NEAR_M / CV.GAP_M) end   -- a time gap: the faster I arrive, the further out I ease
-            if olS < CV.END and aheadIdx >= 0 and gapA * trackLen < cvGap and spd > aheadSpd + CV.CLOSING
+            if roomF then cvGap = math.max(cvGap, spd / 3.6 * R.ROOM_TG * tightHere); cvNear = cvGap * (CV.NEAR_M / CV.GAP_M) end   -- ROOM_FOLLOW: a time gap in tight room, every lap
+            if ((olS < CV.END and myLap == 0) or roomF) and aheadIdx >= 0 and gapA * trackLen < cvGap and spd > aheadSpd + CV.CLOSING
                and not (R.OL_STAR_CONVOY and Strategy.tierOf(i) >= 2) then
                 local aCar = ac.getCar(aheadIdx)
                 if aCar and math.abs(latOf(aCar.position) - latOf(me.position)) < CV.LAT then
                     local gm = gapA * trackLen
                     local lim = clamp(CV.THR_MIN + (1 - CV.THR_MIN) * (gm - cvNear) / (cvGap - cvNear), CV.THR_MIN, 1)
-                    thr = math.min(thr, lim + (1 - lim) * (1 - startX))   -- Racing / Stock: less of the convoy hold
+                    if myLap == 0 then lim = lim + (1 - lim) * (1 - startX) end   -- Racing / Stock: less of the convoy hold (lap 0 only: the room rule is not a start option)
+                    thr = math.min(thr, lim)
+                    if roomF and myLap > 0 then R.roomAct = (R.roomAct or 0) + 1 end
                 end
             end
             -- SIDE YIELD: two-abreast into a corner on lap 0 is how same-row pairs touch (Barcelona F1 2026-09-16:
             -- six of nine lap-0 contacts). The car behind by a nose eases and tucks in.
-            if R.OL_SIDEYIELD and sideBy and cornerAhead(mySpline) then thr = math.min(thr, CV.SIDE_THR) end
+            if myLap == 0 and R.OL_SIDEYIELD and sideBy and cornerAhead(mySpline) then thr = math.min(thr, CV.SIDE_THR) end
         end
         local pc = R.penCap and R.penCap[i]                 -- serving a penalty (lib/fault.lua): throttle cap until it's paid
         if pc and os.clock() < pc.till then thr = math.min(thr, pc.cap) end
@@ -586,17 +650,18 @@ function R.evaluate(i, dt)
         elseif cv2.thr[i] then cv2.thr[i] = nil; pcall(physics.setAIThrottleLimit, i, 1.0) end
         -- BRAKE-ZONE GUARD (lap 0): the car ahead on my line is on the brakes and I'm inside CV.BG_M -> raise my brake
         -- hint (earlier brake point) in proportion to the gap. R.BG_ALL: whole-race multiplier, direction test only.
-        if (R.OL_BRAKEGUARD or R.BG_ALL > 0) and physics.setAIBrakeHint then
+        if (R.OL_BRAKEGUARD or R.BG_ALL > 0 or roomB) and physics.setAIBrakeHint then
             if cv2.base[i] == nil then
                 cv2.base[i] = 1.0
                 pcall(function() cv2.base[i] = ac.INIConfig.carData(i, 'ai.ini'):get('PEDALS', 'BRAKE_HINT', 1.0) end)
             end
             local mul = R.BG_ALL > 0 and R.BG_ALL or 1.0
-            if R.OL_BRAKEGUARD and startX > 0 and myLap <= 1 and aheadIdx >= 0 and not (Recovery.stateOf(i) or {}).rec then
+            if ((R.OL_BRAKEGUARD and startX > 0 and myLap <= 1) or roomB) and aheadIdx >= 0 and not (Recovery.stateOf(i) or {}).rec then
                 local gm = gapA * trackLen
                 local reach = CV.BG_M
-                if R.OL_FUEL_K > 0 then reach = reach * (1 + R.OL_FUEL_K * clamp(((me.fuel or 20) - 20) / 50, 0, 1.5)) end   -- heavier car, longer braking
-                if R.OL_GRID_DEPTH > 0 and cv2.back[i] and (cv2.depth or 0) > 0 then reach = reach * (1 + R.OL_GRID_DEPTH * cv2.back[i] / cv2.depth) end   -- the deeper you started, the earlier
+                if roomB then reach = reach * (1 + R.ROOM_BG * tightHere) end   -- ROOM_FOLLOW: a longer reach into tight room (the corridor entries, at any speed)
+                if myLap <= 1 and R.OL_FUEL_K > 0 then reach = reach * (1 + R.OL_FUEL_K * clamp(((me.fuel or 20) - 20) / 50, 0, 1.5)) end   -- heavier car, longer braking
+                if myLap <= 1 and R.OL_GRID_DEPTH > 0 and cv2.back[i] and (cv2.depth or 0) > 0 then reach = reach * (1 + R.OL_GRID_DEPTH * cv2.back[i] / cv2.depth) end   -- the deeper you started, the earlier
                 if R.BG_T > 0 then reach = math.max(reach, (spd - aheadSpd) / 3.6 * R.BG_T) end
                 if gm < reach then
                     local aCar = ac.getCar(aheadIdx)
@@ -606,6 +671,7 @@ function R.evaluate(i, dt)
                         -- The cut scales with how fast I'm closing on a braking car and how close it already is.
                         local closing = clamp((spd - aheadSpd) / CV.BG_CLOSE, 0, 1)
                         mul = mul * (1 - CV.BG_HINT * closing * clamp(1 - gm / reach, 0, 1))
+                        if roomB and myLap > 1 then R.roomAct = (R.roomAct or 0) + 1 end
                     end
                 end
             end
@@ -816,6 +882,9 @@ function R.evaluate(i, dt)
                     rsPass = true
                 end
             end
+            -- ROOM LINE (R.ROOM_LINE): tight room, no road-space side, no manoeuvre -> the reactive nudge is dropped. The geometric
+            -- 'no room' verdict used to leave the 0.35 x class nudge standing: nobody passes in a corridor, so nobody moves in one.
+            if cv2.roomLine and roomOn and ov == nil and not rsPass and target ~= 0 then target = 0; R.roomAct = (R.roomAct or 0) + 1 end
         elseif state == 2 then
             aggr = math.min(1, baseA + K.DEFEND_AGGR_ADD)
             caut = K.CAUTION_DEFEND
@@ -835,7 +904,8 @@ function R.evaluate(i, dt)
                 local progZ = myTc and myTc.z or mySpline
                 local isCorner, inside = cornerAhead(progZ)
                 if isCorner and inside ~= 0 then
-                    target = inside * (K.DEFEND_OFFSET * t.defend)   -- hold the inside line (stable, corner-based)
+                    if cv2.roomLine and roomOn then target = 0; R.roomAct = (R.roomAct or 0) + 1   -- ROOM LINE: no cover move in a corridor
+                    else target = inside * (K.DEFEND_OFFSET * t.defend) end   -- hold the inside line (stable, corner-based)
                 end
                 -- on straights, keep the racing line -- don't weave to mirror the attacker
             end
@@ -951,15 +1021,18 @@ function R.evaluate(i, dt)
         end
         -- anti rear-end: closing fast, right behind, and still ON the same line (not pulling out to
         -- pass) -> ease the approach. Risk lowers how much a driver backs off, but never to nothing.
-        if gapA < K.REAREND_GAP and aheadIdx >= 0 and blockSide == 0 then    -- (going around a blockage? don't also brake to a crawl behind it)
+        local reGap = roomF and math.max(K.REAREND_GAP, spd / 3.6 * R.ROOM_RE_T * tightHere / trackLen) or K.REAREND_GAP   -- ROOM_FOLLOW: a time window in tight room
+        if gapA < reGap and aheadIdx >= 0 and blockSide == 0 then    -- (going around a blockage? don't also brake to a crawl behind it)
             local closing = spd - aheadSpd
-            if closing > K.REAREND_CLOSE and math.abs(myLat - latOf(ac.getCar(aheadIdx).position)) < K.REAREND_LAT then
-                local urgency = clamp((closing - K.REAREND_CLOSE) / K.REAREND_RANGE, 0, 1) * clamp(1 - gapA / K.REAREND_GAP, 0, 1)
+            local reClose = roomF and K.REAREND_CLOSE * (1 - 0.6 * tightHere) or K.REAREND_CLOSE   -- ROOM_FOLLOW: a 3 km/h creep in a 40 km/h corridor counts
+            if closing > reClose and math.abs(myLat - latOf(ac.getCar(aheadIdx).position)) < K.REAREND_LAT then
+                local urgency = clamp((closing - reClose) / K.REAREND_RANGE, 0, 1) * clamp(1 - gapA / reGap, 0, 1)
                 local riskF = prof and clamp(1.0 - 0.6 * prof.risk, 0.4, 1.0) or 0.8
                 if rsPass or (paceEdge and math.abs(target) > 0.25) then   -- pulling out to pass: don't kill the run first
                     urgency = urgency * ((myLap >= 2) and CV.RS_REAREND or R.RS_OL_REAREND)
                 end
                 caut = caut + K.REAREND_CAUT * urgency * riskF
+                if roomF then R.roomAct = (R.roomAct or 0) + 1 end
             end
         end
 
@@ -1130,7 +1203,10 @@ function R.evaluate(i, dt)
             laneHeld = true
         end
         if not laneHeld and myLap == 0 and crowd >= 1 and olS < K.GRID_FADE_END * R.GRID_FADE_X then
-            if gridLat[i] == nil and olS < K.GRID_CAPTURE then gridLat[i] = myLat end
+            if gridLat[i] == nil and olS < K.GRID_CAPTURE then
+                gridLat[i] = myLat
+                if R.GRID_HOLD_MAXLAT > 0 and math.abs(myLat) > R.GRID_HOLD_MAXLAT then gridLat[i] = 0 end   -- off the road: aim for the line
+            end
             if gridLat[i] then
                 target = clamp(gridLat[i] * K.GRID_HOLD * clamp(1 - math.max(0, olS) / (K.GRID_FADE_END * R.GRID_FADE_X), 0, 1), -1, 1)
             end
@@ -1235,6 +1311,12 @@ function R.beginFrame()
                     local side = {}
                     for j in pairs(sp) do side[j] = sgn((latNow[j] or 0) - mid) end
                     local x = front
+                    -- LANE_MIN_HALF: on a road that does not fit two cars there are no lanes to hold (the one width read here)
+                    local halfFront = 6.0
+                    if R.LANE_MIN_HALF > 0 then
+                        pcall(function() local sd = ac.getTrackAISplineSides(front % 1); if sd then halfFront = math.max(3.0, (sd.x + sd.y) * 0.5) end end)
+                        if halfFront < R.LANE_MIN_HALF then x = front + CV.LANE_MAX_M / trackLen end   -- skip the scan: no lane
+                    end
                     while x < front + CV.LANE_MAX_M / trackLen do
                         local isC, ins = cornerAhead(x % 1)
                         if isC and ins ~= 0 then cv2.lane = { inside = ins, mid = mid, side = side, endS = x + 2 * K.SAMPLE_D + LANE_APEX_M_frac(trackLen) }; break end
@@ -1252,9 +1334,16 @@ function R.beginFrame()
     end
     pcall(function()
         local s = ac.getSim()
+        local rm = cv2.roomEn and cv2.room or nil
         for j = 0, s.carsCount - 1 do
             local c = ac.getCar(j)
             latNow[j] = c and latOf(c.position) or 0
+            -- ROOM MAP pace: the fastest any healthy AI car has driven this bin this session (lap 1 on, not recovering, not yielding)
+            if rm and c and c.isAIControlled and c.splinePosition and (c.speedKmh or 0) > 30 and Recovery.lapsOf(j) >= 1
+               and not (Recovery.stateOf(j) or {}).rec and not (R.last[j] and R.last[j].yield) then
+                local b = math.floor(c.splinePosition * rm.n) % rm.n
+                if c.speedKmh > (rm.pace[b] or 0) then rm.pace[b] = c.speedKmh end
+            end
         end
     end)
     if not R.ovalChecked then   -- the session-start check can run before the AI line is loaded (Daytona 2026-09-19: an oval read as a road course)
@@ -1264,6 +1353,60 @@ function R.beginFrame()
         scaled = true
         pcall(function() local s = ac.getSim(); scaleToTrack(s and s.trackLengthM) end)
     end
+    -- ROOM MAP (R.ROOM): once per session, after scaleToTrack, 50 bins a frame, retried until the AI line is loaded (like detectOval)
+    if scaled and (R.ROOM == true or (type(R.ROOM) == 'number' and R.ROOM > 0)) and not (cv2.room and cv2.room.done) then
+        if not cv2.room then cv2.room = { half = {}, rad = {}, pace = {}, n = 400, k = 0, done = false, miss = 0, err = 0 } end
+        local okMap = pcall(function()
+            local rm = cv2.room
+            local ds = 12.0 / trackLen                                     -- three samples 12 m apart (the cornerAhead method)
+            for _ = 1, 50 do
+                if rm.k >= rm.n then break end
+                local s = rm.k / rm.n
+                local p0 = ac.trackProgressToWorldCoordinate(s, false)
+                local p1 = ac.trackProgressToWorldCoordinate((s + ds) % 1, false)
+                local p2 = ac.trackProgressToWorldCoordinate((s + 2 * ds) % 1, false)
+                if not (p0 and p1 and p2) then return end                 -- the AI line is not loaded yet: same bin next frame
+                local ax, az = p1.x - p0.x, p1.z - p0.z
+                local bx, bz = p2.x - p1.x, p2.z - p1.z
+                local cx, cz = p2.x - p0.x, p2.z - p0.z
+                local cross = math.abs(ax * bz - az * bx)
+                local r = 1e4                                              -- circumradius of the three points (m); 1e4 = straight
+                if cross > 1e-6 then r = math.sqrt((ax * ax + az * az) * (bx * bx + bz * bz) * (cx * cx + cz * cz)) / (2 * cross) end
+                rm.rad[rm.k] = math.min(1e4, math.max(1, r))
+                local half, okS = 6.0, false                               -- half-width (m): fallback 6.0, floor 3.0, as the road-space block reads it
+                pcall(function() local sd = ac.getTrackAISplineSides(s); if sd and (sd.x + sd.y) > 1.0 then half = math.max(3.0, (sd.x + sd.y) * 0.5); okS = true end end)
+                if not okS then rm.miss = rm.miss + 1 end
+                rm.half[rm.k] = okS and half or false                    -- false = no sides here: R.roomAt reads it as inert
+                rm.k = rm.k + 1
+            end
+            if rm.k >= rm.n then
+                rm.done = true
+                local hmin, hmax, tightB, runs, a = 1e9, 0, 0, {}, nil
+                for k = 0, rm.n do
+                    local h = k < rm.n and rm.half[k]
+                    if h then
+                        if h < hmin then hmin = h end
+                        if h > hmax then hmax = h end
+                    end
+                    local on = k < rm.n and R.roomAt(k / rm.n) >= R.ROOM_ON
+                    if on then tightB = tightB + 1 end
+                    -- the tight runs as lap fractions: check them against the offline replica (proof_room.py) before scoring a race on them
+                    if on and not a then a = k elseif not on and a then runs[#runs + 1] = string.format('%.3f-%.3f', a / rm.n, k / rm.n); a = nil end
+                end
+                rm.tightB = tightB
+                if hmin > hmax then hmin, hmax = 0, 0 end
+                ac.log(string.format('Verve: room map %d bins, half-width %.1f-%.1f m (%d bins without sides: inert), %d bins tight >= %.2f before the pace is learned%s: %s',
+                    rm.n, hmin, hmax, rm.miss, tightB, R.ROOM_ON, (rm.miss >= rm.n) and ' - this track has no sides: ROOM is inert here' or '', table.concat(runs, ' ')))
+            end
+        end)
+        if not okMap then      -- a build that keeps erroring (no such API on this CSP build) gives up: unfilled bins read 6.0 m / straight -> inert
+            cv2.room.err = cv2.room.err + 1
+            if cv2.room.err > 600 then cv2.room.done = true; pcall(ac.log, 'Verve: room map could not be built on this build/track: ROOM is inert here') end
+        end
+    end
+    cv2.roomEn = cv2.room ~= nil and cv2.room.done == true and (R.ROOM == true or (type(R.ROOM) == 'number' and R.ROOM > 0))
+    cv2.roomFollow = cv2.roomEn and (R.ROOM_FOLLOW == true or (type(R.ROOM_FOLLOW) == 'number' and R.ROOM_FOLLOW > 0)) or false   -- (true or 1 from the harness)
+    cv2.roomLine = cv2.roomEn and (R.ROOM_LINE == true or (type(R.ROOM_LINE) == 'number' and R.ROOM_LINE > 0)) or false
 end
 function R.reset()
     dmgSeen, dmgLap = {}, {}
@@ -1271,6 +1414,7 @@ function R.reset()
     letbyT, letbyDone, letbyFor = {}, {}, {}
     cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {} }; R.cv2 = cv2
     R.crawlN = 0
+    R.roomN = 0; R.roomAct = 0; R.evalN = 0
     R.last = {}
     pcall(Strategy.reset)
     scaled = false
