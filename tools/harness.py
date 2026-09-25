@@ -382,7 +382,12 @@ def newest_diag(after_ts):
     """The diagnostics file for the run launched at after_ts. A session end (or an app reload) opens a NEW
     file, so "newest" can be a few-frame stub written after the flag: prefer the LARGEST file of the run."""
     files = [os.path.join(VERVE, f) for f in os.listdir(VERVE) if f.startswith("diag_race_") and f.endswith(".jsonl")]
-    files = [f for f in files if os.path.getmtime(f) >= after_ts - 5]
+    def mtime(f):
+        try:
+            return os.path.getmtime(f)
+        except OSError:            # the app rotates the file to .bak mid-write: listed a moment ago, gone now (00:21 2026-09-25)
+            return 0
+    files = [f for f in files if mtime(f) >= after_ts - 5]
     if not files:
         return None
     return max(files, key=lambda f: (os.path.getsize(f) > 20000, os.path.getsize(f) if os.path.getsize(f) > 20000 else os.path.getmtime(f)))
