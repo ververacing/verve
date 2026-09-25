@@ -390,7 +390,12 @@ def newest_diag(after_ts):
     files = [f for f in files if mtime(f) >= after_ts - 5]
     if not files:
         return None
-    return max(files, key=lambda f: (os.path.getsize(f) > 20000, os.path.getsize(f) if os.path.getsize(f) > 20000 else os.path.getmtime(f)))
+    def size(f):
+        try:
+            return os.path.getsize(f)
+        except OSError:
+            return 0
+    return max(files, key=lambda f: (size(f) > 20000, size(f) if size(f) > 20000 else mtime(f)))
 
 
 def any_motion(diag):
