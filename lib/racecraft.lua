@@ -133,7 +133,7 @@ local CV = { END = 0.45, GAP = 0.006, LAT = 0.35, MARGIN = 6.0,          -- v1: 
              RS_EDGE = 0.80, RS_MARGIN_M = 0.8, RS_CARW_M = 1.9, RS_BACK_M = 12.0, RS_FWD_M = 10.0, RS_REAREND = 0.35, RS_ADV = 0.5,
              ISO_REACH_M = 300.0, LONE_M = 50.0,
              LANE_OFF = 0.45, LANE_APEX_M = 40.0, LANE_SCAN_M = 20.0, LANE_MAX_M = 900.0 }   -- turn-1 lanes: offset, hold this far past the apex, corner-scan step, give up looking this far out   -- alone-on-track: a car ahead within this is 'catchable' for a top-tier driver; nobody within this either way = lone   -- road space: usable edge (track units), margin + fallback car width (m), scan window behind me / past the car ahead (m), rear-end ease left while pulling out, run needed (x the aggression-scaled minimum)
-local cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {} }      -- v2 state: lights-out clock, distance behind the front car, cars we throttled, guard applied, base brake hints
+local cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, crossed = {} }      -- v2 state: lights-out clock, distance behind the front car, cars we throttled, guard applied, base brake hints
 R.cv2 = cv2                                                               -- (read by diag's contact trace)
 -- CONVOY v2 (harness A/B: R.CONVOY2_ON): throttle, never a speed cap. A follower closing on the car ahead on the
 -- same line loses throttle in proportion to the gap; the field is released from the lights row by row.
@@ -201,6 +201,9 @@ R.SHIFT_DOWN = 0.5            -- ...and the shift-down threshold that goes with 
 -- lane of turn 1 and even rows the OUTSIDE, then the normal grid funnel takes over. Nobody moves sideways in the pack --
 -- each car only holds a lane (every lateral rule that MOVED cars in the pack made F1 opening laps worse). Real F1 starts
 -- look like this for the first 300 m. Owner's pick 2026-09-17.
+R.OL_CROSSED = false          -- the lap-0 grid wrap (olS = spline - 1 for a grid before the line) applies only until the car has
+                              -- CROSSED the line. Off = today: the wrap also fires in the second half of lap 0, so the lanes,
+                              -- grid hold, convoy and row caution re-engage at full speed (54% of Baku's heavy hits, 2026-09-24)
 R.OL_LANES = true             -- DEFAULT 2026-09-18 (owner): regression suite passed (Spa 8.7 vs 9.7, Barcelona 8.3 vs 8.7, Monza 12 laps not worse); stars at meter >= RS_OL_METER exempt
 R.CONCEDE = 0                 -- >0: a defender concedes the line to a tier-2 driver behind whose pace rating beats his by this much (A/B)
 R.ACX_LAP = 0                 -- ATTACK_CAUT_X applies from this lap on (0 = always; 2 = keep the opening laps as they are) (A/B)
@@ -449,7 +452,10 @@ function R.evaluate(i, dt)
         -- lap-0 progress with the grid's wrap undone: a grid before the line reads 0.98-0.99, which made every
         -- "start of the opening lap" rule below treat the run to turn one as the END of the lap (2026-09-16)
         local olS = mySpline
-        if myLap == 0 and mySpline > 0.5 then olS = mySpline - 1 end
+        if R.OL_CROSSED then
+            if myLap == 0 and mySpline < 0.1 then cv2.crossed[i] = true end   -- past the line: from here on lap 0 is a lap
+            if myLap == 0 and mySpline > 0.5 and not cv2.crossed[i] then olS = mySpline - 1 end
+        elseif myLap == 0 and mySpline > 0.5 then olS = mySpline - 1 end
 
         -- nearest ahead / behind (gap, speed, index)
         local gapA, aheadSpd, aheadIdx = 1e9, 0, -1
@@ -1263,7 +1269,7 @@ function R.reset()
     dmgSeen, dmgLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     letbyT, letbyDone, letbyFor = {}, {}, {}
-    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0 }; R.cv2 = cv2
+    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {} }; R.cv2 = cv2
     R.crawlN = 0
     R.last = {}
     pcall(Strategy.reset)
