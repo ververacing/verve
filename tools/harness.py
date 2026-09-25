@@ -387,6 +387,23 @@ def newest_diag(after_ts):
     return max(files, key=lambda f: (os.path.getsize(f) > 20000, os.path.getsize(f) if os.path.getsize(f) > 20000 else os.path.getmtime(f)))
 
 
+def any_motion(diag):
+    """Has any car in the newest snapshot ever been seen moving? (the grid before the lights reads 0 km/h for all)"""
+    try:
+        with open(diag, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 200000))
+            tail = f.read().decode("utf-8", errors="replace").splitlines()
+        for l in tail:
+            if l.startswith('{"t"'):
+                r = json.loads(l)
+                if any((c.get("spd") or 0) > 10 for c in r.get("grid", [])):
+                    return True
+        return False
+    except (OSError, ValueError, KeyError):
+        return False
+
+
 def race_state(diag):
     """(leader lap, every car stopped in the pits?, seconds since the file was last written) from the
     newest snapshot in a diagnostics file, or None if it has no snapshots yet."""
@@ -473,44 +490,82 @@ def apply_csp_overrides(spec):
     return restore
 
 
-
-
-ARCHIVE_DIR = "D:/verve_archive" if os.path.isdir("D:/") else None
-KEEP_DAYS = 2.0          # diag files and race feeds older than this are moved to the archive drive
-MIN_FREE_GB = 4.0        # refuse to launch with less free space than this on the drive holding the app
-
-
-def free_gb(path):
-    try:
-        return shutil.disk_usage(path).free / (1024 ** 3)
-    except OSError:
-        return 1e9
-
-
-def housekeeping():
-    """Keep the app drive from filling up (C: hit zero free space mid-batch, 2026-09-22): move old diag files and
-    race feeds to the archive drive. Returns the free space left, in GB."""
-    if ARCHIVE_DIR:
-        cut = time.time() - KEEP_DAYS * 86400
-        moved = 0
-        for src, sub, pref in ((VERVE, "diag", "diag_race_"), (os.path.join(DOCS, "verve_feed"), "verve_feed", "")):
-            if not os.path.isdir(src):
-                continue
-            dst = os.path.join(ARCHIVE_DIR, sub)
-            os.makedirs(dst, exist_ok=True)
-            for f in os.listdir(src):
-                if pref and not f.startswith(pref):
-                    continue
-                fp = os.path.join(src, f)
-                try:
-                    if os.path.isfile(fp) and os.path.getmtime(fp) < cut:
-                        shutil.move(fp, os.path.join(dst, f)); moved += 1
-                except OSError:
-                    pass
-        if moved:
-            print(f"  housekeeping: archived {moved} old diag/feed files to {ARCHIVE_DIR}")
-    return free_gb(VERVE)
-
+
+
+
+
+ARCHIVE_DIR = "D:/verve_archive" if os.path.isdir("D:/") else None
+
+KEEP_DAYS = 2.0          # diag files and race feeds older than this are moved to the archive drive
+
+MIN_FREE_GB = 4.0        # refuse to launch with less free space than this on the drive holding the app
+
+
+
+
+
+def free_gb(path):
+
+    try:
+
+        return shutil.disk_usage(path).free / (1024 ** 3)
+
+    except OSError:
+
+        return 1e9
+
+
+
+
+
+def housekeeping():
+
+    """Keep the app drive from filling up (C: hit zero free space mid-batch, 2026-09-22): move old diag files and
+
+    race feeds to the archive drive. Returns the free space left, in GB."""
+
+    if ARCHIVE_DIR:
+
+        cut = time.time() - KEEP_DAYS * 86400
+
+        moved = 0
+
+        for src, sub, pref in ((VERVE, "diag", "diag_race_"), (os.path.join(DOCS, "verve_feed"), "verve_feed", "")):
+
+            if not os.path.isdir(src):
+
+                continue
+
+            dst = os.path.join(ARCHIVE_DIR, sub)
+
+            os.makedirs(dst, exist_ok=True)
+
+            for f in os.listdir(src):
+
+                if pref and not f.startswith(pref):
+
+                    continue
+
+                fp = os.path.join(src, f)
+
+                try:
+
+                    if os.path.isfile(fp) and os.path.getmtime(fp) < cut:
+
+                        shutil.move(fp, os.path.join(dst, f)); moved += 1
+
+                except OSError:
+
+                    pass
+
+        if moved:
+
+            print(f"  housekeeping: archived {moved} old diag/feed files to {ARCHIVE_DIR}")
+
+    return free_gb(VERVE)
+
+
+
 PURE_SETTINGS = os.path.join(AC_DIR, "extension", "weather-controllers", "pureCtrl", "settings.ini")
 RAINY = {3, 4, 5, 6, 7, 8, 0, 1, 2, 9, 10, 11, 29}   # CSP types that should start on a wet track
 
@@ -750,7 +805,13 @@ def run_once(args, arm, run_idx):
         # End of race is read from the diagnostics file (AC only rewrites out/race_out.json on exit to the
         # menu, so that signal never fires in an unattended run): the leader has completed all the laps,
         # or every car is stationary in the pits and the logger has gone quiet.
+        stalled = False
         stopped_checks = 0
+        # A race that never starts (CSP "App Verve is not allowed to load", a Lua compile error, AC's start
+        # lights never showing) used to be waited out for its whole budget and scored "frozen 20" - 24 minutes
+        # lost per event on PC #2, 2026-09-24. If no car has moved STALL_S after the diag opened, it is over.
+        STALL_S = 150
+        t_diag0, moved = None, False
         while time.time() - t_launch < budget:
             time.sleep(10)
             if proc.poll() is not None:
@@ -762,6 +823,13 @@ def run_once(args, arm, run_idx):
             if state is None:
                 continue
             leader_lap, all_parked, age = state
+            t_diag0 = t_diag0 or time.time()
+            if not moved:
+                moved = any_motion(diag)
+                if not moved and time.time() - t_diag0 > STALL_S:
+                    print(f"  !! sat at the lights: no car moved {STALL_S} s after the diag opened (CSP refused the app? Lua error? see logs/) -- killing acs.exe, run not scorable")
+                    stalled = True
+                    break
             stopped_checks = stopped_checks + 1 if all_parked else 0      # a field stopped for 4 checks (40 s) is over, logger or not (point-to-point finish)
             lap_done = (leader_lap > args.laps) if not getattr(args, "minutes", 0) else False   # timed: the flag is 'all parked'
             if lap_done or (getattr(args, "stop_laps", 0) and leader_lap >= args.stop_laps) or (all_parked and (age > 40 or stopped_checks >= 4) and leader_lap >= 1):
@@ -815,6 +883,9 @@ def run_once(args, arm, run_idx):
                 fo.writelines(l for l in fi if "Starting light should show" not in l)
     except OSError as e:
         print("  (ac log not kept:", e, ")")
+    if stalled:
+        print("  !! run not scorable: sat at the lights")
+        return None
     diag = newest_diag(t_launch)
     if diag and (getattr(args, "practice", 0) or getattr(args, "quali", 0)):
         # a weekend writes one file per session; score the race's
