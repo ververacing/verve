@@ -154,7 +154,8 @@ function F.update(dt, stats)
     -- from a weekend's stale first frames, and never in a plain race). Armed only after a settled snapshot of this Race
     -- session showed a standing grid (every running car under 5 km/h): a feed that starts after the launch (the app
     -- hot-reloaded, or 'Race feed' switched on during laps 0-1) never saw the grid and stamped race_start at racing
-    -- speed. AC holds the grid on its pre-session screen until Drive, so every fresh session arms (2026-09-26)
+    -- speed. Pure bug fix, no switch: the feed starts on AC's pre-session screen, where nothing moves until Drive, so a
+    -- feed that sees its session's grid arms on its first settled snapshot and writes what 0.14.5 wrote (2026-09-26)
     if not F.startSent and #running > 0 and running[1].lap <= 1 then   -- <= 1: a grid before the line can cross it first
         local isRace = false; pcall(function() isRace = sim.raceSessionType == ac.SessionType.Race end)
         if isRace and not F.startArmed then
