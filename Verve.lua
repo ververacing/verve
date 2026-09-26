@@ -17,6 +17,7 @@ local Watch     = require('lib.watch')        -- read-back watchdog: is anything
 local Contacts  = require('lib.contacts')     -- contacts from CSP's collision state (works with damage off)
 local Fault     = require('lib.fault')        -- who caused each contact, and the time penalty it costs (owner's ask 2026-09-17)
 local Strategy  = require('lib.strategy')     -- planned manoeuvres (racecraft drives it; Verve owns the toggle + status)
+local Fuel      = require('lib.fuel')         -- timed races: AC's 1.2-lap AI fuel load and its empty-tank pit loop (G.timedFuel)
 Racecraft.penCap = Fault.penCap            -- penalty throttle caps, read by racecraft's throttle setter (shared table)
 Fault.attach(Recovery.recentDrops, Feed.event)
 local Diag = nil; pcall(function() Diag = require('diag') end)   -- LOCAL dev diagnostics; absent in the shipped build
@@ -49,6 +50,7 @@ local DEFAULTS = {
     crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
     careerCurve = true, shareData = false, strategy = true, raceStart = 'calm', sliderCurve = true, repairOnTrack = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
+    timedFuel = false,   -- harness switch (lib/fuel.lua): fuel a TIMED race's AI for the clock, stop AC's empty-tank pit loop
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
 
@@ -60,6 +62,7 @@ local S = ac.storage({
     crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
     careerCurve = true, shareData = false, strategy = true, raceStart = 'calm', sliderCurve = true, repairOnTrack = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
+    timedFuel = false,
     autosave = true, schema = 1,
 })
 -- settings migration: 0.12 made crash repair + trouble spots core (they were opt-in experiments; a day-long
@@ -132,6 +135,7 @@ local function sessionReset(restart)
     pcall(Recovery.reset)         -- clear per-car recovery + pit-rescue state
     pcall(Troublespots.reset)     -- save the old track's learned hot spots, load the new track's
     pcall(Feed.reset)
+    pcall(Fuel.reset)
     if Diag then pcall(Diag.reset) end
 end
 
@@ -243,8 +247,11 @@ function script.update(dt)
                 if harnessT > 2.0 then
                     autopilotArmed = true
                     pcall(function() physics.setCarAutopilot(true, true) end)
-                    -- the launcher fuels the player for a short run (30 L); give the autopilot the AI field's load, or it pits twice
+                    -- the launcher fuels the player for a short run (30 L); give the autopilot the AI field's load, or it pits twice.
+                    -- Not in a TIMED race: AC fuels that field for 1.2 laps, so the median handed car 0 ~5 L. It keeps the launcher's
+                    -- load there (and with G.timedFuel on, lib/fuel.lua loads it like an AI car once the autopilot has it).
                     pcall(function()
+                        if Fuel.timedSession(simH) then return end
                         local fs = {}
                         for i = 1, simH.carsCount - 1 do local c = ac.getCar(i); if c and c.fuel and c.fuel > 0 then fs[#fs + 1] = c.fuel end end
                         table.sort(fs)
@@ -365,6 +372,7 @@ function script.update(dt)
     Recovery.CRASH_REPAIR = G.crashRepair
     Recovery.REPAIR_BODY  = G.repairOnTrack ~= false
     if G.recovery then Recovery.update(dt) end
+    if G.timedFuel then pcall(Fuel.update, sim, dt) end   -- timed races: green fuel load + pit-box guard (lib/fuel.lua)
     Troublespots.ENABLED = G.troubleSpots
     Troublespots.update(dt)
 
@@ -377,7 +385,7 @@ function script.update(dt)
             hotSpots = Troublespots.hotCount(), crashRisk = Troublespots.crashiness(), isOval = Racecraft.isOval,
             peak = Troublespots.peakHeat(), storeLen = Troublespots.storeLen, saveOk = Troublespots.lastSaveOk,
             per = diagPer, rc = Racecraft.last, recState = Recovery.stateOf, cv2 = Racecraft.cv2, episodes = Strategy.episodes,
-            recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, boxRescueN = Recovery.boxRescueN, boxSeenN = Recovery.boxSeenN, boxTryN = Recovery.boxTryN, boxOkN = Recovery.boxOkN, dropsOff = Recovery.dropsOff,
+            recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, boxRescueN = Recovery.boxRescueN, boxSeenN = Recovery.boxSeenN, boxTryN = Recovery.boxTryN, boxOkN = Recovery.boxOkN, dropsOff = Recovery.dropsOff, fuelLoadN = Fuel.loadN, fuelBoxN = Fuel.boxFixN,
             mvN = Strategy.attempts, mvOK = Strategy.ok, mvT = Strategy.byTypeString(), gateN = Recovery.gateMoves,
             fwdSign = (Recovery.fwdSign and Recovery.fwdSign() or 0), dropFlips = Recovery.dropFlips,
             suspPits = Recovery.suspPitCount, faults = Fault.count, penalties = Fault.penCount, contacts = Contacts.count,

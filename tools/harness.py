@@ -21,7 +21,7 @@ Examples
 An arm file (A.json) is {"label": "...", "settings": {...G keys...}, "recovery": {"DRIVE": false},
 "racecraft": {...}} -- keys under "settings" are Verve's global toggles/sliders (enabled, crashRepair,
 troubleSpots, racecraft, recovery, humanVar, humanErrors, classPhys, controlGrip, intensity, rcIntensity,
-baseGrip); "recovery"/"racecraft" set fields on those modules directly.
+baseGrip, timedFuel); "recovery"/"racecraft" set fields on those modules directly.
 """
 import argparse
 import atexit
@@ -233,7 +233,9 @@ def set_sessions(ini, args):
     if getattr(args, "quali", 0):
         sessions.append({"NAME": "Qualifying", "TYPE": "2", "DURATION_MINUTES": str(args.quali), "SPAWN_SET": "PIT"})
     minutes = getattr(args, "minutes", 0) or 0
-    # a TIMED race (most outside races are timed): LAPS 0 + DURATION_MINUTES; AC adds a lap after the clock runs out
+    # a TIMED race (most outside races are timed): LAPS 0 + DURATION_MINUTES; AC adds a lap after the clock runs out.
+    # This LAPS is what AC fuels its AI from: (LAPS + 1) x 1.2 laps as the race starts, (LAPS - completed + 1) x 1.2 at a
+    # stop - so a timed field starts on 1.2 laps and a stop empties the tank (Verve's timedFuel setting fixes both)
     sessions.append({"NAME": "Quick Race" if not sessions else "Race", "TYPE": "3", "LAPS": "0" if minutes else str(args.laps),
                      "DURATION_MINUTES": str(minutes) if minutes else "0",
                      "SPAWN_SET": "START", "STARTING_POSITION": str(args.start_pos)})
@@ -285,9 +287,9 @@ def build_race_ini(args, base_path):
         ini.set("RACE", "TRACK", args.track)
         ini.set("RACE", "CONFIG_TRACK", args.layout or "")
     ini.set("RACE", "CARS", str(len(cars) + 1))
-    if getattr(args, "minutes", 0):
-        ini.set("RACE", "VIRTUAL_LAPS", str(args.laps))   # the lap estimate AC fuels the AI with in a timed race (RACE_LAPS alone gave 4 L, 2026-09-20)
-    ini.set("RACE", "RACE_LAPS", str(args.laps))     # also for a timed race: AC fuels the AI from this estimate (0 = 4 L, the field ran dry after two laps, 2026-09-20)
+    # [RACE] RACE_LAPS is the launcher's record only: neither acs.exe nor CSP fuels the AI from it, nor from VIRTUAL_LAPS
+    # (written here until 0.14.6, to no effect). AC fuels from [SESSION_n] LAPS - see set_sessions (its log, 2026-09-26)
+    ini.set("RACE", "RACE_LAPS", str(args.laps))
     set_sessions(ini, args)
     if args.weather:
         # CSP weather type (Pure/Sol controllers read __CM_WEATHER_TYPE): 12 clear, 13 few clouds, 15 broken clouds, 16 overcast,
@@ -514,6 +516,33 @@ def best_laps_from_race_out(t_launch):
             if t > 10:
                 best[l["car"]] = min(best.get(l["car"], 1e9), t)
     return best
+
+
+def ac_log_fuel(path):
+    """AC's own view of the AI's fuel, from the run's kept log.txt (tools/harness_results/aclogs): the stops where AC
+    emptied a tank ('setting fuel for 0 laps': every AI stop in a timed race), the AI stops it began ('AI RACE PITSTOP';
+    a car looping in its box repeats it), and the race laps it fuelled the field for (the first 'race laps:N'; 0 in a
+    timed race = 1.2 laps of fuel). Empty strings when there is no log from this run."""
+    out = {"ai_zero_fuel_stops": "", "ai_pit_lines": "", "ai_race_laps": ""}
+    if not path or not os.path.exists(path):
+        return out
+    zero = pits = 0
+    laps = None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for ln in f:
+                if "setting fuel for 0 laps" in ln:
+                    zero += 1
+                if "AI RACE PITSTOP" in ln:
+                    pits += 1
+                if laps is None:
+                    mm = re.search(r"race laps:(\d+)", ln)       # (lower case: not the stop lines' "Race laps:0, completed:1")
+                    if mm:
+                        laps = int(mm.group(1))
+    except OSError:
+        return out
+    out.update(ai_zero_fuel_stops=zero, ai_pit_lines=pits, ai_race_laps=laps if laps is not None else "")
+    return out
 
 
 CSP_USER_CFG = os.path.join(CFG, "extension")
@@ -804,7 +833,7 @@ def run_once(args, arm, run_idx):
         budget = args.minutes * 60 + 2 * args.lap_budget_s + 240      # the clock, the extra lap, the load
     # a weekend: the timed sessions, plus their loads (the terms were lost in a comment for one night, 2026-09-21)
     budget += 60 * (getattr(args, "practice", 0) + getattr(args, "quali", 0)) + (120 if (getattr(args, "practice", 0) or getattr(args, "quali", 0)) else 0)
-    # a TIMED race ends on the clock: --laps is only its fuel/budget estimate, so it is not a stop distance (review 0.14.5)
+    # a TIMED race ends on the clock: --laps is not its distance (and AC does not fuel from it), so it is not a stop distance (review 0.14.5)
     write_harness_lua(arm, ttl_s=int(budget) + 120, ncars=ncars, laps=0 if getattr(args, 'minutes', 0) else (getattr(args, 'laps', 0) or 0),
                       weekend=bool(getattr(args, 'practice', 0) or getattr(args, 'quali', 0)))
     label = arm.get("label", "A")
@@ -951,12 +980,16 @@ def run_once(args, arm, run_idx):
     except OSError as e:
         print("  (replay not kept:", e, ")")
     # keep AC's own log per run (log.txt is overwritten by the next launch; an early exit's cause was lost, 2026-09-21)
+    aclog = None
     try:
         ldir = os.path.join(RESULTS_DIR, "aclogs"); os.makedirs(ldir, exist_ok=True)
         src = os.path.join(DOCS, "logs", "log.txt")
         if os.path.exists(src):
-            with open(src, encoding="utf-8", errors="replace") as fi, open(os.path.join(ldir, f"{time.strftime('%Y%m%d_%H%M')}_{label}.log"), "w", encoding="utf-8") as fo:
+            dst = os.path.join(ldir, f"{time.strftime('%Y%m%d_%H%M')}_{label}.log")
+            with open(src, encoding="utf-8", errors="replace") as fi, open(dst, "w", encoding="utf-8") as fo:
                 fo.writelines(l for l in fi if "Starting light should show" not in l)
+            if os.path.getmtime(src) >= t_launch:     # this run's log, not a stale one: the fuel columns read it
+                aclog = dst
     except OSError as e:
         print("  (ac log not kept:", e, ")")
     if stalled:
@@ -1009,6 +1042,11 @@ def run_once(args, arm, run_idx):
     m["weather"] = args.weather or ""
     m["ambient_c"] = args.ambient if args.ambient is not None else DEFAULT_AMBIENT
     m["road_c"] = args.road if args.road is not None else DEFAULT_ROAD
+    # AC's own fuel record (appended columns): tanks it emptied at a stop, AI stops it began, laps it fuelled the field for
+    m.update(ac_log_fuel(aclog))
+    if m["ai_zero_fuel_stops"]:
+        print(f"  !! AC emptied an AI tank at {m['ai_zero_fuel_stops']} pit stop(s), {m['ai_pit_lines']} AI pit-stop lines: "
+              "the timed-race fuel loop (Verve's timedFuel setting fixes it)")
     csv_path = os.path.join(RESULTS_DIR, "results.csv")
     new = not os.path.exists(csv_path)
     if not new:   # the columns changed (2026-09-13: ai_level + exact lap times): rotate the old file rather than misalign rows
@@ -1057,7 +1095,8 @@ def main():
     ap.add_argument("--troublespots", help="JSON of Troublespots module fields, e.g. {\"FRESH\":true} = clean learned map for this run")
     ap.add_argument("--human", help="JSON of Human module fields, e.g. {\"RAINFX_GRIP\":1.0,\"RAINFX_CAUT\":1.0}")
     ap.add_argument("--csp", help="JSON of CSP per-user config overrides for this run only, e.g. {\"new_behaviour\":{\"AI_RACE_RUBBERBANDING\":{\"ENABLED\":1}}}")
-    ap.add_argument("--minutes", type=int, default=0, help="TIMED race of N minutes (LAPS 0; AC adds a lap after the clock). --laps is then only the fuel/budget estimate")
+    ap.add_argument("--minutes", type=int, default=0, help="TIMED race of N minutes (LAPS 0; AC adds a lap after the clock). --laps then only fills race.ini's RACE_LAPS "
+                    "record: AC fuels a timed field for 1.2 laps whatever it says (--settings timedFuel true fuels it for the clock)")
     ap.add_argument("--stop-laps", type=int, default=0, help="heavy sprint: end the race gracefully once the leader completes N laps (fuel load of --laps, duration of N)")
     ap.add_argument("--fuel", type=float, default=0, help="litres in every car when the autopilot arms (0 = AC decides); e.g. 20 for a quali-load pace probe")
     ap.add_argument("--assists", help="JSON of launcher assists for this run only (cfg/assists.ini [ASSISTS]), e.g. {\"DAMAGE\":0} = damage off")
