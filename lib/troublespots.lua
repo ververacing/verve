@@ -43,7 +43,18 @@ local MAX_BINS_KEPT = 40         -- keep only the hottest N bins per class per t
 local RECENT_TAU    = 240.0      -- seconds: how long a recent incident keeps the field's guard up
 local CRASH_RECENT  = 6.0        -- this many recent incidents = fully crash-prone
 
-local store = ac.storage({ troubleData = '' })
+local store = ac.storage({ troubleData = '', troubleEra = 0 })
+-- MAP ERA: bumping T.ERA wipes every learned map once, on the first load of the new build. Era 1 (0.14.5): up to 0.14.4
+-- a race weekend's first frames made recovery log a phantom incident for every car in the pit boxes (qualifying) and on
+-- the grid (race), so a weekend left the track's hottest bins there. The map keeps only its 40 hottest bins, so the fake
+-- ones crowded out real corners (Baku's 0.743 kink was not on the map) and seeded every later race's guard (2026-09-26).
+T.ERA = 1
+pcall(function()
+    if (tonumber(store.troubleEra) or 0) < T.ERA then
+        store.troubleData = ''; store.troubleEra = T.ERA
+        ac.log('Verve: trouble-spot maps reset (era ' .. T.ERA .. ')')
+    end
+end)
 local data  = {}                 -- data[cls][bin] = heat for the CURRENT track ('_global' = all classes)
 local peak  = {}                 -- peak[cls] = hottest bin heat in that class map (refreshed each second)
 local trackKey = 'track'
