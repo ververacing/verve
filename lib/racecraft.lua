@@ -347,6 +347,20 @@ K.YELLOW_CAP_FAR = 200   -- ...at this cap (km/h), easing linearly to YELLOW_CAP
 K.FREEPASS_CAUT = 0.15  -- caution taken OFF a car lapping a yielding backmarker
 R.CAUT_BASE = 0.0       -- flat caution offset on every AI car (harness: is there pace in braking later? 0 = as today)
 K.YELLOW_LAT = 1.3   -- a stopped car this far from the centre line still counts (edge/kerb); deep in the gravel doesn't
+-- SLOW-CAR YELLOW (harness A/B: R.YELLOW_SLOW > 0). The yellow above only sees a car under K.BLOCK_SPEED (24 km/h), so at
+-- Baku's flat-out kink (0.74, 255-270 km/h) cars ran into a damaged crawler or a just-repositioned car doing 30-90 km/h with
+-- no warning at all. With this on, a car ahead is ALSO a yellow when it is under YELLOW_SLOW x the speed ITS OWN bit of road
+-- is normally driven at: the typical-speed map (cv2.ys), one sample per car per ~20 m bin crossing, from lap 1 on, from every
+-- moving car not in the pit lane, damaged, ramping after a reposition or finished; a bin reads as the slowest trusted one of
+-- itself and its two neighbours, so a braking zone reads as its slow end. Judged against the road, not against me: a car
+-- braking for a hairpin is at the hairpin's normal speed and never counts (the lap-0 OL_SPINYELLOW test, 'far slower than
+-- me', would fire behind every one). What follows detection is the stopped-car cap, unchanged (a crawler at its speed + 40).
+R.YELLOW_SLOW = 0             -- fraction of the road's typical speed, 0 = off (no map, nothing changes); 0.35 = a car under 35% of it is a yellow (Baku kink 2026-09-26)
+CV.YS_M = 20.0                -- m per bin of the typical-speed map (bin count = track length / this, 50..1000)
+CV.YS_MIN = 10                -- crossings before a bin is trusted (a running mean until then); 10+ cars trust the lap during lap 1
+CV.YS_UP = 0.20; CV.YS_DN = 0.05   -- EMA rates once trusted: quick up, slow down, so cars slowed through a yellow zone do not teach the map the zone is slow
+CV.YS_REJ = 0.5               -- a crossing under this fraction of a trusted bin is not learned (the crawler, the queue behind it); fixed, so every YELLOW_SLOW reads the same map
+R.yellowSlowN = 0             -- diag: pair-frames a car ahead read as a slow-car yellow (session line yellowSlowN)
 
 -- TRACK-LENGTH SCALING: every gap above is a spline FRACTION, and the tuning was done on ~4.5 km circuits.
 -- A fraction is a different distance on every track (0.008 is 36 m at Zandvoort, 160 m at the
@@ -555,6 +569,20 @@ function R.evaluate(i, dt)
                                 local vl = math.sqrt(v.x * v.x + v.z * v.z)
                                 if vl > 1 and (v.x * lk.x + v.z * lk.z) / vl < CV.SPIN_DOT then hazard = true end
                             end
+                        end
+                    end
+                    -- SLOW-CAR YELLOW (R.YELLOW_SLOW): far under the speed its own bit of road is normally driven at (cv2.ys, beginFrame)
+                    if not hazard and cv2.ys and d > 0 and d < yellowRange and math.abs(ocLat) < K.YELLOW_LAT and not oc.isInPitlane then   -- (cv2.ys exists only while the switch is on)
+                        local ys = cv2.ys
+                        local nb = ys.nb
+                        local ob = math.floor(oc.splinePosition * nb) % nb
+                        if (ys.n[ob] or 0) >= CV.YS_MIN then
+                            local tv = ys.v[ob]
+                            local o2 = (ob + nb - 1) % nb                          -- the slowest trusted of the bin and its neighbours
+                            if (ys.n[o2] or 0) >= CV.YS_MIN and ys.v[o2] < tv then tv = ys.v[o2] end
+                            o2 = (ob + 1) % nb
+                            if (ys.n[o2] or 0) >= CV.YS_MIN and ys.v[o2] < tv then tv = ys.v[o2] end
+                            if ocSpd < R.YELLOW_SLOW * tv then hazard = true; R.yellowSlowN = (R.yellowSlowN or 0) + 1 end
                         end
                     end
                     if d > 0 and d < yellowRange and hazard and math.abs(ocLat) < K.YELLOW_LAT and d < yellowD then
@@ -1382,6 +1410,12 @@ function R.beginFrame()
     pcall(function()
         local s = ac.getSim()
         local rm = cv2.roomEn and cv2.room or nil
+        -- SLOW-CAR YELLOW map (R.YELLOW_SLOW > 0 only, built once the track is scaled): typical speed per bin, one sample per car per crossing
+        local ys = nil
+        if type(R.YELLOW_SLOW) == 'number' and R.YELLOW_SLOW > 0 and scaled then
+            ys = cv2.ys
+            if not ys then ys = { nb = clamp(math.floor(trackLen / CV.YS_M), 50, 1000), v = {}, n = {}, b = {} }; cv2.ys = ys end
+        end
         for j = 0, s.carsCount - 1 do
             local c = ac.getCar(j)
             latNow[j] = c and latOf(c.position) or 0
@@ -1390,6 +1424,21 @@ function R.beginFrame()
                and not (Recovery.stateOf(j) or {}).rec and not (R.last[j] and R.last[j].yield) then
                 local b = math.floor(c.splinePosition * rm.n) % rm.n
                 if c.speedKmh > (rm.pace[b] or 0) then rm.pace[b] = c.speedKmh end
+            end
+            if ys and c and c.splinePosition then
+                local b = math.floor(c.splinePosition * ys.nb) % ys.nb
+                if b ~= ys.b[j] then                                          -- a new bin: its entry speed is one sample
+                    ys.b[j] = b
+                    local v = c.speedKmh or 0
+                    if v > K.SPEED_MIN and not c.isInPitlane and not c.isRaceFinished and Recovery.lapsOf(j) >= 1
+                       and Recovery.rampCap(j) >= 1e9 and Recovery.damageOf(j) < K.DAMAGE_YIELD then
+                        local n, tv = (ys.n[b] or 0) + 1, ys.v[b] or v
+                        if n <= CV.YS_MIN or v >= tv * CV.YS_REJ then       -- (trusted: a crossing far under it is not learned)
+                            ys.n[b] = n
+                            ys.v[b] = tv + (v - tv) * ((n <= CV.YS_MIN) and 1 / n or (v > tv and CV.YS_UP or CV.YS_DN))
+                        end
+                    end
+                end
             end
         end
     end)
@@ -1461,7 +1510,7 @@ function R.reset()
     letbyT, letbyDone, letbyFor = {}, {}, {}
     cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {} }; R.cv2 = cv2
     R.crawlN = 0
-    R.roomN = 0; R.roomAct = 0; R.evalN = 0; R.fastTuckN = 0
+    R.roomN = 0; R.roomAct = 0; R.evalN = 0; R.fastTuckN = 0; R.yellowSlowN = 0
     R.last = {}
     pcall(Strategy.reset)
     scaled = false
