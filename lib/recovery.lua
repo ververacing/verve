@@ -232,10 +232,16 @@ R.GATE_MODE = 'back'       -- 'back' = drop on a straight just before the last s
 R.GATE_FIRST_M = 500       -- DEFAULT 0.14.5; 0 = off. >0 (m): with 2+ intermediate splits, gate to just before SPLIT 1 when that is at most this far
                            -- back, else don't gate. AC credits the lap only if the car passes split 1 after its last teleport:
                            -- sector-1 landings 1039/1052 counted, sector 2 (the 'back' gate) 19/1865, last sector 0/80 (2026-09-26).
-                           -- Capped at split 2: a landing past split 2 is never gated back to split 1 (a whole sector lost, 2026-09-26).
+R.GATE_FIRST_CAP = false   -- false = 0.14.5. true: a landing in the LAST sector (at or past the last intermediate split) is never gated back
+                           -- to split 1, however big GATE_FIRST_M. A trade, not a fix: gated, it becomes a sector-1 landing (1039/1052 credited)
+                           -- for up to GATE_FIRST_M + walk + stagger of road; left there it keeps the road and likely loses the lap (last
+                           -- sector 0/80); unmeasured either way. Fires only where last split - split 1 < GATE_FIRST_M: at 500 m none of the
+                           -- 12 raced layouts (shortest Portland l1, ~650 m); at 1000-1500 m Portland, Mosport DDT, Brands GP (2026-09-26)
 R.GATE_WALK_V2 = false     -- false = 0.14.5. true: a gate-first drop starts its walk back for a straight at (margin + this car's 0-45 m
                            -- stagger), so the straightness test and the stop-at-the-line guard judge the real landing spot; 0.14.5 walks
-                           -- from the margin and subtracts the stagger afterwards, unchecked: it can land in a corner exit (review 2026-09-26)
+                           -- from the margin and subtracts the stagger afterwards, unchecked: it can land in a corner exit (review 2026-09-26).
+                           -- Cost: cars whose staggered start is in a bend all stop at the first straight sample behind it, so their 45 m
+                           -- spread shrinks to under one 0.004 step (18 m at 4.5 km, inside DROP_NEAR): A/B it on stacked gate drops too
 local GATE_MARGIN = 0.006  -- how far before the split to drop (~25 m on a 4 km track): the car must CROSS it
 local GATE_BACK_MAX = 0.03 -- ...looking up to this far before it for a STRAIGHT bit of road (a fixed mid-corner drop
                            -- point wrecked the 2026-09-14 19:59 race: 41 drops, 38 incidents, all landing on one spot)
@@ -250,7 +256,7 @@ local gateStage = {}       -- twostep: cars parked before the split, waiting for
 local function gateSafe(sim, progress, i)
     -- (sim.lapSplits is a C array: 0-based, `#` gives the count; it is NOT a Lua table -- a type() check skipped it
     -- and the 2026-09-14 19:26 verification race gated nothing)
-    local lastGate, firstGate, secondGate, line0 = 0, 1, 1, false
+    local lastGate, firstGate, line0 = 0, 1, false
     pcall(function()
         local splits = sim.lapSplits
         local n = #splits
@@ -259,7 +265,7 @@ local function gateSafe(sim, progress, i)
             local s = splits[k]
             if type(s) == 'number' and s > 0.02 and s < 0.98 then
                 if s > lastGate then lastGate = s end
-                if s < firstGate then secondGate = firstGate; firstGate = s elseif s > firstGate and s < secondGate then secondGate = s end
+                if s < firstGate then firstGate = s end
             end
         end
     end)
@@ -267,7 +273,7 @@ local function gateSafe(sim, progress, i)
     local gfm = tonumber(R.GATE_FIRST_M) or 0
     if gfm > 0 and line0 and firstGate < lastGate then   -- (see R.GATE_FIRST_M) the target is split 1, and only when it is near
         if progress < firstGate - GATE_MARGIN * 0.5 or (progress - firstGate) * trackLen > gfm then return progress, false end
-        if progress >= secondGate then return progress, false end   -- past split 2: never back to split 1 (a big GATE_FIRST_M, a short sector 2)
+        if R.GATE_FIRST_CAP and progress >= lastGate then return progress, false end   -- (R.GATE_FIRST_CAP) a last-sector landing stays put
         lastGate = firstGate; first = true
     end
     if lastGate <= 0 or progress < lastGate - GATE_MARGIN * 0.5 then return progress, false end   -- a split still ahead: fine
