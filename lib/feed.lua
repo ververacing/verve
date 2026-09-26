@@ -21,6 +21,7 @@ local BATTLE_HOLD   = 3        -- ...for this many snapshots
 local STUCK_S       = 8.0      -- stationary off the line this long = stuck (and a yellow if on the road)
 local INCIDENT_MIN  = 8        -- km/h of new body damage that counts as an incident
 local Contacts = require('lib.contacts')
+local Classes = require('lib.classes')    -- the header's per-car class (the classifier the app and the reports use)
 local feedEvSeen = {}       -- per car: last collision event id already reported
 
 local file, buf, started = nil, {}, false
@@ -76,7 +77,8 @@ local function newFile(sim)
             local model, name = '', ''
             pcall(function() model = ac.getCarID(i) or '' end)
             pcall(function() name = ac.getDriverName(i) or '' end)
-            cars[#cars + 1] = string.format('{"i":%d,"model":"%s","driver":"%s","player":%s}', i, esc(model), esc(name), tostring(i == 0))
+            local cls = ''; pcall(function() cls = Classes.keyOf(i) or '' end)
+            cars[#cars + 1] = string.format('{"i":%d,"model":"%s","class":"%s","driver":"%s","player":%s}', i, esc(model), esc(cls), esc(name), tostring(i == 0))
         end
     end
     local amb, road, laps = 0, 0, 0
