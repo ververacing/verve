@@ -182,7 +182,7 @@ def status():
 # Both are pinned before every harness race so a race that turns out to be worth cutting is always recordable.
 REPLAY = os.path.join(CFG, "replay.ini")
 REPLAY_PINS = {"QUALITY": {"LEVEL": "3"},            # ~30 Hz: smooth enough to cut, half the size of 60
-               "REPLAY": {"MAX_SIZE_MB": "600"},     # a 25-minute 24-car race fits; raised from AC's 26 long ago
+               "REPLAY": {"MAX_SIZE_MB": "1200"},    # a ~50-minute 20-car race fits (broadcast weekend 2026-09-26); was 600
                "AUTOSAVE": {"ENABLED": "1", "RACE": "2", "MIN_TIME_SECONDS": "30"}}
 
 
@@ -197,7 +197,7 @@ def pin_replay():
         return ""
     with open(REPLAY, "w", encoding="utf-8") as f:
         f.write(chr(10).join(lines) + chr(10))
-    return "replay recording pinned (30 Hz, 600 MB buffer, autosave on)"
+    return "replay recording pinned (30 Hz, 1200 MB buffer, autosave on)"
 
 
 def main():

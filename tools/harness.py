@@ -107,6 +107,22 @@ FIRST_NAMES = ["Alex", "Sam", "Jo", "Chris", "Dana", "Robin", "Kim", "Lee", "Max
 LAST_NAMES = ["Vermeer", "Okafor", "Lindqvist", "Moreau", "Tanaka", "Silva", "Novak", "Haddad", "Bauer", "Rossi", "Kowalski", "Dubois", "Ferreira", "Nilsen", "Costa", "Ahmed", "Weber"]
 
 
+SKIN_MATCH = None   # --skin-match REGEX: cycle per slot through the model's skins whose folder name matches (liveries by name)
+
+
+def pick_skin(model, slot):
+    """The skin for a grid slot: with --skin-match, the slot-th matching skin (cycled), so a one-model grid is not 20
+    identical cars (broadcast 2026-09-26: fictional liveries only - replica skins are excluded by the pattern); else first."""
+    if not SKIN_MATCH:
+        return first_skin(model)
+    d = os.path.join(AC_DIR, "content", "cars", model, "skins")
+    try:
+        skins = sorted(x for x in os.listdir(d) if os.path.isdir(os.path.join(d, x)) and re.search(SKIN_MATCH, x))
+    except OSError:
+        skins = []
+    return skins[slot % len(skins)] if skins else first_skin(model)
+
+
 def first_skin(model):
     d = os.path.join(AC_DIR, "content", "cars", model, "skins")
     try:
@@ -134,7 +150,7 @@ def grid_from_models(models, count, seed=0):
         m = expanded[n] if pinned and n < len(expanded) else expanded[n % len(expanded)]
         cars.append({
             "MODEL": m, "MODEL_CONFIG": "", "AI_LEVEL": str(rnd.randint(95, 102)), "AI_AGGRESSION": "0",
-            "SKIN": first_skin(m), "DRIVER_NAME": f"{FIRST_NAMES[n % len(FIRST_NAMES)]} {LAST_NAMES[(n * 7) % len(LAST_NAMES)]}",
+            "SKIN": pick_skin(m, n + 1), "DRIVER_NAME": f"{FIRST_NAMES[n % len(FIRST_NAMES)]} {LAST_NAMES[(n * 7) % len(LAST_NAMES)]}",
             "NATIONALITY": "", "NATION_CODE": "",
         })
     return cars
@@ -246,8 +262,8 @@ def build_race_ini(args, base_path):
         if args.player_model:
             ini.set("CAR_0", "MODEL", "-")
             ini.set("RACE", "MODEL", args.player_model)
-            ini.set("RACE", "SKIN", first_skin(args.player_model))
-            ini.set("CAR_0", "SKIN", first_skin(args.player_model))
+            ini.set("RACE", "SKIN", pick_skin(args.player_model, 0))
+            ini.set("CAR_0", "SKIN", pick_skin(args.player_model, 0))
     else:
         k = 1
         while grid_src.has_section(f"CAR_{k}"):
@@ -347,6 +363,27 @@ def parse_profiles(spec, ncars):
     return out
 
 
+PLAYER_NAME_FALLBACK = "Kai Weber"   # fictional, and not one the generic grid names produce
+
+
+def player_name(profiles_spec, ncars):
+    """CAR_0's DRIVER_NAME for a harness race. The base race.ini carries the owner's own player name, which then
+    reached the feed and diag headers and the replay (2026-09-26). Use the slot-0 profile's parody name when it has
+    one (lib/drivers.lua; archetypes like 'Midfielder' are not names), else a fictional name."""
+    prof = parse_profiles(profiles_spec, ncars) or {}
+    key = (prof.get("slots") or {}).get(0) or prof.get("all") or ""
+    if key:
+        try:
+            with open(os.path.join(VERVE, "lib", "drivers.lua"), encoding="utf-8") as f:
+                src = f.read()
+            m = re.search(r"key='" + re.escape(key) + r"',\s*name='([^']+)'[^}]*?bucket='([^']+)'", src)
+            if m and m.group(2) != "archetype":
+                return m.group(1)
+        except OSError:
+            pass
+    return PLAYER_NAME_FALLBACK
+
+
 def write_harness_lua(arm, ttl_s, ncars=0, laps=0, weekend=False):
     body = {
         "expires": int(time.time()) + ttl_s,
@@ -361,10 +398,11 @@ def write_harness_lua(arm, ttl_s, ncars=0, laps=0, weekend=False):
         # 0 of 8 on CSP 3465 too, so it is the track, not the build). An unflagged race accumulates an extra
         # lap of incidents, contacts and repositions, so every absolute number was over a distance nobody
         # chose. This makes the requested distance the distance actually raced, everywhere.
-        # NOT defaulted on a weekend: Verve compares the leader's lap count with no session check, and a
-        # 15-minute practice at Baku passes six laps easily, so a default stop would shut the run down
-        # before the race even started. An explicit --stop-laps still applies (the caller asked for it).
-        "stopAtLap": arm.get("stop_laps") or (0 if weekend else (laps or 0)),
+        # Weekends too (2026-09-26): the check sits inside Verve's Race-session gate and AC counts laps per
+        # session, so practice and qualifying laps never reach it. Measured: the Baku weekend with --stop-laps 25
+        # stopped at race lap 25 after 48 min, not at race lap ~17. Without it the first broadcast weekend ran on
+        # past the flag and lost its race replay when the harness budget killed AC.
+        "stopAtLap": arm.get("stop_laps") or (laps or 0),
         # raceFeed is a Verve setting (1-2 Hz feed in Documents/Assetto Corsa/verve_feed): the 8 s diag can't resolve who hit whom
         "settings": {"raceFeed": True, "shareData": True, **arm.get("settings", {})},   # shareData: exercises the opt-in report path; rows are flagged unattended
         "recovery": arm.get("recovery", {}),
@@ -757,6 +795,8 @@ def run_once(args, arm, run_idx):
         print('  ' + pinned)
     ini, ncars = build_race_ini(args, backup if args.grid is None else RACE_INI)
     force_ai_level(ini, getattr(args, "ai_level", 0))
+    if ini.has_section("CAR_0"):
+        ini.set("CAR_0", "DRIVER_NAME", player_name(arm.get("profiles"), ncars))   # never the owner's own name
     write_ini(ini, RACE_INI)
     eff_laps = min(args.laps, args.stop_laps) if getattr(args, "stop_laps", 0) else args.laps
     budget = eff_laps * args.lap_budget_s + 240
@@ -898,12 +938,15 @@ def run_once(args, arm, run_idx):
         rdir = os.path.join(DOCS, "replay", "temp")
         cands = [os.path.join(rdir, f) for f in os.listdir(rdir) if f.endswith(".acreplay") and os.path.getmtime(os.path.join(rdir, f)) >= t_launch]
         if cands:
-            newest = max(cands, key=os.path.getmtime)
             keep = REPLAY_DIR
             os.makedirs(keep, exist_ok=True)
-            dst = os.path.join(keep, f"{time.strftime('%Y%m%d_%H%M')}_{label}.acreplay")
-            shutil.copy2(newest, dst)
-            print(f"  replay kept: {os.path.basename(dst)} ({os.path.getsize(dst) / 1e6:.0f} MB)")
+            # a weekend writes one replay per session: keep them all, oldest first (_s1 practice, _s2 qualifying, ...)
+            ordered = sorted(cands, key=os.path.getmtime)
+            for n, src in enumerate(ordered, 1):
+                sfx = f"_s{n}" if len(ordered) > 1 else ""
+                dst = os.path.join(keep, f"{time.strftime('%Y%m%d_%H%M')}_{label}{sfx}.acreplay")
+                shutil.copy2(src, dst)
+                print(f"  replay kept: {os.path.basename(dst)} ({os.path.getsize(dst) / 1e6:.0f} MB)")
     except OSError as e:
         print("  (replay not kept:", e, ")")
     # keep AC's own log per run (log.txt is overwritten by the next launch; an early exit's cause was lost, 2026-09-21)
@@ -1001,6 +1044,7 @@ def main():
     ap.add_argument("--ambient", type=int); ap.add_argument("--road", type=int)
     ap.add_argument("--condition", action="append",
                     help="override a pinned race.ini value, e.g. --condition DYNAMIC_TRACK.SESSION_START=0 (repeatable)")
+    ap.add_argument("--skin-match", help="cycle per slot through the model's skins matching this regex, e.g. '^[0-9]+_pse_'")
     ap.add_argument("--keep-video", action="store_true",
                     help="do not swap AC's video settings to the lean harness profile for this run")
     ap.add_argument("--weather", help="CSP weather type by name (clear, clouds, overcast, fog, mist, drizzle, lightrain, rain, heavyrain, storm, hot, cold, windy) or number; Pure must be the weather controller")
@@ -1023,6 +1067,8 @@ def main():
     ap.add_argument("--lap-budget-s", type=int, default=150, help="seconds allowed per lap before a run is killed")
     ap.add_argument("--ai-level", type=int, default=0, help="force every AI car's AI_LEVEL (career events and --models grids alike); 0 = as configured")
     args = ap.parse_args()
+    global SKIN_MATCH
+    SKIN_MATCH = getattr(args, "skin_match", None)
     if not args.laps and not args.career:
         args.laps = 6
 
