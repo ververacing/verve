@@ -217,7 +217,7 @@ R.DROP_RATE_SUSP = 0.20    -- pending drops and bent-suspension crawlers as fail
 R.rateOK, R.rateN = 0, 0   -- the V2 tally (judged, undamaged at the drop)
 R.TEMP_WHEELS = { 0, 1, 2, 3 }   -- DEFAULT 0.14.4; tyre restore: a 4-list {FL,FR,RL,RR} of the wheel argument to use (false = WHEEL_BITS, which restores
                            -- 2 of 4 wheels - front-left always 12 C after a drop, 2026-09-25). Candidates {0,1,2,3}, {1,2,4,8}.
-R.SETTLE_S = 4.0           -- s after a reset (session change, restart, reload) when recovery does nothing: a new session's first frames
+R.SETTLE_S = 4.0           -- s after a reset (session change, restart) when recovery does nothing: a new session's first frames
                            -- still show the OLD session's cars (a weekend race opened at lap 4, 230 km/h), which read the parked grid as
                            -- stuck (21 grid 'crash repairs' per weekend session) and pinned lapsOf at the old lap (2026-09-26). 0 = off.
 R.settleUntil = 0
@@ -284,7 +284,7 @@ local function gateSafe(sim, progress, i)
         end)
         if straight then best = pr; break end
     end
-    if first and i then best = best - hash01(i * 17) * STAGGER_RANGE end   -- per-car 0-45 m further back: one spot for a knot stacks them
+    if first and i then best = (best - hash01(i * 17) * STAGGER_RANGE) % 1 end   -- per-car 0-45 m further back: one spot for a knot stacks them (wrapped: never before 0)
     return best, true
 end
 

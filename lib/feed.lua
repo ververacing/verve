@@ -26,6 +26,7 @@ local feedEvSeen = {}       -- per car: last collision event id already reported
 
 local file, buf, started = nil, {}, false
 local lastState, lastFlush = -1e9, -1e9
+local namesSent, namesT = '', 0   -- declared before F.reset so its reset reaches them (it used to set two globals)
 local t0 = 0
 local prev = {}                -- per-car last snapshot { lap, pos, dmg, pit, ret, spline, lat, spd, st, yl, bl, rec }
 local prevOrder = nil
@@ -95,11 +96,11 @@ function F.reset()
     prev = {}; prevOrder = nil; lapStart = {}; bestLap = {}; overallBest = nil
     stuckSince = {}; stuckReported = {}; battles = {}
     lastState = -1e9
+    lastFlush = -1e9   -- the new file's clock starts at 0: a stale value held a weekend race's writes for as long as the last session ran
     F.startSent = false
 end
 
 -- stats: the same table Verve passes to the diagnostics logger (rc = Racecraft.last, recState = Recovery.stateOf)
-local namesSent, namesT = '', 0
 -- the header is written at session start, before driver profiles rename the cars: re-emit the names when they settle
 local function namesEvent(sim, t)
     local parts = {}

@@ -649,7 +649,7 @@ function script.windowMain()
     ui.newLine()
     ui.separator()
     ui.textColored('Drivers (per grid slot)', rgbm(0.6, 0.6, 0.6, 1))
-    ui.textWrapped('Give any individual racer its own driver -- a real racer or a generic archetype -- and each grid slot is separate, so even a grid of identical cars can be all different drivers. Each gets that driver\'s pace, aggression and risk. Session-only, resets each race. Tip: pause on the grid with ESC to set up, or just hit Randomize.')
+    ui.textWrapped('Give any individual racer its own driver -- a real racer or a generic archetype -- and each grid slot is separate, so even a grid of identical cars can be all different drivers. Each gets that driver\'s pace, aggression and risk. Kept through a race weekend on the same grid; a new grid starts fresh. Tip: pause on the grid with ESC to set up, or just hit Randomize.')
     if Career.active then
         ui.textColored('Career event: driver profiles are off. The career difficulty curve sets the field (see Options).', rgbm(0.8, 0.7, 0.4, 1))
         ui.textColored(Difficulty.describe(), rgbm(0.6, 0.6, 0.6, 1))
