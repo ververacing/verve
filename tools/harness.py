@@ -804,7 +804,8 @@ def run_once(args, arm, run_idx):
         budget = args.minutes * 60 + 2 * args.lap_budget_s + 240      # the clock, the extra lap, the load
     # a weekend: the timed sessions, plus their loads (the terms were lost in a comment for one night, 2026-09-21)
     budget += 60 * (getattr(args, "practice", 0) + getattr(args, "quali", 0)) + (120 if (getattr(args, "practice", 0) or getattr(args, "quali", 0)) else 0)
-    write_harness_lua(arm, ttl_s=int(budget) + 120, ncars=ncars, laps=getattr(args, 'laps', 0) or 0,
+    # a TIMED race ends on the clock: --laps is only its fuel/budget estimate, so it is not a stop distance (review 0.14.5)
+    write_harness_lua(arm, ttl_s=int(budget) + 120, ncars=ncars, laps=0 if getattr(args, 'minutes', 0) else (getattr(args, 'laps', 0) or 0),
                       weekend=bool(getattr(args, 'practice', 0) or getattr(args, 'quali', 0)))
     label = arm.get("label", "A")
     print(f"[{label} #{run_idx}] {ini.get('RACE', 'TRACK')} x{args.laps} laps, {ncars} cars, budget {budget:.0f}s")
