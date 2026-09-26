@@ -6,8 +6,9 @@
 --     strategy ... race laps:0', 'setting fuel for 1 laps, with mult=1.200000'). A timed race has LAPS=0, so the whole
 --     field starts on 1.2 laps. [RACE] RACE_LAPS and VIRTUAL_LAPS play no part in it.
 --   * at an AI stop AC SETS the tank to (LAPS - completed + 1) x 1.2 x fuel per lap, which is 0 L in a timed race
---     ('Putting fuel for 0 laps, filled to 0.000000 L'). The car cannot leave, asks for another stop, and loops: 276
---     'AI RACE PITSTOP' lines in a 10-minute Spa race. Recovery's box-limbo rescue never fired on it (boxTryN 0).
+--     ('Putting fuel for 0 laps' on lap 1, '-1 laps' on lap 2, each 'filled to 0.000000 L'). The car cannot leave,
+--     asks for another stop, and loops: 276 'AI RACE PITSTOP' lines in a 10-minute Spa race. Recovery's box-limbo
+--     rescue never fired on it (boxTryN 0).
 --   * in a weekend AC applies the race load again as the race session begins, so one write is not enough.
 --
 -- What this does - only in an offline, non-replay RACE session that is TIMED, with fuel consumption on, and only to
@@ -18,13 +19,17 @@
 --      a 1-lap race, and a car still on that plan comes in after lap 1 whatever it carries. Fuel is never lowered.
 --   B. BOX GUARD: after that, an AI car stopped in the pit lane with less than the rest of the race + 1 lap in its
 --      tank gets it (capped at maxFuel), its laps-before-pitting set to what that covers and its pit request cleared,
---      so it drives out instead of looping. Repeated every F.BOX_GAP_S while AC keeps emptying it, for F.BOX_HOLD_S
---      of the visit at most; after that the car is recovery's (box limbo). Never a car Verve retired.
+--      so it drives out instead of looping. Once the clock is out a car still racing gets its last lap(s): a stop then
+--      (AC's damage-pit teleport, a tank maxFuel capped) is emptied the same way. Repeated every F.BOX_GAP_S while AC
+--      keeps emptying it, within F.BOX_HOLD_S of the car stopping or of AC last emptying its tank: every emptying is
+--      a new AC stop and opens a new window, since AC's repeated stops also keep resetting recovery's box-limbo timer
+--      (it never took over: boxTryN 0), so a window that closed for good would strand the car. Never a car Verve retired.
 -- The fast lap is the quickest of: the car's best lap in an earlier session of the weekend, its best lap in this
 -- race, and the track length at its class's F.SPEED - an error means more laps, so more fuel, never a dry tank.
 -- Fuel per lap is AC's own estimate (car.fuelPerLap); before AC has one, the load AC gave the car / 1.2 (AC's formula
 -- for a 0-lap race; capped at twice the class figure, since a practice-length load is not one lap's worth); with no
--- load either, F.LPKM for the class x F.LPKM_MARGIN.
+-- load either, F.LPKM for the class x F.LPKM_MARGIN. Car 0 always takes the class figure: AC's 1.2-lap race load is
+-- the AI's only, so the autopilot's tank still holds the launcher/setup load, which is not a lap's worth of anything.
 -- Cost: none with the switch off (Verve.lua does not call it); on, outside a timed race, one session check at 4 Hz.
 
 local Classes  = require('lib.classes')
@@ -37,7 +42,8 @@ F.TICK_S       = 0.25     -- work at 4 Hz, not every frame
 F.SLACK_L      = 1.0      -- write only when a tank is this far under its target (a held tank burns: no write per frame)
 F.STOP_KMH     = 2.0      -- "stopped" in the pit lane
 F.BOX_GAP_S    = 3.0      -- seconds between two top-ups of the same car (AC emptied it again)
-F.BOX_HOLD_S   = 60.0     -- stop topping a car up this long into its pit-lane visit (AC's stop takes ~20 s)
+F.BOX_HOLD_S   = 60.0     -- top-ups this long after a car stops or AC empties its tank again (AC's stop takes ~20 s)
+F.REEMPTY      = 0.5      -- a stopped car's tank below this share of the most it held since its window opened: AC emptied it
 F.MIN_LAP_S    = 20.0     -- floor on the lap estimate (a wrong track length cannot ask for a thousand laps)
 F.SPEED = { gt = 190, formula = 250, formula_jr = 210, prototype = 210, hypercar = 210, touring = 175, road = 165,
             nascar = 300, kart = 100 }   -- km/h: a FAST average lap per class (too fast = more laps = more fuel)
@@ -46,7 +52,8 @@ F.LPKM = { gt = 0.60, formula = 0.60, prototype = 0.65, hypercar = 0.65, touring
            kart = 0.15 }                 -- litres per km, only when AC has no estimate and no load to read
 F.LPKM_DEFAULT = 0.60
 F.LPKM_MARGIN  = 1.15
-F.loadN, F.boxFixN = 0, 0 -- session tallies for the diagnostics (fuelLoadN: green-load writes; fuelBoxN: pit visits fixed)
+F.loadN, F.boxFixN, F.boxReN = 0, 0, 0   -- session tallies for the diagnostics (fuelLoadN: green-load writes; fuelBoxN:
+                                         -- pit visits fixed; fuelReN: AC emptied a tank again after a top-up, same visit)
 F.active = false          -- this session is one the switch acts in
 
 local st = {}             -- per-session state (F.reset)
@@ -54,7 +61,7 @@ local st = {}             -- per-session state (F.reset)
 function F.reset()
     st = { now = 0, tick = 0, sawPre = false, greenT = nil, doneA = false, fpl = {}, prevBest = nil, visit = {},
            fuelOnT = -1e9, fuelOn = true, lo = nil, hi = nil, laps = 0 }
-    F.loadN, F.boxFixN, F.active = 0, 0, false
+    F.loadN, F.boxFixN, F.boxReN, F.active = 0, 0, 0, false
 end
 F.reset()
 
@@ -126,7 +133,7 @@ local function fplOf(i, car, trackM)                 -- litres per lap
     if st.fpl[i] then return st.fpl[i] end           -- first reading kept: our own top-ups must not feed back into it
     local cls = (F.LPKM[Classes.keyOf(i)] or F.LPKM_DEFAULT) * F.LPKM_MARGIN * trackM / 1000
     local loaded = car.fuel or 0
-    f = loaded > 0 and math.min(loaded / F.MULT, 2 * cls) or cls
+    f = (loaded > 0 and i ~= 0) and math.min(loaded / F.MULT, 2 * cls) or cls   -- (car 0: never AC's race load)
     st.fpl[i] = f
     return f
 end
@@ -169,24 +176,29 @@ local function boxGuard(sim, ss, trackM)
     local dur = (ss.durationMinutes or 0) * 60
     local left = (sim.sessionTimeLeft or 0) / 1000
     if left <= 0 or left > dur + 120 then left = dur - (st.greenT or 0) end
-    if left <= 0 then return end                     -- the clock is out: stops now are the end of the race
+    if left < 0 then left = 0 end                    -- the clock is out: a car still racing needs its last lap(s) (+extra, +1)
     local extra = ss.hasAdditionalLap and 1 or 0
     for i = 0, sim.carsCount - 1 do
         local car = ac.getCar(i)
         if car and car.isInPitlane then
             if (car.speedKmh or 0) < F.STOP_KMH and eligible(car) and not car.isRaceFinished and not car.isRetired then
                 local v = st.visit[i]
-                if not v then v = { t0 = st.now, last = -1e9, fixed = false }; st.visit[i] = v end
+                local fuel = car.fuel or 0
+                if not v then v = { t0 = st.now, last = -1e9, fixed = false, hi = fuel }; st.visit[i] = v end
+                if fuel > v.hi then v.hi = fuel end
+                if v.hi > F.SLACK_L and fuel < F.REEMPTY * v.hi then  -- AC's stop emptied it (a parked car burns nothing):
+                    v.t0 = st.now; v.hi = fuel                        -- a new stop, a new window
+                    if v.fixed then F.boxReN = F.boxReN + 1 end       -- (again, after a top-up: the loop)
+                end
                 local fpl = fplOf(i, car, trackM)
                 local laps = math.ceil(left / lapEst(i, car, trackM)) + extra
                 local target = tankFor(car, laps, fpl)
-                local fuel = car.fuel or 0
                 if fuel + F.SLACK_L < target and st.now - v.t0 < F.BOX_HOLD_S and st.now - v.last >= F.BOX_GAP_S then
                     local rs = Recovery.stateOf(i)
                     if not (rs and rs.parked) then
                         v.last = st.now
                         local want = lapsCovered(target, fpl, laps + 1)
-                        pcall(physics.setCarFuel, i, target)
+                        if pcall(physics.setCarFuel, i, target) and target > v.hi then v.hi = target end
                         pcall(physics.setAILapsToComplete, i, want)
                         pcall(physics.setAIPitStopRequest, i, false)   -- (else it asks for the next stop from its box)
                         if not v.fixed then

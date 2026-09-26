@@ -518,30 +518,48 @@ def best_laps_from_race_out(t_launch):
     return best
 
 
+AC_LOG_CUT = "<Limit exceeded, truncating the rest>"   # AC's last line once log.txt reaches ~10k lines
+
+
 def ac_log_fuel(path):
-    """AC's own view of the AI's fuel, from the run's kept log.txt (tools/harness_results/aclogs): the stops where AC
-    emptied a tank ('setting fuel for 0 laps': every AI stop in a timed race), the AI stops it began ('AI RACE PITSTOP';
-    a car looping in its box repeats it), and the race laps it fuelled the field for (the first 'race laps:N'; 0 in a
-    timed race = 1.2 laps of fuel). Empty strings when there is no log from this run."""
-    out = {"ai_zero_fuel_stops": "", "ai_pit_lines": "", "ai_race_laps": ""}
+    """AC's own view of the AI's race fuel, from the run's kept log.txt (tools/harness_results/aclogs), counted from the
+    race session's first 'Race strategy ... race laps:N' line on (practice and qualifying have none):
+      ai_zero_fuel_stops  AI stops where AC set the tank to 0 L: 'setting fuel for N laps' with N <= 0. A stop is filled
+                          for (LAPS - completed + 1) laps, so in a timed race (LAPS 0) every AI stop is one - '0 laps' on
+                          lap 1, '-1 laps' on lap 2 (255 of the 276 in the 10-minute Spa race) - and a lapped race has
+                          none. AC logs its fill before Verve's timedFuel box guard refills the tank, so with the switch
+                          on these still count: read them with ai_pit_lines.
+      ai_pit_lines        'AI RACE PITSTOP' lines: AI stops AC began; a car looping in its box repeats it
+      ai_race_laps        N of the first 'race laps:N' (0 in a timed race = a 1.2-lap load)
+      ai_log_truncated    1 when AC stopped writing the log (at ~10k lines): the counts are then lower bounds; 0 when whole
+    The three race columns are empty when the log never reached the race's strategy lines (cut off before the race, as
+    in many weekends and 24-car grids), so a cut-off log does not read as a clean race. All four are empty with no log
+    from this run."""
+    out = {"ai_zero_fuel_stops": "", "ai_pit_lines": "", "ai_race_laps": "", "ai_log_truncated": ""}
     if not path or not os.path.exists(path):
         return out
-    zero = pits = 0
+    zero = pits = cut = 0
     laps = None
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             for ln in f:
-                if "setting fuel for 0 laps" in ln:
-                    zero += 1
+                if AC_LOG_CUT in ln:
+                    cut = 1
+                if laps is None:
+                    mm = re.search(r"race laps:(-?\d+)", ln)     # (lower case: not the stop lines' "Race laps:0, completed:1")
+                    if not mm:
+                        continue
+                    laps = int(mm.group(1))
                 if "AI RACE PITSTOP" in ln:
                     pits += 1
-                if laps is None:
-                    mm = re.search(r"race laps:(\d+)", ln)       # (lower case: not the stop lines' "Race laps:0, completed:1")
-                    if mm:
-                        laps = int(mm.group(1))
+                mm = re.search(r"setting fuel for (-?\d+) laps", ln)
+                if mm and int(mm.group(1)) <= 0:
+                    zero += 1
     except OSError:
         return out
-    out.update(ai_zero_fuel_stops=zero, ai_pit_lines=pits, ai_race_laps=laps if laps is not None else "")
+    out["ai_log_truncated"] = cut
+    if laps is not None:
+        out.update(ai_zero_fuel_stops=zero, ai_pit_lines=pits, ai_race_laps=laps)
     return out
 
 
@@ -1042,11 +1060,20 @@ def run_once(args, arm, run_idx):
     m["weather"] = args.weather or ""
     m["ambient_c"] = args.ambient if args.ambient is not None else DEFAULT_AMBIENT
     m["road_c"] = args.road if args.road is not None else DEFAULT_ROAD
-    # AC's own fuel record (appended columns): tanks it emptied at a stop, AI stops it began, laps it fuelled the field for
+    # AC's own fuel record (appended columns): tanks it emptied at a stop, AI stops it began, laps it fuelled the field
+    # for, and whether its log was cut off (the counts are then lower bounds; no race line = no counts)
     m.update(ac_log_fuel(aclog))
+    atleast = "at least " if m["ai_log_truncated"] else ""
     if m["ai_zero_fuel_stops"]:
-        print(f"  !! AC emptied an AI tank at {m['ai_zero_fuel_stops']} pit stop(s), {m['ai_pit_lines']} AI pit-stop lines: "
-              "the timed-race fuel loop (Verve's timedFuel setting fixes it)")
+        if (arm.get("settings") or {}).get("timedFuel"):
+            print(f"  AC emptied an AI tank at {atleast}{m['ai_zero_fuel_stops']} stop(s), {m['ai_pit_lines']} AI pit-stop lines "
+                  "(timedFuel on: AC logs its fill before Verve refills the tank; fewer pit-stop lines = fewer loops, "
+                  "diag fuelBoxN / fuelReN)")
+        else:
+            print(f"  !! AC emptied an AI tank at {atleast}{m['ai_zero_fuel_stops']} pit stop(s), {m['ai_pit_lines']} AI pit-stop "
+                  "lines: the timed-race fuel loop (Verve's timedFuel setting fixes it)")
+    elif m["ai_log_truncated"] and m["ai_race_laps"] == "":
+        print("  (AC's log was cut off before the race: no AI fuel counts for this run)")
     csv_path = os.path.join(RESULTS_DIR, "results.csv")
     new = not os.path.exists(csv_path)
     if not new:   # the columns changed (2026-09-13: ai_level + exact lap times): rotate the old file rather than misalign rows
