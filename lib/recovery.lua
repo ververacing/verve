@@ -217,6 +217,9 @@ R.DROP_RATE_SUSP = 0.20    -- pending drops and bent-suspension crawlers as fail
 R.rateOK, R.rateN = 0, 0   -- the V2 tally (judged, undamaged at the drop)
 R.TEMP_WHEELS = false      -- tyre restore: a 4-list {FL,FR,RL,RR} of the wheel argument to use (false = WHEEL_BITS, which restores
                            -- 2 of 4 wheels - front-left always 12 C after a drop, 2026-09-25). Candidates {0,1,2,3}, {1,2,4,8}.
+R.DROP_SAFE_T = 0          -- s: no drop while a car behind would reach the spot within this at its speed (0 = DROP_BEHIND only)
+R.DROP_SAFE_HOLD = 8.0     -- s: how long a FORCED drop also waits for that gap before it goes regardless
+R.safeHold = {}            -- per car: when a forced drop started waiting for the gap
 R.DROP_API = 'car'         -- 'car' = physics.setCarPosition, 'ai' = physics.setAICarPosition (A/B 2026-09-14: same lap counting; 'car' rejoined cleaner)
 R.gateMoves = 0            -- drops moved back before the last timing split so AC counts the lap (see gateSafe)
 R.GATE_MODE = 'back'       -- 'back' = drop on a straight just before the last split; 'twostep' = touch down before the split for a
@@ -488,6 +491,8 @@ local function dropSafe(sim, i, prog)
                 local ag = math.abs(g)
                 if ag < DROP_NEAR then return false end                         -- someone right on the spot
                 if g < 0 and ag < DROP_BEHIND and (oc.speedKmh or 0) > DANGER_SPEED then return false end  -- fast car closing from behind
+                if R.DROP_SAFE_T > 0 and g < 0 and (oc.speedKmh or 0) > DANGER_SPEED and not oc.isInPitlane
+                   and ag * trackLen < (oc.speedKmh / 3.6) * R.DROP_SAFE_T then return false end   -- ...or within DROP_SAFE_T s at its speed
             end
         end
     end
@@ -500,6 +505,7 @@ end
 local function putBackOnLine(sim, i, progress, center, force, skipGate)
     if not center then return false end
     local reqProgress = progress     -- where the car got stuck (the gate moves the landing spot; the escape must see the corner)
+    local callerSkip = skipGate      -- the gate's second stage passes true (the same-spot escape sets skipGate itself below)
     -- same-spot escape: dropped here before (twice within DROP_SAME_M)? go DROP_SKIP_M further on, past whatever it cannot take
     local spots = dropSpots[i]
     if spots and #spots >= 2 then
@@ -528,6 +534,11 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
         end
     end
     if not force and not dropSafe(sim, i, progress) then gateStage[i] = nil; return false end
+    if force and R.DROP_SAFE_T > 0 and not callerSkip and not dropSafe(sim, i, progress) then   -- (not the gate's second stage)
+        R.safeHold[i] = R.safeHold[i] or os.clock()          -- a forced drop still waits for the gap, but only so long
+        if os.clock() - R.safeHold[i] < R.DROP_SAFE_HOLD then gateStage[i] = nil; return false end
+    end
+    R.safeHold[i] = nil
     if gated then R.gateMoves = R.gateMoves + 1 end     -- (counted once the drop actually goes ahead)
     -- forward direction from a CENTRED sample (a point behind -> a point ahead), which is far steadier
     -- than a tiny forward-only step and always points along the racing direction.
@@ -1260,7 +1271,7 @@ function R.suspLimp(i, car, spd, dt)
 end
 
 function R.reset()
-    R.boxRescued = {}; R.boxRescueN = 0; R.boxSeenN = 0; R.boxTryN = 0; R.boxOkN = 0
+    R.boxRescued = {}; R.boxRescueN = 0; R.boxSeenN = 0; R.boxTryN = 0; R.boxOkN = 0; R.safeHold = {}
     R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0; R.suspFixN = 0; R.suspFixCar = {}; R.suspOwe = {}
     R.pointToPoint = nil
     boxT = {}; boxFuel = {}
