@@ -351,16 +351,20 @@ K.YELLOW_LAT = 1.3   -- a stopped car this far from the centre line still counts
 -- Baku's flat-out kink (0.74, 255-270 km/h) cars ran into a damaged crawler or a just-repositioned car doing 30-90 km/h with
 -- no warning at all. With this on, a car ahead is ALSO a yellow when it is under YELLOW_SLOW x the speed ITS OWN bit of road
 -- is normally driven at: the typical-speed map (cv2.ys), one sample per car per ~20 m bin crossing, from lap 1 on, from every
--- moving car not in the pit lane, damaged, ramping after a reposition or finished; a bin reads as the slowest trusted one of
--- itself and its two neighbours, so a braking zone reads as its slow end. Judged against the road, not against me: a car
--- braking for a hairpin is at the hairpin's normal speed and never counts (the lap-0 OL_SPINYELLOW test, 'far slower than
--- me', would fire behind every one). What follows detection is the stopped-car cap, unchanged (a crawler at its speed + 40).
+-- moving car not in the pit lane, finished, damaged, yielding, driven by recovery or in the rejoin ramp; a bin reads as the
+-- slowest trusted one of itself and its two neighbours, so a braking zone reads as its slow end. Judged against the road,
+-- not against me: a car braking for a hairpin is at the hairpin's normal speed and never counts (the lap-0 OL_SPINYELLOW
+-- test, 'far slower than me', would fire behind every one). It counts only IN THE WAY: within CV.YS_LANE of the racing
+-- line where it is, or of me (a car braking on the edge for the pit entry, or pulled aside, is passed). Each slow car gets
+-- the stopped-car cap (a crawler passed at its speed + 40) on its own, and the tighter of that and the stopped-car yellow
+-- applies: a slow car queueing in front of a wreck must never hide the wreck and lift the cap.
 R.YELLOW_SLOW = 0             -- fraction of the road's typical speed, 0 = off (no map, nothing changes); 0.35 = a car under 35% of it is a yellow (Baku kink 2026-09-26)
 CV.YS_M = 20.0                -- m per bin of the typical-speed map (bin count = track length / this, 50..1000)
 CV.YS_MIN = 10                -- crossings before a bin is trusted (a running mean until then); 10+ cars trust the lap during lap 1
 CV.YS_UP = 0.20; CV.YS_DN = 0.05   -- EMA rates once trusted: quick up, slow down, so cars slowed through a yellow zone do not teach the map the zone is slow
 CV.YS_REJ = 0.5               -- a crossing under this fraction of a trusted bin is not learned (the crawler, the queue behind it); fixed, so every YELLOW_SLOW reads the same map
-R.yellowSlowN = 0             -- diag: pair-frames a car ahead read as a slow-car yellow (session line yellowSlowN)
+CV.YS_LANE = 0.45             -- track half-widths (latOf units): a slow car this close to the racing line at its spot, or to me, is in the way (K.ALONGSIDE_LAT's overlap) (2026-09-26)
+R.yellowSlowN = 0             -- diag: pair-frames a slow car in the way capped a car behind it (session line yellowSlowN)
 
 -- TRACK-LENGTH SCALING: every gap above is a spline FRACTION, and the tuning was done on ~4.5 km circuits.
 -- A fraction is a different distance on every track (0.008 is 36 m at Zandvoort, 160 m at the
@@ -535,6 +539,7 @@ function R.evaluate(i, dt)
         local myPace = me.bestLapTimeMs                     -- (0 until the car has set a lap)
         if type(myPace) ~= 'number' or myPace <= 0 then myPace = nil end
         local yellowD, yellowSpd = 1e9, 0                   -- nearest STOPPED car on the road ahead (yellow flag)
+        local ysCap = 1e9                                   -- R.YELLOW_SLOW: the tightest cap any slow car in the way asks for (1e9 = none)
         local lappedAhead = false                           -- the car ahead is a lap down and letting me through
         local yellowRange = K.YELLOW_FAR / trackLen
         local sideBy = false                                -- lap 0: a car alongside with its nose just ahead of mine
@@ -571,7 +576,8 @@ function R.evaluate(i, dt)
                             end
                         end
                     end
-                    -- SLOW-CAR YELLOW (R.YELLOW_SLOW): far under the speed its own bit of road is normally driven at (cv2.ys, beginFrame)
+                    -- SLOW-CAR YELLOW (R.YELLOW_SLOW): far under the speed its own bit of road is normally driven at (cv2.ys, beginFrame).
+                    -- Capped on its own (ysCap), never as the nearest hazard: in front of a wreck it would hide the wreck and lift the cap.
                     if not hazard and cv2.ys and d > 0 and d < yellowRange and math.abs(ocLat) < K.YELLOW_LAT and not oc.isInPitlane then   -- (cv2.ys exists only while the switch is on)
                         local ys = cv2.ys
                         local nb = ys.nb
@@ -582,7 +588,19 @@ function R.evaluate(i, dt)
                             if (ys.n[o2] or 0) >= CV.YS_MIN and ys.v[o2] < tv then tv = ys.v[o2] end
                             o2 = (ob + 1) % nb
                             if (ys.n[o2] or 0) >= CV.YS_MIN and ys.v[o2] < tv then tv = ys.v[o2] end
-                            if ocSpd < R.YELLOW_SLOW * tv then hazard = true; R.yellowSlowN = (R.yellowSlowN or 0) + 1 end
+                            if ocSpd < R.YELLOW_SLOW * tv then
+                                -- in the way: near the racing line at its spot, or near me (a car braking on the edge for the pit entry is not)
+                                local lnLat = ocLat
+                                local okL, lp = pcall(ac.trackProgressToWorldCoordinate, oc.splinePosition, false)
+                                if okL and lp then lnLat = latOf(lp) end
+                                if math.abs(ocLat - lnLat) < CV.YS_LANE or math.abs(ocLat - (latNow[i] or 0)) < CV.YS_LANE then
+                                    local dm = d * trackLen                        -- the stopped-car cap below, for this car
+                                    local yc = K.YELLOW_CAP + (K.YELLOW_CAP_FAR - K.YELLOW_CAP) * clamp((dm - K.YELLOW_NEAR) / (K.YELLOW_FAR - K.YELLOW_NEAR), 0, 1)
+                                    if ocSpd > 15 then yc = math.max(yc, ocSpd + 40) end
+                                    if yc < ysCap then ysCap = yc end
+                                    R.yellowSlowN = (R.yellowSlowN or 0) + 1
+                                end
+                            end
                         end
                     end
                     if d > 0 and d < yellowRange and hazard and math.abs(ocLat) < K.YELLOW_LAT and d < yellowD then
@@ -649,6 +667,7 @@ function R.evaluate(i, dt)
             -- not matched: two repositioned cars capping each other crawled at 50 km/h for 30 s (Silverstone)
             if yellowSpd > 15 then cap = math.max(cap, yellowSpd + 40) end
         end
+        if ysCap < cap then cap = ysCap end                 -- SLOW-CAR YELLOW: only ever tighter than the stopped-car cap (1e9 while off)
         if R.CONVOY_ON and myLap == 0 and olS < CV.END and aheadIdx >= 0 and gapA < CV.GAP and crowd >= 1 then
             local aCar = ac.getCar(aheadIdx)
             if aCar and math.abs(latOf(aCar.position) - latOf(me.position)) < CV.LAT then
@@ -1431,11 +1450,14 @@ function R.beginFrame()
                     ys.b[j] = b
                     local v = c.speedKmh or 0
                     if v > K.SPEED_MIN and not c.isInPitlane and not c.isRaceFinished and Recovery.lapsOf(j) >= 1
-                       and Recovery.rampCap(j) >= 1e9 and Recovery.damageOf(j) < K.DAMAGE_YIELD then
-                        local n, tv = (ys.n[b] or 0) + 1, ys.v[b] or v
-                        if n <= CV.YS_MIN or v >= tv * CV.YS_REJ then       -- (trusted: a crossing far under it is not learned)
-                            ys.n[b] = n
-                            ys.v[b] = tv + (v - tv) * ((n <= CV.YS_MIN) and 1 / n or (v > tv and CV.YS_UP or CV.YS_DN))
+                       and Recovery.damageOf(j) < K.DAMAGE_YIELD and not (R.last[j] and R.last[j].yield) then
+                        local st = Recovery.stateOf(j) or {}                  -- (a table per crossing, only for a car that passed the rest)
+                        if not st.rec and (st.ramp or 1) >= 1 then           -- not driven by recovery, not in the rejoin ramp (rampCap reads 1e9 even then)
+                            local n, tv = (ys.n[b] or 0) + 1, ys.v[b] or v
+                            if n <= CV.YS_MIN or v >= tv * CV.YS_REJ then   -- (trusted: a crossing far under it is not learned)
+                                ys.n[b] = n
+                                ys.v[b] = tv + (v - tv) * ((n <= CV.YS_MIN) and 1 / n or (v > tv and CV.YS_UP or CV.YS_DN))
+                            end
                         end
                     end
                 end
