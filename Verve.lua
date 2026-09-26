@@ -655,7 +655,7 @@ function script.windowMain()
         ui.textColored(Difficulty.describe(), rgbm(0.6, 0.6, 0.6, 1))
     else
         if ui.button('Randomize driver grid') then Drivers.randomizeGrid() end
-        if ui.itemHovered() then ui.setTooltip('Assign every AI car a unique driver from its class (overflow uses the Rookie / Midfielder / Veteran archetypes). Session-only, resets each race.') end
+        if ui.itemHovered() then ui.setTooltip('Assign every AI car a unique driver from its class (overflow uses the Rookie / Midfielder / Veteran archetypes). Kept through a race weekend on the same grid (practice, qualifying, race); a different grid starts fresh.') end
         ui.sameLine()
         if ui.button('Clear drivers') then Drivers.clearAll() end
         driverGridList()
