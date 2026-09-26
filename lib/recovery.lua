@@ -1195,15 +1195,39 @@ R.boxTryN = 0              -- rescues attempted
 R.boxOkN = 0               -- rescues that returned success
 R.boxRescueN = 0           -- session tally (diagnostics)
 R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0
+R.SUSP_FIX = 0             -- >0: a car crawling on suspension damage >= this for SUSP_FIX_T s is REPAIRED where it is (all
+R.SUSP_FIX_T = 15.0        -- damage; its own fuel and tyre temperatures kept) and asked to pit. Owner's idea, 2026-09-25: Baku
+R.suspFixN = 0             -- cars at 0.30-0.49 ran at a median 30 km/h for the rest of the race. 0 = off.
 function R.suspLimp(i, car, spd, dt)
-    if R.SUSP_LIMP <= 0 or parked[i] then return end
+    if (R.SUSP_LIMP <= 0 and R.SUSP_FIX <= 0) or parked[i] then return end
     if car.isInPitlane then R.suspT[i] = 0; return end
-    if maxSusp(car) >= R.SUSP_LIMP and spd > STOP_SPEED and spd < R.SUSP_LIMP_SPD then
+    local thr = (R.SUSP_FIX > 0) and R.SUSP_FIX or R.SUSP_LIMP
+    if maxSusp(car) >= thr and spd > STOP_SPEED and spd < R.SUSP_LIMP_SPD then
         R.suspT[i] = (R.suspT[i] or 0) + dt
     elseif spd >= R.SUSP_LIMP_SPD + 20 then
         R.suspT[i] = 0
     end
     local t = R.suspT[i] or 0
+    if R.SUSP_FIX > 0 then                                  -- repair on track (no teleport), then the pit request
+        if t > R.SUSP_FIX_T then
+            R.suspT[i] = 0
+            local fuel, temps, sus = nil, {}, maxSusp(car)
+            pcall(function()
+                fuel = car.fuel
+                for k = 0, 3 do local w = car.wheels and car.wheels[k]; local tc = w and (w.tyreCoreTemperature or w.tyreTemperature); if type(tc) == 'number' and tc > 0 then temps[k] = tc end end
+            end)
+            if pcall(physics.resetCarState, i, 1.0) then
+                if type(fuel) == 'number' and fuel > 0 then pcall(physics.setCarFuel, i, fuel) end   -- resetCarState refuels: keep its own
+                if next(temps) ~= nil then applyTemps(i, temps); pendingTemps[i] = { temps = temps, untilT = os.clock() + TEMP_HOLD } end
+                pcall(function() physics.setAIStopCounter(i, 0) end)
+                repairBody(i, car)                              -- the body baseline: damage since this repair
+                pcall(physics.setAIPitStopRequest, i, true)     -- where the AI can pit, that stop is the time it pays
+                R.suspFixN = R.suspFixN + 1
+                pcall(function() ac.log(string.format('Verve: car %d suspension %.2f, crawling %.0f s: repaired on track, asked to pit', i, sus, t)) end)
+            end
+        end
+        return
+    end
     if not R.suspPit[i] and t > R.SUSP_LIMP_T then
         R.suspPit[i] = os.clock(); R.suspPitCount = (R.suspPitCount or 0) + 1
         pcall(physics.setAIPitStopRequest, i, true)
@@ -1216,7 +1240,7 @@ end
 
 function R.reset()
     R.boxRescued = {}; R.boxRescueN = 0; R.boxSeenN = 0; R.boxTryN = 0; R.boxOkN = 0
-    R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0
+    R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0; R.suspFixN = 0
     R.pointToPoint = nil
     boxT = {}; boxFuel = {}
     ownLaps, ownSpline = {}, {}
