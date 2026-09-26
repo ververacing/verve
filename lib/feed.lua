@@ -93,6 +93,7 @@ function F.reset()
     prev = {}; prevOrder = nil; lapStart = {}; bestLap = {}; overallBest = nil
     stuckSince = {}; stuckReported = {}; battles = {}
     lastState = -1e9
+    F.startSent = false
 end
 
 -- stats: the same table Verve passes to the diagnostics logger (rc = Racecraft.last, recState = Recovery.stateOf)
@@ -117,6 +118,7 @@ function F.update(dt, stats)
         if t - lastFlush > 5 then lastFlush = t; flush() end
         return
     end
+    if t < 3.0 then return end   -- a new session's first frames still show the old session's cars (weekend race, 2026-09-26)
     lastState = t
     stats = stats or {}
     if t - namesT >= 5 then namesT = t; pcall(namesEvent, sim, t) end   -- every 5 s, written only when a name changed
@@ -144,9 +146,11 @@ function F.update(dt, stats)
     end
     table.sort(running, function(a, b) return a.pos < b.pos end)
 
-    -- race start
-    if not prevOrder and #running > 0 then
-        for _, c in ipairs(running) do if c.spd > 30 then event(t, 'race_start'); break end end
+    -- race start: the first race-session car moving, leader on lap 0-1 (the old test, 'no previous order', only ever fired
+    -- from a weekend's stale first frames, and never in a plain race)
+    if not F.startSent and #running > 0 and running[1].lap <= 1 then   -- <= 1: a grid before the line can cross it first
+        local isRace = false; pcall(function() isRace = sim.raceSessionType == ac.SessionType.Race end)
+        if isRace then for _, c in ipairs(running) do if c.spd > 30 then event(t, 'race_start'); F.startSent = true; break end end end
     end
 
     -- state snapshot with time gaps

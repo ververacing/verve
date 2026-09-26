@@ -217,6 +217,10 @@ R.DROP_RATE_SUSP = 0.20    -- pending drops and bent-suspension crawlers as fail
 R.rateOK, R.rateN = 0, 0   -- the V2 tally (judged, undamaged at the drop)
 R.TEMP_WHEELS = { 0, 1, 2, 3 }   -- DEFAULT 0.14.4; tyre restore: a 4-list {FL,FR,RL,RR} of the wheel argument to use (false = WHEEL_BITS, which restores
                            -- 2 of 4 wheels - front-left always 12 C after a drop, 2026-09-25). Candidates {0,1,2,3}, {1,2,4,8}.
+R.SETTLE_S = 4.0           -- s after a reset (session change, restart, reload) when recovery does nothing: a new session's first frames
+                           -- still show the OLD session's cars (a weekend race opened at lap 4, 230 km/h), which read the parked grid as
+                           -- stuck (21 grid 'crash repairs' per weekend session) and pinned lapsOf at the old lap (2026-09-26). 0 = off.
+R.settleUntil = 0
 R.DROP_SAFE_T = 4.0        -- DEFAULT 0.14.4; s: no drop while a car behind would reach the spot within this at its speed (0 = DROP_BEHIND only)
 R.DROP_SAFE_HOLD = 8.0     -- s: how long a FORCED drop also waits for that gap before it goes regardless
 R.safeHold = {}            -- per car: when a forced drop started waiting for the gap
@@ -646,6 +650,7 @@ function R.update(dt)
     if not R.ENABLED then R.count = 0; return end
     local ok, sim = pcall(ac.getSim)
     if not ok or not sim then return end
+    if os.clock() < R.settleUntil then R.count = 0; return end   -- a new session's first frames are the old one's (R.SETTLE_S)
     local active = 0
     if not scaled then scaled = true; pcall(function() scaleToTrack(sim.trackLengthM) end) end   -- per-track distances (self-heals after a hot-reload)
     if #drops > 0 then pcall(judgeDrops, os.clock()) end
@@ -1285,6 +1290,7 @@ function R.suspLimp(i, car, spd, dt)
 end
 
 function R.reset()
+    R.settleUntil = os.clock() + R.SETTLE_S     -- see R.SETTLE_S: the next frames are still the old session's
     R.boxRescued = {}; R.boxRescueN = 0; R.boxSeenN = 0; R.boxTryN = 0; R.boxOkN = 0; R.safeHold = {}
     R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0; R.suspFixN = 0; R.suspFixCar = {}; R.suspOwe = {}
     R.pointToPoint = nil
@@ -1345,7 +1351,7 @@ end
 -- per-car recovery state for the diagnostics log (never used for decisions)
 function R.stateOf(i)
     return {
-        rec = (recT[i] or 0) > 0, recT = recT[i] or 0, repairN = repairN[i] or 0,
+        rec = (recT[i] or 0) > 0, recT = recT[i] or 0, repairN = repairN[i] or 0, laps = R.lapsOf(i),
         rescued = rescued[i] == true, handedBack = handedBack[i] == true, limpDone = limpDone[i] == true,
         parked = parked[i] == true, dmgBase = dmgBase[i] or 0, episodeT = episodeT[i] or 0,
         rescueN = rescueN[i] or 0, ramp = rampLimit(i), dropFailed = dropFailed[i] == true,
