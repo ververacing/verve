@@ -105,6 +105,8 @@ local function gridSignature()
     end)
     return ok and sig or nil
 end
+weekendSig = gridSignature()   -- seed: CSP never fires onSessionStart for the session running when Lua loads, so without this
+                               -- the practice grid was wiped at practice -> qualifying (0.14.4 release review)
 local function sessionReset(restart)
     pcall(function() local okS, simR = pcall(ac.getSim); if okS and simR then Telemetry.abort(restart and 'restart' or 'session change', simR, telemetryCtx()) end end)
     pcall(Career.reset)

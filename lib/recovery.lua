@@ -327,7 +327,7 @@ local function judgeDrops(now)
     if R.DROP_RATE_V2 then poor = R.rateN >= DROP_TRIAL and (R.rateOK / R.rateN) < DROP_MIN_RATE end
     if not R.dropsOff and poor then
         R.dropsOff = true
-        pcall(function() ac.log(string.format('Verve: repositioning off for this session (%d of %d rejoined)', R.dropOK, R.dropN)) end)
+        pcall(function() ac.log(string.format('Verve: repositioning off for this session (%d of %d rejoined)', R.DROP_RATE_V2 and R.rateOK or R.dropOK, R.DROP_RATE_V2 and R.rateN or R.dropN)) end)
     end
 end
 function R.recentDrops() return drops end   -- (diagnostics)
@@ -600,6 +600,8 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
         physics.setAIStopCounter(i, 0)               -- a teleport can re-trigger the AI's post-incident "brake and wait"
         pcall(physics.setAINoInput, i, false, false) -- and make sure the AI's input isn't in its "parked" state after the move
     end)
+    local pt0 = pendingTemps[i]   -- dropped again inside the hold: the wheels now read the first teleport's 12 C reset
+    if pt0 and os.clock() < pt0.untilT then temps = pt0.temps end
     if okp and next(temps) ~= nil then
         applyTemps(i, temps)
         pendingTemps[i] = { temps = temps, untilT = os.clock() + TEMP_HOLD }

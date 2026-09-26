@@ -743,6 +743,8 @@ function R.evaluate(i, dt)
                     local pb = math.min(cv2.pace[(sb + 99) % 100] or 1e9, cv2.pace[sb] or 1e9, cv2.pace[(sb + 1) % 100] or 1e9)
                     if pb < 1e9 and pb > CV.CRAWL_PACE_MIN and slowSpd < pb * R.CRAWL_PASS then
                         cv2.slowSince[slowIdx] = cv2.slowSince[slowIdx] or os.clock()   -- first observer stamps it
+                    elseif pb < 1e9 and slowSpd >= pb * R.CRAWL_PASS then
+                        cv2.slowSince[slowIdx] = nil   -- seen back at pace: the only clear a human-driven car gets (R.evaluate skips it)
                     end
                     if pb < 1e9 and pb > CV.CRAWL_PACE_MIN and slowSpd < pb * R.CRAWL_PASS
                        and os.clock() - (cv2.slowSince[slowIdx] or os.clock()) >= R.CRAWL_T
