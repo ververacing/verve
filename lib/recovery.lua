@@ -217,8 +217,9 @@ R.DROP_RATE_SUSP = 0.20    -- pending drops and bent-suspension crawlers as fail
 R.rateOK, R.rateN = 0, 0   -- the V2 tally (judged, undamaged at the drop)
 R.TEMP_WHEELS = { 0, 1, 2, 3 }   -- DEFAULT 0.14.4; tyre restore: a 4-list {FL,FR,RL,RR} of the wheel argument to use (false = WHEEL_BITS, which restores
                            -- 2 of 4 wheels - front-left always 12 C after a drop, 2026-09-25). Candidates {0,1,2,3}, {1,2,4,8}.
-R.DROP_KEEP_FUEL = false   -- true: a reposition keeps the car's own fuel (the AI move makes AC reload the tank to its race load: the
-                           -- whole race again when lapped, 1.2 laps when timed - 23 L -> 4 L at a timed-race drop, PC #1 2026-09-26)
+R.DROP_KEEP_FUEL = false   -- true: a reposition keeps the car's own fuel. Moving a car (physics.setCarPosition, the default R.DROP_API, or
+                           -- setAICarPosition) makes AC reload its tank to the race load: the whole race again when lapped, 1.2 laps when
+                           -- timed (23 L -> 4 L at a timed-race drop, PC #1 2026-09-26). A car with an EMPTY tank keeps AC's reload.
 R.SETTLE_S = 4.0           -- s after a reset (session change, restart) when recovery does nothing: a new session's first frames
                            -- still show the OLD session's cars (a weekend race opened at lap 4, 230 km/h), which read the parked grid as
                            -- stuck (21 grid 'crash repairs' per weekend session) and pinned lapsOf at the old lap (2026-09-26). 0 = off.
@@ -764,7 +765,7 @@ function R.update(dt)
             if pt then
                 if os.clock() < pt.untilT then
                     applyTemps(i, pt.temps)
-                    if pt.fuel and (car.fuel or 0) < pt.fuel - 0.5 then pcall(physics.setCarFuel, i, pt.fuel) end   -- AC's reload can land late
+                    if pt.fuel and math.abs((car.fuel or 0) - pt.fuel) > 0.5 then pcall(physics.setCarFuel, i, pt.fuel) end   -- a late reload, up or down
                 else pendingTemps[i] = nil end
             end
             if rejoinUntil[i] then
@@ -1286,10 +1287,10 @@ function R.suspLimp(i, car, spd, dt)
                 for k = 0, 3 do local w = car.wheels and car.wheels[k]; local tc = w and (w.tyreCoreTemperature or w.tyreTemperature); if type(tc) == 'number' and tc > 0 then temps[k] = tc end end
             end)
             local pt0 = pendingTemps[i]                          -- repaired inside a drop's hold: the wheels read the 12 C reset
-            if pt0 and os.clock() < pt0.untilT then temps = pt0.temps end
+            if pt0 and os.clock() < pt0.untilT then temps = pt0.temps; fuel = pt0.fuel or fuel end   -- (DROP_KEEP_FUEL: the drop's tank)
             if pcall(physics.resetCarState, i, 1.0) then
                 if type(fuel) == 'number' and fuel > 0 then pcall(physics.setCarFuel, i, fuel) end   -- resetCarState refuels: keep its own
-                if next(temps) ~= nil then applyTemps(i, temps); pendingTemps[i] = { temps = temps, untilT = os.clock() + TEMP_HOLD } end
+                if next(temps) ~= nil then applyTemps(i, temps); pendingTemps[i] = { temps = temps, untilT = os.clock() + TEMP_HOLD, fuel = R.DROP_KEEP_FUEL and fuel or nil } end
                 pcall(function() physics.setAIStopCounter(i, 0) end)
                 dmgBase[i] = 0                                  -- resetCarState clears car.damage: the baseline is zero
                 if R.SUSP_FIX_PIT then                          -- one stop (cancelled past the line); off by default
