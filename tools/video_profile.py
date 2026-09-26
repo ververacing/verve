@@ -101,7 +101,10 @@ def lean(now=None):
         # a takeover is already in force. Only re-assert if video.ini is still EXACTLY what we left; if the owner
         # changed it since, their file is the one worth keeping - back that up instead of overwriting the backup
         # with our own lean copy, which is how a night of drift used to eat their settings.
-        if _digest(VIDEO) != st.get("wrote"):
+        # ...but AC rewrites the window geometry on exit, so a file that is still lean apart from WIDTH/HEIGHT/
+        # FULLSCREEN/_EXT_PLACEMENT is still ours. Treating it as the owner's is how a windowed 1022x646 placement from
+        # a harness race got into the owner's backup (24 Sep) and froze two broadcast recordings (26 Sep).
+        if _digest(VIDEO) != st.get("wrote") and not _lean_apart_from_geometry():
             shutil.copy2(VIDEO, BACKUP)
             st = None
         else:
@@ -132,10 +135,37 @@ def restore():
             return ("NOT restoring: video.ini has changed since the harness took it over, so the backup may be "
                     "older than your settings. Both files kept - " + BACKUP + " is the harness's copy.")
     shutil.copy2(BACKUP, VIDEO)
+    _drop_windowed_placement()
     os.remove(BACKUP)
     if os.path.exists(STATE):
         os.remove(STATE)
     return "your video settings are back"
+
+
+def _drop_windowed_placement():
+    """A fullscreen owner file has no use for CSP's remembered WINDOW placement, and a stale one makes a direct launch
+    open as a small window (the 1022x646 line that froze OBS's fullscreen capture, 2026-09-26). Drop it; CSP writes a
+    fresh one if the owner ever runs windowed."""
+    lines, section, full = _read(VIDEO), "", False
+    for line in lines:
+        t = line.strip()
+        if t.startswith("[") and t.endswith("]"):
+            section = t[1:-1]
+        elif section == "VIDEO" and t.replace(" ", "") == "FULLSCREEN=1":
+            full = True
+    if not full:
+        return
+    out, section = [], ""
+    for line in lines:
+        t = line.strip()
+        if t.startswith("[") and t.endswith("]"):
+            section = t[1:-1]
+        if section == "VIDEO" and t.split("=", 1)[0].strip() == "_EXT_PLACEMENT":
+            continue
+        out.append(line)
+    if len(out) != len(lines):
+        with open(VIDEO, "w", encoding="utf-8") as f:
+            f.write(chr(10).join(out) + chr(10))
 
 
 def _lean_apart_from_geometry():
