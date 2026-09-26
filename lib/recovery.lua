@@ -232,6 +232,10 @@ R.GATE_MODE = 'back'       -- 'back' = drop on a straight just before the last s
 R.GATE_FIRST_M = 500       -- DEFAULT 0.14.5; 0 = off. >0 (m): with 2+ intermediate splits, gate to just before SPLIT 1 when that is at most this far
                            -- back, else don't gate. AC credits the lap only if the car passes split 1 after its last teleport:
                            -- sector-1 landings 1039/1052 counted, sector 2 (the 'back' gate) 19/1865, last sector 0/80 (2026-09-26).
+                           -- Capped at split 2: a landing past split 2 is never gated back to split 1 (a whole sector lost, 2026-09-26).
+R.GATE_WALK_V2 = false     -- false = 0.14.5. true: a gate-first drop starts its walk back for a straight at (margin + this car's 0-45 m
+                           -- stagger), so the straightness test and the stop-at-the-line guard judge the real landing spot; 0.14.5 walks
+                           -- from the margin and subtracts the stagger afterwards, unchecked: it can land in a corner exit (review 2026-09-26)
 local GATE_MARGIN = 0.006  -- how far before the split to drop (~25 m on a 4 km track): the car must CROSS it
 local GATE_BACK_MAX = 0.03 -- ...looking up to this far before it for a STRAIGHT bit of road (a fixed mid-corner drop
                            -- point wrecked the 2026-09-14 19:59 race: 41 drops, 38 incidents, all landing on one spot)
@@ -246,7 +250,7 @@ local gateStage = {}       -- twostep: cars parked before the split, waiting for
 local function gateSafe(sim, progress, i)
     -- (sim.lapSplits is a C array: 0-based, `#` gives the count; it is NOT a Lua table -- a type() check skipped it
     -- and the 2026-09-14 19:26 verification race gated nothing)
-    local lastGate, firstGate, line0 = 0, 1, false
+    local lastGate, firstGate, secondGate, line0 = 0, 1, 1, false
     pcall(function()
         local splits = sim.lapSplits
         local n = #splits
@@ -255,7 +259,7 @@ local function gateSafe(sim, progress, i)
             local s = splits[k]
             if type(s) == 'number' and s > 0.02 and s < 0.98 then
                 if s > lastGate then lastGate = s end
-                if s < firstGate then firstGate = s end
+                if s < firstGate then secondGate = firstGate; firstGate = s elseif s > firstGate and s < secondGate then secondGate = s end
             end
         end
     end)
@@ -263,14 +267,20 @@ local function gateSafe(sim, progress, i)
     local gfm = tonumber(R.GATE_FIRST_M) or 0
     if gfm > 0 and line0 and firstGate < lastGate then   -- (see R.GATE_FIRST_M) the target is split 1, and only when it is near
         if progress < firstGate - GATE_MARGIN * 0.5 or (progress - firstGate) * trackLen > gfm then return progress, false end
+        if progress >= secondGate then return progress, false end   -- past split 2: never back to split 1 (a big GATE_FIRST_M, a short sector 2)
         lastGate = firstGate; first = true
     end
     if lastGate <= 0 or progress < lastGate - GATE_MARGIN * 0.5 then return progress, false end   -- a split still ahead: fine
     -- the nearest straight-ish spot before the split (so the dropped car isn't set down mid-corner in the path of
     -- the next arrival): walk back from the margin in small steps, take the first that's straight and clear
-    local best = lastGate - GATE_MARGIN
+    local stag = 0     -- (R.GATE_WALK_V2) this car's gate-first stagger, walked from instead of subtracted after the walk
+    if first and i and R.GATE_WALK_V2 then
+        stag = hash01(i * 17) * STAGGER_RANGE
+        if lastGate - GATE_MARGIN - stag < 0 then stag = 0 end   -- split 1 nearer the line than margin + stagger: no stagger, never behind the line
+    end
+    local best = lastGate - GATE_MARGIN - stag
     for d = GATE_MARGIN, GATE_BACK_MAX, 0.004 do
-        local pr = lastGate - d
+        local pr = lastGate - d - stag
         if pr < 0 then break end
         local straight = false
         pcall(function()
@@ -284,7 +294,7 @@ local function gateSafe(sim, progress, i)
         end)
         if straight then best = pr; break end
     end
-    if first and i then best = (best - hash01(i * 17) * STAGGER_RANGE) % 1 end   -- per-car 0-45 m further back: one spot for a knot stacks them (wrapped: never before 0)
+    if first and i and not R.GATE_WALK_V2 then best = (best - hash01(i * 17) * STAGGER_RANGE) % 1 end   -- per-car 0-45 m further back: one spot for a knot stacks them (wrapped: never before 0)
     return best, true
 end
 
