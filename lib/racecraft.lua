@@ -155,6 +155,12 @@ R.OL_AGGR_FORMULA = 0         -- laps 0-1: extra aggression trim (0..1) for form
 R.OL_REACT_MAX = 0            -- lights: per-driver reaction time up to this many s (0 = off; harness A/B)
 R.OL_CAUT_PROX = true         -- opening caution scaled by the gap ahead (leaders brake normally). DEFAULT 2026-09-18 (owner): F1 8.7 -> 5.8 in contact over 5 runs; with lanes Spa 7.0 vs 9.7
 R.OL_CORNER_PRIO = false      -- laps 0-1: alongside a car whose nose is ahead, corner coming -> take the outside line (harness A/B)
+R.FAST_TUCK = 0               -- km/h, 0 = off: above this on any lap, alongside a car whose nose is ahead with a bend coming -> lift to
+                              -- FAST_TUCK_THR and tuck in (Baku 0.743 kink 2026-09-26: two abreast at 260 km/h, one runs out of road)
+R.FAST_TUCK_THR = 0.85        -- throttle while tucking in
+R.FAST_TUCK_LOOK = 1.5        -- s: how far ahead (at my speed) the bend is looked for, besides right here
+R.FAST_TUCK_TS = false        -- true: only into a bend the trouble-spot map has learned
+R.fastTuckN = 0               -- diag: car-frames tucking in
 R.BG_T = 0                    -- >0: the guard's reach is closing speed x this many seconds (min CV.BG_M) and a much slower car ahead counts as braking (A/B)
 R.OL_BRAKEGUARD = true        -- opening lap: brake earlier when the car ahead on my line is already braking inside CV.BG_M (harness A/B)
 R.BG_ALL = 0                  -- >0: every AI car's brake hint x this all race (direction test only; 0 = off)
@@ -528,7 +534,7 @@ function R.evaluate(i, dt)
                     local d = oc.splinePosition - mySpline; if d < 0 then d = d + 1 end
                     local b = mySpline - oc.splinePosition; if b < 0 then b = b + 1 end
                     local ocLat = latNow[j] or 0
-                    if (R.OL_SIDEYIELD or R.OL_SIDESPACE) and myLap <= 1 and ocSpd > 30 then
+                    if ((R.OL_SIDEYIELD or R.OL_SIDESPACE) and myLap <= 1 or (R.FAST_TUCK > 0 and spd > R.FAST_TUCK)) and ocSpd > 30 then
                         local sd = d < 0.5 and d or d - 1                   -- signed spline gap: + their nose ahead of mine
                         if math.abs(sd) * trackLen < CV.SIDE_M then
                             local dl = math.abs(ocLat - (latNow[i] or 0))
@@ -648,6 +654,14 @@ function R.evaluate(i, dt)
             -- SIDE YIELD: two-abreast into a corner on lap 0 is how same-row pairs touch (Barcelona F1 2026-09-16:
             -- six of nine lap-0 contacts). The car behind by a nose eases and tucks in.
             if myLap == 0 and R.OL_SIDEYIELD and sideBy and cornerAhead(mySpline) then thr = math.min(thr, CV.SIDE_THR) end
+        end
+        -- FAST TUCK (R.FAST_TUCK): two abreast at speed into a bend, the car behind by a nose backs out instead of squeezing
+        if R.FAST_TUCK > 0 and sideBy and spd > R.FAST_TUCK and not (Recovery.stateOf(i) or {}).rec then
+            local look = (mySpline + spd / 3.6 * R.FAST_TUCK_LOOK / trackLen) % 1
+            if (cornerAhead(look) or cornerAhead(mySpline))
+               and (not R.FAST_TUCK_TS or Troublespots.cautionAt(look, classKey) > 0 or Troublespots.cautionAt(mySpline, classKey) > 0) then
+                thr = math.min(thr, R.FAST_TUCK_THR); R.fastTuckN = R.fastTuckN + 1
+            end
         end
         local pc = R.penCap and R.penCap[i]                 -- serving a penalty (lib/fault.lua): throttle cap until it's paid
         if pc and os.clock() < pc.till then thr = math.min(thr, pc.cap) end
@@ -1447,7 +1461,7 @@ function R.reset()
     letbyT, letbyDone, letbyFor = {}, {}, {}
     cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {} }; R.cv2 = cv2
     R.crawlN = 0
-    R.roomN = 0; R.roomAct = 0; R.evalN = 0
+    R.roomN = 0; R.roomAct = 0; R.evalN = 0; R.fastTuckN = 0
     R.last = {}
     pcall(Strategy.reset)
     scaled = false
