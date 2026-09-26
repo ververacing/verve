@@ -229,7 +229,7 @@ R.gateMoves = 0            -- drops moved back before the last timing split so A
 R.GATE_MODE = 'back'       -- 'back' = drop on a straight just before the last split; 'twostep' = touch down before the split for a
                            -- few physics frames, then drop at the crash spot as usual (harness A/B: does the jump count as
                            -- crossing the split?); 'off' = no gating (the lap is lost past the last split)
-R.GATE_FIRST_M = 0         -- 0 = off. >0 (m): with 2+ intermediate splits, gate to just before SPLIT 1 when that is at most this far
+R.GATE_FIRST_M = 500       -- DEFAULT 0.14.5; 0 = off. >0 (m): with 2+ intermediate splits, gate to just before SPLIT 1 when that is at most this far
                            -- back, else don't gate. AC credits the lap only if the car passes split 1 after its last teleport:
                            -- sector-1 landings 1039/1052 counted, sector 2 (the 'back' gate) 19/1865, last sector 0/80 (2026-09-26).
 local GATE_MARGIN = 0.006  -- how far before the split to drop (~25 m on a 4 km track): the car must CROSS it

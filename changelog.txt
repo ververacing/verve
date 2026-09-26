@@ -1,3 +1,24 @@
+0.14.5
+- Race weekends: the race after practice or qualifying now starts with the opening-lap rules on (the turn-1 lanes,
+  the grid hold, the convoy throttle, the row caution). The first second of every new session still shows the
+  previous session's cars, and Verve believed it: every car that had driven laps in practice or qualifying looked
+  like it was already on a later lap, so all of that was off for those cars. Plain single races were never affected.
+- Race weekends: no more phantom crash repairs for every car on the grid and in the pit boxes at the start of
+  qualifying and the race.
+- Trouble spots: every learned trouble-spot map is reset once. Weekends had taught them a crash in the pit boxes
+  and on the grid for every car, which crowded the real corners out of the map. They relearn in a few races.
+- Repositioned cars keep their lap more often: on tracks with three sectors, a car put back in the middle sector
+  never had that lap counted (AC only credits a lap that passes the first sector line). A car put back within
+  500 m after the first sector line is now put back just before it instead. Further on, and in the last sector,
+  it rejoins where it stopped (the old move back to the last sector line never got the lap counted either).
+  Tested at Baku: 6 of 6 laps counted, against 0 of 14 before.
+- Race feed: nothing is written in the first 3 seconds of a session, race_start now marks the real launch (single
+  races get one too), and the header gives each car's class. Also fixed: in a weekend, the race's feed file could
+  stay unwritten, and driver-name updates stopped, for as long as the previous session had run.
+- The Drivers panel and the Randomize tooltip no longer say driver picks reset every race: since 0.14.4 they last
+  the whole weekend on the same grid.
+- Test switch added, off: FAST_TUCK (two abreast at speed into a bend, the car behind lifts and tucks in).
+
 0.14.4
 - Repositioned cars rejoin on warm tyres: their tyre temperatures were restored on the rear wheels only, so every
   repositioned car set off on front tyres at 12 C.
