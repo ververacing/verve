@@ -160,6 +160,8 @@ R.FAST_TUCK = 0               -- km/h, 0 = off: above this on any lap, alongside
 R.FAST_TUCK_THR = 0.85        -- throttle while tucking in
 R.FAST_TUCK_LOOK = 1.5        -- s: how far ahead (at my speed) the bend is looked for, besides right here
 R.FAST_TUCK_TS = false        -- true: only into a bend the trouble-spot map has learned
+R.FAST_TUCK_MINLAP = 0        -- the rule acts from this lap on (Verve's lap count; 0 = every lap). PC #2 2026-09-26: lap 0-1 incidents
+                              -- 25, 14 with FAST_TUCK 200 vs 5, 10 without - the lift into turn 1 in the opening pack concertinas
 R.fastTuckN = 0               -- diag: car-frames tucking in
 R.BG_T = 0                    -- >0: the guard's reach is closing speed x this many seconds (min CV.BG_M) and a much slower car ahead counts as braking (A/B)
 R.OL_BRAKEGUARD = true        -- opening lap: brake earlier when the car ahead on my line is already braking inside CV.BG_M (harness A/B)
@@ -703,7 +705,7 @@ function R.evaluate(i, dt)
             if myLap == 0 and R.OL_SIDEYIELD and sideBy and cornerAhead(mySpline) then thr = math.min(thr, CV.SIDE_THR) end
         end
         -- FAST TUCK (R.FAST_TUCK): two abreast at speed into a bend, the car behind by a nose backs out instead of squeezing
-        if R.FAST_TUCK > 0 and sideBy and spd > R.FAST_TUCK and not (Recovery.stateOf(i) or {}).rec then
+        if R.FAST_TUCK > 0 and sideBy and spd > R.FAST_TUCK and myLap >= R.FAST_TUCK_MINLAP and not (Recovery.stateOf(i) or {}).rec then
             local look = (mySpline + spd / 3.6 * R.FAST_TUCK_LOOK / trackLen) % 1
             if (cornerAhead(look) or cornerAhead(mySpline))
                and (not R.FAST_TUCK_TS or Troublespots.cautionAt(look, classKey) > 0 or Troublespots.cautionAt(mySpline, classKey) > 0) then
