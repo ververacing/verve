@@ -212,12 +212,12 @@ local dropFailed = {}      -- cars whose last reposition did NOT rejoin: no seco
 -- at Monza against GT3 7/7. Both removed rather than left switched off: dead switches cost upvalue headroom
 -- on a module three candidates from LuaJIT's limit, and this one carried two real bugs of its own.)
 R.dropN, R.dropOK = 0, 0   -- session tally (for the UI / diagnostics)
-R.DROP_RATE_V2 = false     -- switch-off rate over JUDGED drops of cars undamaged at the drop (false = dropOK/dropN, which counts
+R.DROP_RATE_V2 = true      -- DEFAULT 0.14.4; switch-off rate over JUDGED drops of cars undamaged at the drop (false = dropOK/dropN, which counts
 R.DROP_RATE_SUSP = 0.20    -- pending drops and bent-suspension crawlers as failures: 4 false switch-offs in 535 races, 2026-09-25)
 R.rateOK, R.rateN = 0, 0   -- the V2 tally (judged, undamaged at the drop)
-R.TEMP_WHEELS = false      -- tyre restore: a 4-list {FL,FR,RL,RR} of the wheel argument to use (false = WHEEL_BITS, which restores
+R.TEMP_WHEELS = { 0, 1, 2, 3 }   -- DEFAULT 0.14.4; tyre restore: a 4-list {FL,FR,RL,RR} of the wheel argument to use (false = WHEEL_BITS, which restores
                            -- 2 of 4 wheels - front-left always 12 C after a drop, 2026-09-25). Candidates {0,1,2,3}, {1,2,4,8}.
-R.DROP_SAFE_T = 0          -- s: no drop while a car behind would reach the spot within this at its speed (0 = DROP_BEHIND only)
+R.DROP_SAFE_T = 4.0        -- DEFAULT 0.14.4; s: no drop while a car behind would reach the spot within this at its speed (0 = DROP_BEHIND only)
 R.DROP_SAFE_HOLD = 8.0     -- s: how long a FORCED drop also waits for that gap before it goes regardless
 R.safeHold = {}            -- per car: when a forced drop started waiting for the gap
 R.DROP_API = 'car'         -- 'car' = physics.setCarPosition, 'ai' = physics.setAICarPosition (A/B 2026-09-14: same lap counting; 'car' rejoined cleaner)
@@ -1206,7 +1206,7 @@ R.boxTryN = 0              -- rescues attempted
 R.boxOkN = 0               -- rescues that returned success
 R.boxRescueN = 0           -- session tally (diagnostics)
 R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0
-R.SUSP_FIX = 0             -- >0: a car crawling on suspension damage >= this for SUSP_FIX_T s is REPAIRED where it is (all
+R.SUSP_FIX = 0.25          -- DEFAULT 0.14.4; >0: a car crawling on suspension damage >= this for SUSP_FIX_T s is REPAIRED where it is (all
 R.SUSP_FIX_T = 15.0        -- damage; its own fuel and tyre temperatures kept) and asked to pit. Owner's idea, 2026-09-25: Baku
 R.suspFixN = 0             -- cars at 0.30-0.49 ran at a median 30 km/h for the rest of the race. 0 = off.
 R.SUSP_FIX_MAX = 2         -- repairs per car per race; the next crawl retires it (a corner that keeps breaking is done)

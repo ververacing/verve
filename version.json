@@ -1,5 +1,5 @@
 {
-  "version": "0.14.3",
+  "version": "0.14.4",
   "url": "https://github.com/ververacing/verve/releases/latest",
-  "summary": "Passing fixed (a hidden cold-tyre penalty on cool days), calmer opening laps at race fuel, no more frozen cars."
+  "summary": "Cars with broken suspension are repaired on track instead of crawling, repositioned cars rejoin on warm tyres, clear of traffic, repositioning no longer switches itself off after a pile-up, a driver grid set up in practice survives the weekend."
 }

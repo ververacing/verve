@@ -1,3 +1,19 @@
+0.14.4
+- Repositioned cars rejoin on warm tyres: their tyre temperatures were restored on the rear wheels only, so every
+  repositioned car set off on front tyres at 12 C.
+- Broken suspension: a car crawling round at 30 km/h on a bent corner is now repaired on track after 15 s (no
+  teleport) and races on; the time it lost limping is its penalty. At most two repairs per car, and only when
+  'Repair damage on track' is on. At Baku these cars used to crawl for the rest of the race, holding up the field.
+- Safer repositioning: a car is only put back on the track when nothing behind would reach it within 4 seconds
+  (it used to look 90 m back - one second at Baku's top speed - and forced repositions did not look at all), so
+  the field no longer arrives at full speed on a car setting off from 27 km/h.
+- Repositioning no longer switches itself off after a pile-up. Repositions still being judged, and damaged cars
+  that crawl at 30 km/h after a correct reposition, counted as failures; in the races where that switched
+  repositioning off, 10-12 of 20 cars were lost.
+- Race weekends: a driver grid you set up in practice now survives qualifying and the race.
+- Test switches added, all off: ROOM (a tight-room map), LANE_MIN_HALF, GRID_HOLD_MAXLAT and BLOCK_MIN_HALF (a
+  width-aware start for very narrow grids such as Amalfi), CRAWL_PASS, CRAWL_DMG, CRAWL_CLOSE, SUSP_FIX_PIT, RS_SEE_STOPPED.
+
 0.14.3
 - Opening lap: the turn-1 lane hold ended at turn 1 as designed only on paper. A grid-wrap fix from 0.14.1 also fired
   for cars still on their first lap in the second half of the lap, so the lanes (half a car off the racing line), the
