@@ -1199,6 +1199,7 @@ R.SUSP_FIX = 0             -- >0: a car crawling on suspension damage >= this fo
 R.SUSP_FIX_T = 15.0        -- damage; its own fuel and tyre temperatures kept) and asked to pit. Owner's idea, 2026-09-25: Baku
 R.suspFixN = 0             -- cars at 0.30-0.49 ran at a median 30 km/h for the rest of the race. 0 = off.
 R.SUSP_FIX_MAX = 2         -- repairs per car per race; the next crawl retires it (a corner that keeps breaking is done)
+R.SUSP_FIX_PIT = false     -- also ask a repaired car to pit once (off: at Baku the pit lane lost lap counts and parked a car)
 R.suspFixCar = {}; R.suspOwe = {}   -- per-car repair count; the owed pit stop { crossed = bool } until the car passes the line
 function R.suspLimp(i, car, spd, dt)
     if (R.SUSP_LIMP <= 0 and R.SUSP_FIX <= 0) or parked[i] then return end
@@ -1238,10 +1239,12 @@ function R.suspLimp(i, car, spd, dt)
                 if next(temps) ~= nil then applyTemps(i, temps); pendingTemps[i] = { temps = temps, untilT = os.clock() + TEMP_HOLD } end
                 pcall(function() physics.setAIStopCounter(i, 0) end)
                 dmgBase[i] = 0                                  -- resetCarState clears car.damage: the baseline is zero
-                pcall(physics.setAIPitStopRequest, i, true)     -- one stop is the time it pays (cancelled past the line)
-                R.suspOwe[i] = { near = (car.splinePosition or 0) > 0.8 }
+                if R.SUSP_FIX_PIT then                          -- one stop (cancelled past the line); off by default
+                    pcall(physics.setAIPitStopRequest, i, true)
+                    R.suspOwe[i] = { near = (car.splinePosition or 0) > 0.8 }
+                end
                 R.suspFixN = R.suspFixN + 1
-                pcall(function() ac.log(string.format('Verve: car %d suspension %.2f, crawling %.0f s: repaired on track, asked to pit', i, sus, t)) end)
+                pcall(function() ac.log(string.format('Verve: car %d suspension %.2f, crawling %.0f s: repaired on track%s', i, sus, t, R.SUSP_FIX_PIT and ', asked to pit' or '')) end)
             end
         end
         return
