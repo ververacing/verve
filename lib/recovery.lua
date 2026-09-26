@@ -217,6 +217,8 @@ R.DROP_RATE_SUSP = 0.20    -- pending drops and bent-suspension crawlers as fail
 R.rateOK, R.rateN = 0, 0   -- the V2 tally (judged, undamaged at the drop)
 R.TEMP_WHEELS = { 0, 1, 2, 3 }   -- DEFAULT 0.14.4; tyre restore: a 4-list {FL,FR,RL,RR} of the wheel argument to use (false = WHEEL_BITS, which restores
                            -- 2 of 4 wheels - front-left always 12 C after a drop, 2026-09-25). Candidates {0,1,2,3}, {1,2,4,8}.
+R.DROP_KEEP_FUEL = false   -- true: a reposition keeps the car's own fuel (the AI move makes AC reload the tank to its race load: the
+                           -- whole race again when lapped, 1.2 laps when timed - 23 L -> 4 L at a timed-race drop, PC #1 2026-09-26)
 R.SETTLE_S = 4.0           -- s after a reset (session change, restart) when recovery does nothing: a new session's first frames
                            -- still show the OLD session's cars (a weekend race opened at lap 4, 230 km/h), which read the parked grid as
                            -- stuck (21 grid 'crash repairs' per weekend session) and pinned lapsOf at the old lap (2026-09-26). 0 = off.
@@ -610,9 +612,10 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
     -- rubber and spun at the very next corner, which is where the endless stuck -> reposition -> stuck
     -- loop came from. Tyres don't go cold in an instant, so snapshot each wheel's core temperature and
     -- put it back after the move: the car rejoins on the rubber it actually had.
-    local temps = {}
+    local temps, fuel0 = {}, nil
     pcall(function()
         local car = ac.getCar(i)
+        if car and R.DROP_KEEP_FUEL and type(car.fuel) == 'number' and car.fuel > 0 then fuel0 = car.fuel end
         if car and car.wheels then
             for k = 0, 3 do
                 local w = car.wheels[k]
@@ -646,10 +649,11 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
         pcall(physics.setAINoInput, i, false, false) -- and make sure the AI's input isn't in its "parked" state after the move
     end)
     local pt0 = pendingTemps[i]   -- dropped again inside the hold: the wheels now read the first teleport's 12 C reset
-    if pt0 and os.clock() < pt0.untilT then temps = pt0.temps end
-    if okp and next(temps) ~= nil then
+    if pt0 and os.clock() < pt0.untilT then temps = pt0.temps; fuel0 = pt0.fuel or fuel0 end   -- (and the tank from before the first move)
+    if okp and (next(temps) ~= nil or fuel0) then
         applyTemps(i, temps)
-        pendingTemps[i] = { temps = temps, untilT = os.clock() + TEMP_HOLD }
+        if fuel0 then pcall(physics.setCarFuel, i, fuel0) end   -- R.DROP_KEEP_FUEL: undo AC's reload of the tank
+        pendingTemps[i] = { temps = temps, untilT = os.clock() + TEMP_HOLD, fuel = fuel0 }
     end
     if okp then
         rejoinUntil[i] = os.clock() + REJOIN_RAMP            -- rejoin gently (see REJOIN_RAMP)
@@ -758,7 +762,10 @@ function R.update(dt)
             if parked[i] then return end                -- retired by us: sitting in its pit box, leave it be
             local pt = pendingTemps[i]
             if pt then
-                if os.clock() < pt.untilT then applyTemps(i, pt.temps) else pendingTemps[i] = nil end
+                if os.clock() < pt.untilT then
+                    applyTemps(i, pt.temps)
+                    if pt.fuel and (car.fuel or 0) < pt.fuel - 0.5 then pcall(physics.setCarFuel, i, pt.fuel) end   -- AC's reload can land late
+                else pendingTemps[i] = nil end
             end
             if rejoinUntil[i] then
                 local lim = rampLimit(i)                      -- (returns 1 and clears itself when the ramp ends)
