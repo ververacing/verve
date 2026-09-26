@@ -1198,8 +1198,18 @@ R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0
 R.SUSP_FIX = 0             -- >0: a car crawling on suspension damage >= this for SUSP_FIX_T s is REPAIRED where it is (all
 R.SUSP_FIX_T = 15.0        -- damage; its own fuel and tyre temperatures kept) and asked to pit. Owner's idea, 2026-09-25: Baku
 R.suspFixN = 0             -- cars at 0.30-0.49 ran at a median 30 km/h for the rest of the race. 0 = off.
+R.SUSP_FIX_MAX = 2         -- repairs per car per race; the next crawl retires it (a corner that keeps breaking is done)
+R.suspFixCar = {}; R.suspOwe = {}   -- per-car repair count; the owed pit stop { crossed = bool } until the car passes the line
 function R.suspLimp(i, car, spd, dt)
     if (R.SUSP_LIMP <= 0 and R.SUSP_FIX <= 0) or parked[i] then return end
+    local owe = R.suspOwe[i]
+    if owe then                                              -- one stop, not one per lap: cancel once the line is behind it
+        local sp = car.splinePosition or 0.5
+        if sp > 0.8 then owe.near = true elseif owe.near and sp < 0.2 then owe.crossed = true end
+        if owe.crossed and sp > 0.15 and sp < 0.5 and not car.isInPitlane then
+            pcall(physics.setAIPitStopRequest, i, false); R.suspOwe[i] = nil
+        end
+    end
     if car.isInPitlane then R.suspT[i] = 0; return end
     local thr = (R.SUSP_FIX > 0) and R.SUSP_FIX or R.SUSP_LIMP
     if maxSusp(car) >= thr and spd > STOP_SPEED and spd < R.SUSP_LIMP_SPD then
@@ -1208,20 +1218,28 @@ function R.suspLimp(i, car, spd, dt)
         R.suspT[i] = 0
     end
     local t = R.suspT[i] or 0
-    if R.SUSP_FIX > 0 then                                  -- repair on track (no teleport), then the pit request
+    if R.SUSP_FIX > 0 and R.REPAIR_BODY ~= false then       -- repair on track (no teleport), then one pit stop
         if t > R.SUSP_FIX_T then
             R.suspT[i] = 0
             local fuel, temps, sus = nil, {}, maxSusp(car)
+            local n = (R.suspFixCar[i] or 0) + 1; R.suspFixCar[i] = n
+            if n > R.SUSP_FIX_MAX then
+                pcall(function() ac.log(string.format('Verve: car %d suspension %.2f broke again after %d repairs: retired', i, sus, n - 1)) end)
+                parkInPits(i, 'susp_fix'); return
+            end
             pcall(function()
                 fuel = car.fuel
                 for k = 0, 3 do local w = car.wheels and car.wheels[k]; local tc = w and (w.tyreCoreTemperature or w.tyreTemperature); if type(tc) == 'number' and tc > 0 then temps[k] = tc end end
             end)
+            local pt0 = pendingTemps[i]                          -- repaired inside a drop's hold: the wheels read the 12 C reset
+            if pt0 and os.clock() < pt0.untilT then temps = pt0.temps end
             if pcall(physics.resetCarState, i, 1.0) then
                 if type(fuel) == 'number' and fuel > 0 then pcall(physics.setCarFuel, i, fuel) end   -- resetCarState refuels: keep its own
                 if next(temps) ~= nil then applyTemps(i, temps); pendingTemps[i] = { temps = temps, untilT = os.clock() + TEMP_HOLD } end
                 pcall(function() physics.setAIStopCounter(i, 0) end)
-                repairBody(i, car)                              -- the body baseline: damage since this repair
-                pcall(physics.setAIPitStopRequest, i, true)     -- where the AI can pit, that stop is the time it pays
+                dmgBase[i] = 0                                  -- resetCarState clears car.damage: the baseline is zero
+                pcall(physics.setAIPitStopRequest, i, true)     -- one stop is the time it pays (cancelled past the line)
+                R.suspOwe[i] = { near = (car.splinePosition or 0) > 0.8 }
                 R.suspFixN = R.suspFixN + 1
                 pcall(function() ac.log(string.format('Verve: car %d suspension %.2f, crawling %.0f s: repaired on track, asked to pit', i, sus, t)) end)
             end
@@ -1240,7 +1258,7 @@ end
 
 function R.reset()
     R.boxRescued = {}; R.boxRescueN = 0; R.boxSeenN = 0; R.boxTryN = 0; R.boxOkN = 0
-    R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0; R.suspFixN = 0
+    R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0; R.suspFixN = 0; R.suspFixCar = {}; R.suspOwe = {}
     R.pointToPoint = nil
     boxT = {}; boxFuel = {}
     ownLaps, ownSpline = {}, {}
