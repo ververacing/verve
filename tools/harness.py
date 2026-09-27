@@ -107,6 +107,7 @@ FIRST_NAMES = ["Alex", "Sam", "Jo", "Chris", "Dana", "Robin", "Kim", "Lee", "Max
 LAST_NAMES = ["Vermeer", "Okafor", "Lindqvist", "Moreau", "Tanaka", "Silva", "Novak", "Haddad", "Bauer", "Rossi", "Kowalski", "Dubois", "Ferreira", "Nilsen", "Costa", "Ahmed", "Weber"]
 
 
+AI_AGGRESSION = "0"   # --ai-aggression N: race.ini AI_AGGRESSION for every AI (0-100; default 0 as before; players run ~50-70)
 SKIN_MATCH = None   # --skin-match REGEX: cycle per slot through the model's skins whose folder name matches (liveries by name)
 
 
@@ -149,7 +150,7 @@ def grid_from_models(models, count, seed=0):
     for n in range(count):
         m = expanded[n] if pinned and n < len(expanded) else expanded[n % len(expanded)]
         cars.append({
-            "MODEL": m, "MODEL_CONFIG": "", "AI_LEVEL": str(rnd.randint(95, 102)), "AI_AGGRESSION": "0",
+            "MODEL": m, "MODEL_CONFIG": "", "AI_LEVEL": str(rnd.randint(95, 102)), "AI_AGGRESSION": AI_AGGRESSION,
             "SKIN": pick_skin(m, n + 1), "DRIVER_NAME": f"{FIRST_NAMES[n % len(FIRST_NAMES)]} {LAST_NAMES[(n * 7) % len(LAST_NAMES)]}",
             "NATIONALITY": "", "NATION_CODE": "",
         })
@@ -212,7 +213,7 @@ def career_race_ini(spec, base_path):
             skin = first_skin(model)
         lvl = float(opp.get(sec, "LEVEL", fallback="95"))
         ini.add_section(f"CAR_{n}")
-        for kk, vv in [("MODEL", model), ("MODEL_CONFIG", ""), ("AI_LEVEL", str(int(round(level * lvl / 100.0)))), ("AI_AGGRESSION", "0"),
+        for kk, vv in [("MODEL", model), ("MODEL_CONFIG", ""), ("AI_LEVEL", str(int(round(level * lvl / 100.0)))), ("AI_AGGRESSION", AI_AGGRESSION),
                        ("SKIN", skin), ("DRIVER_NAME", opp.get(sec, "NAME", fallback=f"AI {a}")), ("NATIONALITY", ""), ("NATION_CODE", "")]:
             ini.set(f"CAR_{n}", kk, vv)
         n += 1
@@ -1116,6 +1117,7 @@ def main():
     ap.add_argument("--weather", help="CSP weather type by name (clear, clouds, overcast, fog, mist, drizzle, lightrain, rain, heavyrain, storm, hot, cold, windy) or number; Pure must be the weather controller")
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--label", default="A")
+    ap.add_argument("--ai-aggression", type=int, default=0, help="race.ini AI_AGGRESSION for every AI car (0-100, default 0)")
     ap.add_argument("--settings", help="JSON of Verve global settings to override for the run")
     ap.add_argument("--recovery", help="JSON of Recovery module fields to override for the run, e.g. {\"DROP_API\":\"car\"}")
     ap.add_argument("--racecraft", help="JSON of Racecraft module fields to override for the run")
@@ -1134,8 +1136,9 @@ def main():
     ap.add_argument("--lap-budget-s", type=int, default=150, help="seconds allowed per lap before a run is killed")
     ap.add_argument("--ai-level", type=int, default=0, help="force every AI car's AI_LEVEL (career events and --models grids alike); 0 = as configured")
     args = ap.parse_args()
-    global SKIN_MATCH
+    global SKIN_MATCH, AI_AGGRESSION
     SKIN_MATCH = getattr(args, "skin_match", None)
+    AI_AGGRESSION = str(max(0, min(100, int(getattr(args, "ai_aggression", 0) or 0))))
     if not args.laps and not args.career:
         args.laps = 6
 
