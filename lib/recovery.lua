@@ -217,7 +217,7 @@ R.DROP_RATE_SUSP = 0.20    -- pending drops and bent-suspension crawlers as fail
 R.rateOK, R.rateN = 0, 0   -- the V2 tally (judged, undamaged at the drop)
 R.TEMP_WHEELS = { 0, 1, 2, 3 }   -- DEFAULT 0.14.4; tyre restore: a 4-list {FL,FR,RL,RR} of the wheel argument to use (false = WHEEL_BITS, which restores
                            -- 2 of 4 wheels - front-left always 12 C after a drop, 2026-09-25). Candidates {0,1,2,3}, {1,2,4,8}.
-R.DROP_KEEP_FUEL = false   -- true: a reposition keeps the car's own fuel. Moving a car (physics.setCarPosition, the default R.DROP_API, or
+R.DROP_KEEP_FUEL = true    -- DEFAULT 0.14.6. true: a reposition keeps the car's own fuel. Moving a car (physics.setCarPosition, the default R.DROP_API, or
                            -- setAICarPosition) makes AC reload its tank to the race load: the whole race again when lapped, 1.2 laps when
                            -- timed (23 L -> 4 L at a timed-race drop, PC #1 2026-09-26). A car with an EMPTY tank keeps AC's reload.
 R.SETTLE_S = 4.0           -- s after a reset (session change, restart) when recovery does nothing: a new session's first frames
@@ -232,7 +232,7 @@ R.gateMoves = 0            -- drops moved back before the last timing split so A
 R.GATE_MODE = 'back'       -- 'back' = drop on a straight just before the last split; 'twostep' = touch down before the split for a
                            -- few physics frames, then drop at the crash spot as usual (harness A/B: does the jump count as
                            -- crossing the split?); 'off' = no gating (the lap is lost past the last split)
-R.GATE_FIRST_M = 500       -- DEFAULT 0.14.5; 0 = off. >0 (m): with 2+ intermediate splits, gate to just before SPLIT 1 when that is at most this far
+R.GATE_FIRST_M = 1000      -- DEFAULT 0.14.6 (0.14.5: 500); 0 = off. >0 (m): with 2+ intermediate splits, gate to just before SPLIT 1 when that is at most this far
                            -- back, else don't gate. AC credits the lap only if the car passes split 1 after its last teleport:
                            -- sector-1 landings 1039/1052 counted, sector 2 (the 'back' gate) 19/1865, last sector 0/80 (2026-09-26).
 R.GATE_FIRST_CAP = false   -- false = 0.14.5. true: a landing in the LAST sector (at or past the last intermediate split) is never gated back
@@ -240,7 +240,7 @@ R.GATE_FIRST_CAP = false   -- false = 0.14.5. true: a landing in the LAST sector
                            -- for up to GATE_FIRST_M + walk + stagger of road; left there it keeps the road and likely loses the lap (last
                            -- sector 0/80); unmeasured either way. Fires only where last split - split 1 < GATE_FIRST_M: at 500 m none of the
                            -- 12 raced layouts (shortest Portland l1, ~650 m); at 1000-1500 m Portland, Mosport DDT, Brands GP (2026-09-26)
-R.GATE_WALK_V2 = false     -- false = 0.14.5. true: a gate-first drop starts its walk back for a straight at (margin + this car's 0-45 m
+R.GATE_WALK_V2 = true      -- DEFAULT 0.14.6; false = 0.14.5. true: a gate-first drop starts its walk back for a straight at (margin + this car's 0-45 m
                            -- stagger), so the straightness test and the stop-at-the-line guard judge the real landing spot; 0.14.5 walks
                            -- from the margin and subtracts the stagger afterwards, unchecked: it can land in a corner exit (review 2026-09-26).
                            -- Cost: cars whose staggered start is in a bend all stop at the first straight sample behind it, so their 45 m

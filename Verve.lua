@@ -50,7 +50,7 @@ local DEFAULTS = {
     crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
     careerCurve = true, shareData = false, strategy = true, raceStart = 'calm', sliderCurve = true, repairOnTrack = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
-    timedFuel = false,   -- harness switch (lib/fuel.lua): fuel a TIMED race's AI for the clock, stop AC's empty-tank pit loop
+    timedFuel = true,    -- DEFAULT 0.14.6 (lib/fuel.lua): fuel a TIMED race's AI for the clock, stop AC's empty-tank pit loop
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
 
@@ -62,7 +62,7 @@ local S = ac.storage({
     crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
     careerCurve = true, shareData = false, strategy = true, raceStart = 'calm', sliderCurve = true, repairOnTrack = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
-    timedFuel = false,
+    timedFuel = true,
     autosave = true, schema = 1,
 })
 -- settings migration: 0.12 made crash repair + trouble spots core (they were opt-in experiments; a day-long

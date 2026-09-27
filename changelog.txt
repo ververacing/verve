@@ -1,3 +1,16 @@
+0.14.6
+- Timed races: AC fuels the AI for only 1.2 laps in a race run on the clock, and at their pit stop it sets the tank to
+  empty, so cars queued in the pit lane and most of the field dropped out. Verve now fuels the AI for the clock and
+  refills any car that leaves its pit box empty. Monza, 24 F1 cars, 20 minutes: 18 of 24 running at the flag instead
+  of 2. A Barcelona weekend with a timed race: 16 of 16 instead of 6.
+- Repositioned cars keep their own fuel. Moving a car used to reload its tank to the race-start load: up to 40 L
+  extra late in a race, or a nearly empty tank in a timed race.
+- Repositioned cars keep their lap more often: a car put back up to 1000 m after the first sector line (was 500 m)
+  is set down just before it, on a straight at its own spot. Monza: 5 of 5 laps counted, against 1 of 8.
+- Race feed: race_start is written only once the grid has actually launched.
+- Test switches added, all off: slowing for a stopped car ahead, a wider fast-tuck window, a fixed aggression base for
+  cars without a driver profile, and steering read in degrees for dirty air and the tow.
+
 0.14.5
 - Race weekends: the race after practice or qualifying now starts with the opening-lap rules on (the turn-1 lanes,
   the grid hold, the convoy throttle, the row caution). The first second of every new session still shows the

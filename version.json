@@ -1,5 +1,5 @@
 {
-  "version": "0.14.5",
+  "version": "0.14.6",
   "url": "https://github.com/ververacing/verve/releases/latest",
-  "summary": "Race weekends fixed: the race after practice or qualifying starts with the opening-lap rules on, and no phantom repairs, more repositioned cars keep their lap, trouble-spot maps relearned clean."
+  "summary": "Timed races fixed (the AI no longer run dry and queue in the pit lane), repositioned cars keep their own fuel, and more of them keep their lap."
 }
