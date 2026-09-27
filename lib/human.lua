@@ -32,6 +32,15 @@ H.wu = {}                  -- per car: the warm-up fraction last applied (diag)
 H.DIRTY_CAUT_X  = 1.0      -- x the dirty-air caution (harness A/B 2026-09-20: an attacking veteran carried +0.12 of it on top of
                            -- a cancelled attack term, running MORE cautious than a car alone; 0 = dirty air costs grip only)
 H.rainfx        = nil      -- detected at first use: true when the RainFX module is enabled on this install
+-- ac.StateCar.steer is the steering WHEEL angle in DEGREES (car.steerLock: the car's maximum wheel angle, also degrees), not a
+-- -1..1 input. The three cornering reads below (tow, dirty air, mistake flavour) divided those degrees by 0.35, so any wheel
+-- angle past 0.35 deg counted as full cornering: dirty air on every close follow above 80 km/h, straights included; the tow
+-- almost never; every mistake picked as a cornering one (found 2026-09-26). STEER_FRAC reads the angle as a fraction of lock
+-- instead, full cornering at STEER_CORNER of lock; a car without a usable steerLock keeps the old reading.
+H.STEER_FRAC    = false
+H.STEER_CORNER  = 0.35     -- x lock = full cornering (STEER_FRAC only). A fraction of lock is about a fraction of the road wheels'
+                           -- maximum angle (~17-20 deg on GT3 and F1 alike, ~30 on road cars). Estimated, not yet measured:
+                           -- 0.05-0.2 through fast corners, 0.3 at 80 km/h, 0.5+ in a hairpin, under 0.02 on a straight
 
 -- amplitudes
 local PERSONALITY_AMP = 0.020
@@ -240,7 +249,7 @@ local function slipstream01(i, myCar)
         if spd < TOW_MIN_KMH then return end
         local straight = 1
         local st = myCar.steer
-        if type(st) == "number" then straight = clamp(1 - math.abs(st) / 0.35, 0, 1) end
+        if type(st) == "number" then straight = 1 - H.cornering01(myCar, st) end   -- see H.STEER_FRAC
         if straight <= 0 then return end
         local mySpline = myCar.splinePosition
         if mySpline == nil then return end
@@ -269,7 +278,7 @@ local function dirtyair01(i, myCar)
         if spd < DIRTY_MIN_KMH then return end
         local st = myCar.steer
         if type(st) ~= "number" then return end
-        local corner = clamp(math.abs(st) / 0.35, 0, 1)
+        local corner = H.cornering01(myCar, st)                 -- see H.STEER_FRAC
         if corner <= 0 then return end
         local mySpline = myCar.splinePosition
         if mySpline == nil then return end
@@ -288,6 +297,21 @@ local function dirtyair01(i, myCar)
         if best < DIRTY_GAP then d = (1 - best / DIRTY_GAP) * corner end
     end)
     return d
+end
+
+-- How hard a car is cornering by its steering: 0 (straight) .. 1 (full cornering); st = car.steer, already a number.
+-- Default: the dev0146 reading (the degrees / 0.35). H.STEER_FRAC: the wheel angle as a fraction of lock, full at STEER_CORNER.
+local function lockOf(car) return car.steerLock end       -- read under pcall: an older CSP's car state may not have the field
+function H.cornering01(car, st)
+    if H.STEER_FRAC then
+        local ok, lock = pcall(lockOf, car)
+        if ok and type(lock) == "number" and lock > 0 then
+            local full = H.STEER_CORNER
+            if type(full) ~= "number" or full <= 0 then full = 0.35 end
+            return clamp(math.abs(st) / math.max(lock, 1) / full, 0, 1)
+        end
+    end
+    return clamp(math.abs(st) / 0.35, 0, 1)
 end
 
 function H.reset() scaled = false; H.wu = {} end     -- session start: re-derive the per-track distances
@@ -356,7 +380,7 @@ function H.getModifiers(i)
                 if rate > 0 and dtp > 0 and dtp < 1 and (not mistakeUntil[i] or now > mistakeUntil[i]) then
                     if math.random() < rate * dtp then
                         local st = car.steer
-                        local cornering = (type(st) == "number") and clamp(math.abs(st) / 0.35, 0, 1) or 0
+                        local cornering = (type(st) == "number") and H.cornering01(car, st) or 0   -- see H.STEER_FRAC
                         local m = pickMistake(p, cornering, avoidSharp)
                         mistakeUntil[i] = now + m.dur
                         mistakeGrip[i]  = m.grip * sevScale
