@@ -327,6 +327,15 @@ K.CAUTION_DEFEND = -0.25
 K.ATTACK_AGGR_ADD = 0.25
 K.DEFEND_AGGR_ADD = 0.12
 K.AGGR_CRUISE = 0.55       -- fallback baseline only if the car's aggression can't be read
+-- AGGRESSION BASE (harness A/B: R.AGGR_BASE_FIX). car.aiAggression reads back what Verve itself last wrote with
+-- physics.setAIAggression, so for a car without a profile 'the car's own value' above was last frame's OUTPUT: the
+-- per-driver spread and every attack/defend boost compounded frame on frame (a positive-spread car ratchets to 1.0
+-- while cruising, a negative one sinks to 0.15). With this on, each car's own aggression is read ONCE per session,
+-- before Verve's first write to it that session (R.aggrBase), and stays its base all session.
+R.AGGR_BASE_FIX = false
+R.AGGR_BASE_TOL = 0.03       -- a session's first read this close to Verve's last write is Verve's value (the override survives a restart)
+R.baseAggr = {}              -- [i] = the car's own aggression as read this session (-1 = unreadable); cleared by R.reset
+R.aggrPrev = {}              -- [i] = { base, set }: the last session's capture and Verve's last write to the car, for that guard
 K.OFFSET_SLEW = 0.8        -- units/sec offset may move (lower = smoother, less skittish)
 K.DEADZONE = 0.12       -- ignore tiny offsets (stay on the line)
 K.SIDE_HOLD = 1.2        -- s to hold a chosen side before allowing a flip (anti-dart)
@@ -497,6 +506,22 @@ function R.roomAt(s)
     local slow = clamp((R.ROOM_RHI - (rm.rad[k] or 1e4)) / math.max(1, R.ROOM_RHI - R.ROOM_RLO), 0, 1)
     if rm.pace[k] then slow = math.max(slow, clamp((R.ROOM_VHI - rm.pace[k]) / math.max(1, R.ROOM_VHI - R.ROOM_VLO), 0, 1)) end
     return slow * math.max(narrow, R.ROOM_WFLOOR or 0)
+end
+
+-- AGGR_BASE_FIX: the car's own aggression, read once per session. Called from R.evaluate before its setAIAggression, so
+-- the first call in a session reads the launcher's value -- unless CSP kept Verve's last write over a restart or a
+-- session change, which R.aggrPrev recognises (the previous capture is used then). A hot reload loses both tables:
+-- the first read after it is Verve's last write, a fixed error for the rest of that session (it no longer compounds).
+function R.aggrBase(i, car)
+    local b = R.baseAggr[i]
+    if b then return b end
+    local ok, a = pcall(function() return car.aiAggression end)
+    if not ok or type(a) ~= 'number' then a = -1 end
+    local p, read = R.aggrPrev[i], a
+    if p and p.set and math.abs(a - p.set) <= R.AGGR_BASE_TOL then a = p.base end
+    R.baseAggr[i] = a
+    pcall(ac.log, string.format('Verve: aggression base car %d = %.3f (read %.3f%s)', i, a, read, a ~= read and ', kept from last session' or ''))
+    return a
 end
 
 function R.evaluate(i, dt)
@@ -766,10 +791,11 @@ function R.evaluate(i, dt)
         -- value plus a per-driver spread (scaled by Variability) so the field isn't uniform.
         local prof = Drivers.statsOf(i)
         local baseA
+        if R.AGGR_BASE_FIX then baseA = R.aggrBase(i, me) end   -- read once per session, every car (a profile can be cleared mid-race)
         if prof then
             baseA = clamp(prof.aggr, 0.15, 1.0)
         else
-            baseA = me.aiAggression
+            baseA = baseA or me.aiAggression                     -- (switch off: the per-frame read-back, as before)
             if not baseA or baseA < 0 then baseA = K.AGGR_CRUISE end
             baseA = clamp(baseA, 0.2, 1.0)
             baseA = clamp(baseA + (hash01(i * 11 + 5) * 2 - 1) * K.AGGR_SPREAD * R.VARIABILITY, 0.15, 1.0)
@@ -1548,6 +1574,14 @@ function R.reset()
     cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {} }; R.cv2 = cv2
     R.crawlN = 0
     R.roomN = 0; R.roomAct = 0; R.evalN = 0; R.fastTuckN = 0; R.yellowSlowN = 0
+    -- AGGR_BASE_FIX: the next session reads each car afresh; this session's capture and Verve's last write carry over for
+    -- R.aggrBase's guard (empty while the switch is off: nothing happens)
+    for k, b in pairs(R.baseAggr) do
+        local L, p = R.last[k], R.aggrPrev[k]
+        local set = (L and type(L.aggr) == 'number') and clamp(L.aggr, 0, 1) or (p and p.set) or nil
+        R.aggrPrev[k] = { base = b, set = set }
+    end
+    R.baseAggr = {}
     R.last = {}
     pcall(Strategy.reset)
     scaled = false
