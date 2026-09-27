@@ -281,6 +281,28 @@ function script.update(dt)
                 end
             end
         end
+        -- (2026-09-27) the arm-time top-up above lands in the countdown and AC puts the player's SETUP fuel back at the green
+        -- (30 L in a GT3; 25 Sep races too): every player-slot race longer than ~6 laps pitted car 0 for fuel - the star
+        -- from last pitted on lap 6-7 in all 7 climbs of 26/27 Sep. Repeat it once per race session, 3 s into the race; a
+        -- no-op when car 0 already has the load, in a timed race (lib/fuel.lua owns that) or with a harness `fuel` override.
+        if Harness.autopilot and autopilotArmed and okS and simH and simH.isSessionStarted and simH.raceSessionType == ac.SessionType.Race
+            and Harness._fuelSess ~= simH.currentSessionIndex then
+            Harness._fuelT = (Harness._fuelT or 0) + dt
+            if Harness._fuelT > 3.0 then
+                Harness._fuelSess, Harness._fuelT = simH.currentSessionIndex, 0
+                pcall(function()
+                    if Fuel.timedSession(simH) or (type(Harness.fuel) == 'number' and Harness.fuel > 0) or not physics.setCarFuel then return end
+                    local fs = {}
+                    for i = 1, simH.carsCount - 1 do local c = ac.getCar(i); if c and c.fuel and c.fuel > 0 then fs[#fs + 1] = c.fuel end end
+                    table.sort(fs)
+                    local want, c0 = fs[math.ceil(#fs / 2)], ac.getCar(0)
+                    if want and c0 and (c0.fuel or 0) < want - 3 then
+                        physics.setCarFuel(0, want)
+                        ac.log(string.format('Verve harness: car 0 fuel %.0f -> %.0f L at the green (AI median)', c0.fuel or 0, want))
+                    end
+                end)
+            end
+        end
     end
     if not G.enabled then
         -- (local dev diagnostics still log a DISABLED race, so a baseline run can be compared; the race feed is an
