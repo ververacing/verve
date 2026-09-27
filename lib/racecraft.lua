@@ -153,6 +153,8 @@ R.OL_SIDESPACE = false        -- laps 0-1: alongside a car -> move the lateral t
 R.GRID_FADE_X = 1.0           -- multiplier on the grid-lane hold's fade distance (225 m x this; harness A/B)
 R.OL_AGGR_FORMULA = 0         -- laps 0-1: extra aggression trim (0..1) for formula / formula_jr (harness A/B)
 R.OL_REACT_MAX = 0            -- lights: per-driver reaction time up to this many s (0 = off; harness A/B)
+R.OL_REACT_STAR = 1           -- with OL_REACT_MAX > 0: a top-tier driver (tier 2, profile pace >= 0.75) draws his reaction from
+                              -- this fraction of the spread (0.25 = the quickest quarter): stars react like stars, rookies like rookies
 R.OL_CAUT_PROX = true         -- opening caution scaled by the gap ahead (leaders brake normally). DEFAULT 2026-09-18 (owner): F1 8.7 -> 5.8 in contact over 5 runs; with lanes Spa 7.0 vs 9.7
 R.OL_CORNER_PRIO = false      -- laps 0-1: alongside a car whose nose is ahead, corner coming -> take the outside line (harness A/B)
 R.FAST_TUCK = 0               -- km/h, 0 = off: above this on any lap, alongside a car whose nose is ahead with a bend coming -> lift to
@@ -1462,7 +1464,8 @@ function R.beginFrame()
                     cv2.back[j] = math.max(0, (front - x) * trackLen)
                     if cv2.back[j] > (cv2.depth or 0) then cv2.depth = cv2.back[j] end     -- the grid's depth (m), for OL_GRID_DEPTH
                     -- reaction time at the lights: a human grid never launches as one
-                    cv2.react[j] = (R.OL_REACT_MAX > 0) and (CV.REACT_MIN + math.max(0, R.OL_REACT_MAX - CV.REACT_MIN) * math.random()) or 0
+                    cv2.react[j] = (R.OL_REACT_MAX > 0) and (CV.REACT_MIN + math.max(0, R.OL_REACT_MAX - CV.REACT_MIN) * math.random()
+                        * ((R.OL_REACT_STAR < 1 and Strategy.tierOf(j) >= 2) and R.OL_REACT_STAR or 1)) or 0   -- (R.OL_REACT_STAR)
                 end
             end
         end)
