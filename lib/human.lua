@@ -38,9 +38,15 @@ H.rainfx        = nil      -- detected at first use: true when the RainFX module
 -- almost never; every mistake picked as a cornering one (found 2026-09-26). STEER_FRAC reads the angle as a fraction of lock
 -- instead, full cornering at STEER_CORNER of lock; a car without a usable steerLock keeps the old reading.
 H.STEER_FRAC    = false
-H.STEER_CORNER  = 0.35     -- x lock = full cornering (STEER_FRAC only). A fraction of lock is about a fraction of the road wheels'
-                           -- maximum angle (~17-20 deg on GT3 and F1 alike, ~30 on road cars). Estimated, not yet measured:
-                           -- 0.05-0.2 through fast corners, 0.3 at 80 km/h, 0.5+ in a hairpin, under 0.02 on a straight
+H.STEER_CORNER  = 0.13     -- x lock = full cornering (STEER_FRAC only; not a positive number -> 0.13). A fraction of lock is a
+                           -- fraction of the road wheels' maximum angle (~17-23 deg on GT3, ~30 on road cars). Estimated from
+                           -- geometry, not yet measured, GT3 (2.7 m wheelbase): ~0.22-0.28 at 80 km/h, ~0.13 at 120, 0.05-0.14
+                           -- in 200+ km/h sweepers counting understeer, under 0.02 on a straight; F1 (3.6 m, more grip) reads
+                           -- about twice that at speed. Dirty air only fires over 80 km/h and the tow over 150, so 0.13 = full
+                           -- dirty air up to ~120 km/h on GT3: the unit fix alone (no dirty air on straights, the tow back) at
+                           -- about dev0146's corner dose. A/B arm 0.35 (the -1..1 reading the code was written for) also cuts
+                           -- corner dirty air 50-80 %, most in the fast corners where following is hardest. Longer term,
+                           -- lateral g (car.acceleration.x) would track aero load better than the steering angle.
 
 -- amplitudes
 local PERSONALITY_AMP = 0.020
@@ -307,7 +313,7 @@ function H.cornering01(car, st)
         local ok, lock = pcall(lockOf, car)
         if ok and type(lock) == "number" and lock > 0 then
             local full = H.STEER_CORNER
-            if type(full) ~= "number" or full <= 0 then full = 0.35 end
+            if type(full) ~= "number" or not (full > 0) then full = 0.13 end      -- the default above (NaN too)
             return clamp(math.abs(st) / math.max(lock, 1) / full, 0, 1)
         end
     end
