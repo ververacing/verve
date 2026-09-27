@@ -1,3 +1,11 @@
+0.14.7
+- Repositioned cars keep their lap. A car that stops anywhere after the first sector line (up to 10 km on) is now put
+  back just before that line, so AC counts the lap. Before, a car that stopped in the last sector lost the lap and was
+  classified a lap down. In testing every such lap counted (11 of 11, against 0 of 11 before), with no contact after
+  the move. The car gives up the road back to that line, up to about two thirds of a lap at Spa: less than the lap it
+  used to lose.
+- Test switch added, off: a quicker reaction at the lights for top drivers.
+
 0.14.6
 - Timed races: AC fuels the AI for only 1.2 laps in a race run on the clock, and at their pit stop it sets the tank to
   empty, so cars queued in the pit lane and most of the field dropped out. Verve now fuels the AI for the clock and

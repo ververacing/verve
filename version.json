@@ -1,5 +1,5 @@
 {
-  "version": "0.14.6",
+  "version": "0.14.7",
   "url": "https://github.com/ververacing/verve/releases/latest",
-  "summary": "Timed races fixed (the AI no longer run dry and queue in the pit lane), repositioned cars keep their own fuel, and more of them keep their lap."
+  "summary": "Repositioned cars keep their lap wherever they stopped: no more cars classified a lap down after a crash in the last sector."
 }
