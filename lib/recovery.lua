@@ -1431,8 +1431,10 @@ function R.forceRecover(i)
         -- Repositions onto the racing line at the car's progress -- crucially, this DOES move a car out
         -- of the pit lane (AC's own resetCarState just repairs in place and leaves it stuck in the pits).
         repairBody(i, car)
-        if type(R.gateRetry[i]) == 'number' then R.gateRetry[i] = false end   -- (GATE_FAIL_RETRY) a forced move is HERE: it settles this stop (review 2026-09-28)
+        local gr = R.gateRetry[i]
+        if type(gr) == 'number' then R.gateRetry[i] = false end   -- (GATE_FAIL_RETRY) a forced move is HERE, never the retry spot (review 2026-09-28)
         done = putBackOnLine(sim, i, progress, center, true)   -- honest: false if the physics call failed
+        if not done and type(gr) == 'number' then R.gateRetry[i] = gr end   -- nothing moved (held for traffic): the retry still stands
         overriding[i] = true; releaseControls(i)             -- whatever we last wrote to its controls, let go
         recT[i] = nil; stuckT[i] = nil; repaired[i] = nil; repairRecT[i] = nil
         rescued[i] = nil; handedBack[i] = nil; limpT[i] = nil; limpDone[i] = nil; hasMoved[i] = true
