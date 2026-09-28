@@ -151,6 +151,11 @@ R.OL_SPINYELLOW = false       -- opening lap: a sideways / much slower car ahead
 R.OL_SIDEYIELD = false        -- opening lap: alongside a car whose nose is ahead, corner coming -> tuck in behind it (harness A/B)
 R.OL_SIDESPACE = false        -- laps 0-1: alongside a car -> move the lateral target away from it, leave a car's width (harness A/B)
 R.GRID_FADE_X = 1.0           -- multiplier on the grid-lane hold's fade distance (225 m x this; harness A/B)
+R.OL_STAR_FUNNEL = 0          -- 0-1: for a top-tier driver, shrink the grid-lane hold's FADE DISTANCE by this fraction times his
+                              -- pace edge over a rookie (same edge formula as OL_STAR_ROOM), capped at 60% shorter even at 1.0.
+                              -- He still plants his own lateral spot at the green like everyone else (the CAPTURE is untouched)
+                              -- -- this only lets him merge onto the racing line and start hunting gaps sooner than a rookie
+                              -- would. 0 = off (today's flat 225 m x GRID_FADE_X for every car).
 R.OL_AGGR_FORMULA = 0         -- laps 0-1: extra aggression trim (0..1) for formula / formula_jr (harness A/B)
 R.OL_REACT_MAX = 0            -- lights: per-driver reaction time up to this many s (0 = off; harness A/B)
 R.OL_REACT_STAR = 1           -- with OL_REACT_MAX > 0: a top-tier driver (tier 2, profile pace >= 0.75) draws his reaction from
@@ -1335,14 +1340,20 @@ function R.evaluate(i, dt)
             holdSign[i] = side; holdUntil[i] = os.clock() + K.SIDE_HOLD
             laneHeld = true
         end
-        if not laneHeld and myLap == 0 and crowd >= 1 and olS < K.GRID_FADE_END * R.GRID_FADE_X
+        local funnelFade = K.GRID_FADE_END * R.GRID_FADE_X   -- (R.OL_STAR_FUNNEL) shrunk below for a fast driver
+        if R.OL_STAR_FUNNEL > 0 and Strategy.tierOf(i) >= 2 then
+            local st = Drivers.statsOf(i)
+            local edge = clamp(((st and st.pace or 0) - 0.30) / 0.70, 0, 1)
+            funnelFade = funnelFade * (1 - clamp(R.OL_STAR_FUNNEL * edge, 0, 0.6))
+        end
+        if not laneHeld and myLap == 0 and crowd >= 1 and olS < funnelFade
            and not (R.LANE_MIN_HALF > 0 and (cv2.halfMin or 6.0) < R.LANE_MIN_HALF) then   -- a one-car road has no columns to hold
             if gridLat[i] == nil and olS < K.GRID_CAPTURE then
                 gridLat[i] = myLat
                 if R.GRID_HOLD_MAXLAT > 0 and math.abs(myLat) > R.GRID_HOLD_MAXLAT then gridLat[i] = 0 end   -- off the road: aim for the line
             end
             if gridLat[i] then
-                target = clamp(gridLat[i] * K.GRID_HOLD * clamp(1 - math.max(0, olS) / (K.GRID_FADE_END * R.GRID_FADE_X), 0, 1), -1, 1)
+                target = clamp(gridLat[i] * K.GRID_HOLD * clamp(1 - math.max(0, olS) / funnelFade, 0, 1), -1, 1)
             end
         end
         -- LEAVE A CAR'S WIDTH (laps 0-1): alongside another car, move the target away from it. Both cars of a pair
