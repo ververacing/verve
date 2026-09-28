@@ -220,7 +220,7 @@ function script.update(dt)
             if type(Harness.stopAtLap) == 'number' and Harness.stopAtLap > 0 and leaderLaps >= Harness.stopAtLap and not harnessQuit then
                 -- don't quit in the same frame as the crossing: the feed's lap event for this lap and the next
                 -- diag snapshot have not been written yet, so every tool that counts laps from them would
-                -- under-read the race by one (PC #2, 2026-09-24). The diag writes every 8 s, so clear that.
+                -- under-read the race by one (second test PC, 2026-09-24). The diag writes every 8 s, so clear that.
                 if harnessStopT == 0 then harnessStopT = os.clock() end
                 if os.clock() - harnessStopT >= 10 then
                     harnessQuit = true
@@ -430,7 +430,7 @@ function script.update(dt)
     Telemetry.UNATTENDED = Harness ~= nil and Harness.autopilot == true
     -- AC puts the camera back to cockpit when a weekend moves from practice to the race, and the chase camera
     -- was set once, 2 s into the FIRST session only - so every weekend race ran the heavier cockpit render
-    -- unattended (PC #2 spotted it by eye, 2026-09-24). Re-asserting beats detecting the change: a timer
+    -- unattended (spotted by eye on the second test PC, 2026-09-24). Re-asserting beats detecting the change: a timer
     -- cannot miss an event it never has to notice.
     if Harness and Harness.autopilot and os.clock() - harnessCamT > 1.0 then
         harnessCamT = os.clock()
@@ -679,7 +679,7 @@ function script.windowMain()
     if ui.itemHovered() then ui.setTooltip('How hard the field attacks/defends. 0 = passive, 0.7 = default, 1.5 = elbows out.') end
     local bg = ui.slider('Base AI grip##bg', G.baseGrip, 0.85, 1.50, '%.2f')
     if bg ~= G.baseGrip then setG('baseGrip', bg) end
-    if ui.itemHovered() then ui.setTooltip('Grip the AI has for its own racing line. 1.20 = stock AC AI (default; line speeds are calibrated for this). Below that = more human/on-the-edge but they wash wide if too low. Above 1.20 = extra stick + speed (keeps them planted / competitive at lower difficulty). Pace also scales with the race difficulty %.') end
+    if ui.itemHovered() then ui.setTooltip('Grip the AI has for its own racing line. 1.20 = stock AC AI (default; line speeds are calibrated for this). Below that = more human/on-the-edge but they wash wide if too low. Above 1.20 = extra stick + speed (keeps them planted / competitive at lower difficulty). Pace also scales with the race difficulty % (cars without a driver; a driver sets its own pace).') end
 
     ui.newLine()
     ui.separator()

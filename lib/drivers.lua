@@ -24,7 +24,7 @@ local SPREAD_PCT = 8.0     -- lap-time % between a 1.0-rated driver and a 0.0-ra
 -- slider no longer applies to profiled cars, and nothing depends on who else is on the grid (before, the fastest profile ran
 -- at the slider and the rest were spread below it, so an all-Rookie grid ran at full slider pace). A driver at PACE_REF or
 -- above runs at expert pace (difficulty 100); each 1.0 of rating below costs PACE_K lap-time %, on the car's class curve:
--- Rookie (0.30) +10 % = difficulty 80, Midfielder (0.60) +5 % = difficulty 90, Veteran (0.85) +0.8 % = ~99. The slider still
+-- Rookie (0.30) +10 % = difficulty 80, Midfielder (0.60) +5 % = difficulty 90, Veteran (0.85) +0.8 % = ~98. The slider still
 -- sets every car without a profile.
 D.PACE_ABS = false
 D.PACE_REF = 0.90

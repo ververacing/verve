@@ -170,10 +170,10 @@ R.FAST_TUCK_TS = false        -- true: only into a bend the trouble-spot map has
 R.FAST_TUCK_SIDE_S = 0        -- s, 0 = off: the fast tuck also counts a car CLOSE BEHIND AND OFFSET (not only overlapping): other car's nose
                               -- ahead within max(CV.SIDE_M, speed x this) - 0.15 s is 11 m at 260 km/h
 R.FAST_TUCK_LATMAX = 0        -- 0 = off: RAISES the lateral band's upper bound for that test (half-widths; values under CV.SIDE_LAT_MAX 0.7
-                              -- change nothing). PC #2 2026-09-26 ft200_3: the car behind sat 7-9 m back, its lateral gap went 0.46 -> 0.64
+                              -- change nothing). Second test PC 2026-09-26 ft200_3: the car behind sat 7-9 m back, its lateral gap went 0.46 -> 0.64
                               -- -> 0.81 -> 0.94 in 0.25 s steps and left 0.2-0.7 between the 2nd and 3rd, so the tuck never fired
 R.FAST_TUCK_CLOSE = 15        -- km/h: with SIDE_S / LATMAX on, a car closing faster than this is committing to a pass, not squeezed - no tuck
-R.FAST_TUCK_MINLAP = 0        -- the rule acts from this lap on (Verve's lap count; 0 = every lap). PC #2 2026-09-26: lap 0-1 incidents
+R.FAST_TUCK_MINLAP = 0        -- the rule acts from this lap on (Verve's lap count; 0 = every lap). Second test PC 2026-09-26: lap 0-1 incidents
                               -- 25, 14 with FAST_TUCK 200 vs 5, 10 without - the lift into turn 1 in the opening pack concertinas
 R.fastTuckN = 0               -- diag: car-frames tucking in
 R.BG_T = 0                    -- >0: the guard's reach is closing speed x this many seconds (min CV.BG_M) and a much slower car ahead counts as braking (A/B)

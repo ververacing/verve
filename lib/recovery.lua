@@ -208,7 +208,7 @@ R.DROP_SKIP_M = 150        -- ...the next one goes this much further along the t
 local dropFailed = {}      -- cars whose last reposition did NOT rejoin: no second drop -- they retire
 -- (DROP_RETRY and OW_CLEAR lived here until 2026-09-24. Retrying a failed reposition made the rate WORSE
 -- (75.0% -> 66.7% over three pairs at Baku) and extra clearance for open-wheel cars did nothing (76.4% vs
--- 75.0%, cars lost unchanged) - and PC #2 then showed the class effect was the tracks: F1 repositioned 15/16
+-- 75.0%, cars lost unchanged) - and the second test PC then showed the class effect was the tracks: F1 repositioned 15/16
 -- at Monza against GT3 7/7. Both removed rather than left switched off: dead switches cost upvalue headroom
 -- on a module three candidates from LuaJIT's limit, and this one carried two real bugs of its own.)
 R.dropN, R.dropOK = 0, 0   -- session tally (for the UI / diagnostics)

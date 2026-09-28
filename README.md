@@ -41,8 +41,11 @@ detected class and set per‑car levels on the grid before the lights.
 
 ## Before you race (three things that matter)
 1. **The difficulty slider is real.** 80 is a beginner field, 90 an intermediate one, 100 a strong club racer.
-   Verve makes the launcher's number the truth in every mode (Content Manager's per-car grid levels only keep
-   their spread around it), so start where you actually are — 100 is not the default, it's the top.
+   Verve makes the launcher's number the truth for every car without a driver (Content Manager's per-car grid
+   levels only keep their spread around it, unless you hand-set them more than 10 apart), so start where you
+   actually are — 100 is not the default, it's the top. A car you give a driver in the Drivers panel runs at
+   that driver's own pace instead, whatever the slider says: Rookie = difficulty 80, Midfielder = 90, Veteran
+   about 98, the fastest real drivers 99-100. Career events use their own difficulty curve.
 2. **Keep damage on, 50 % or more.** With damage off nothing ever retires, a wrecked car sits on the line all
    race, and the field never strings out the way a real one does.
 3. **Turn off other AI mods and CSP's AI rubber‑banding / adaptation.** They write the same AI values Verve
@@ -52,9 +55,11 @@ detected class and set per‑car levels on the grid before the lights.
 - Verve controls AI grip via CSP's public physics API. If you also run another AI‑grip mod
   (e.g. AI Whisperer), they'll fight over the setting — Verve detects common ones and lets you
   defer ("Control AI grip" off; self‑recovery keeps working). **Use one AI‑grip layer at a time.**
-- Pace still scales with the **race difficulty %**. **Base AI grip** 1.20 = stock AC (default);
+- Pace still scales with the **race difficulty %** for cars without a driver (a car with a driver runs at
+  that driver's pace). **Base AI grip** 1.20 = stock AC (default);
   lower for a more human, on‑the‑edge feel; above 1.20 for extra stick.
-- The **aggression slider** in Quick Race is respected — Verve uses it as the racecraft baseline.
+- The **aggression slider** in Quick Race is respected — Verve uses it as the racecraft baseline for cars
+  without a driver (a car with a driver uses that driver's aggression).
 - Settings and per‑car overrides are stored via CSP app storage, so **updates never wipe your
   tuning**.
 
