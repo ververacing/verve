@@ -16,8 +16,8 @@ racing, on **any** car and track. Toggle and tune everything in the in‑game pa
   is auto‑detected (tags → name → car data) and overridable per car.
 - **Our own racecraft** — cars close up and pressure, dive the inside of a corner when it's open,
   pass on the side the defender isn't, and make one clean defensive move. Per‑class tactics (an
-  F1 slipstreams from far and passes precisely; a touring car dive‑bombs the inside) and per‑car
-  levels (chill / clean / intense). Collision‑awareness stays on, so they position, not ram.
+  F1 slipstreams from far and passes precisely; a touring car dive‑bombs the inside).
+  Collision‑awareness stays on, so they position, not ram.
 - **Human errors** — occasional *gentle* bobbles on forgiving cars, never on high‑downforce
   open‑wheelers. Grip changes are slew‑limited so an error never snaps a car into a spin.
 - **Self‑recovery** — spun or beached AI that aren't wrecked get themselves going again: gentle

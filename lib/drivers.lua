@@ -20,6 +20,13 @@ local function clamp(x, a, b) if x < a then return a elseif x > b then return b 
 -- field genuinely strings out instead of bunching. Widened (0.16 -> 0.32) because the old value barely
 -- separated the field: a mid-pack driver ended up only a few hundredths of an AI level off the ace.
 local SPREAD_PCT = 8.0     -- lap-time % between a 1.0-rated driver and a 0.0-rated one (a Rookie at 0.30 vs a 0.96 star ~ 5.3%; real F1 fields spread 2-3%, club grids 5-10%)
+-- D.PACE_ABS (user setting paceAbs, off by default; owner 2026-09-28): a profile's pace is set against a FIXED reference, not the
+-- fastest driver on the grid. Today an all-Rookie grid runs at the full slider pace (the Rookie IS the fastest driver there).
+-- With it on: a driver at PACE_REF or above runs at the slider; below that, PACE_K lap-time % per 1.0 of rating -- Rookie (0.30)
+-- +10 % = slider 80, Midfielder (0.60) +5 % = slider 90, Veteran (0.85) +0.8 %. The slider still sets the top of the field.
+D.PACE_ABS = false
+D.PACE_REF = 0.90
+D.PACE_K   = 16.67
 
 -- Detected class -> roster bucket. Classes not listed (road) offer only the archetypes.
 local CLASS_BUCKET = {
@@ -563,6 +570,20 @@ function D.applyFixed(spec)
     paceDirty = true
 end
 
+-- one archetype for every AI car (the Drivers panel's quick fill: all Rookie / Midfielder / Veteran). Slot 0 is left to the
+-- player, as with Randomize.
+function D.fillGrid(key)
+    if D.LOCKED or not BY_KEY[key] then return end
+    pcall(function()
+        local sim = ac.getSim(); if not sim then return end
+        for i = 1, sim.carsCount - 1 do
+            local car = ac.getCar(i)
+            if car and car.isAIControlled then assigned[i] = key; applyName(i) end
+        end
+        paceDirty = true
+    end)
+end
+
 -- how many real-name profiles vs archetypes are on the grid (telemetry)
 function D.counts()
     local real, arch = 0, 0
@@ -626,7 +647,8 @@ function D.applyPace(i, base)
             -- the fastest profile on the grid runs at `base`; the rest are spread BELOW it by pace rating,
             -- in lap-time terms (SPREAD_PCT per 1.0 of rating), converted to a level through the measured curve
             local basePct = Difficulty.levelToPct(base)
-            lvl = math.min(base, Difficulty.pctToLevel(basePct + (fieldMaxPace - st.pace) * SPREAD_PCT))
+            local gapPct = D.PACE_ABS and math.max(0, (D.PACE_REF - st.pace) * D.PACE_K) or (fieldMaxPace - st.pace) * SPREAD_PCT
+            lvl = math.min(base, Difficulty.pctToLevel(basePct + gapPct))
         end
         lvl = math.floor(lvl * 1000 + 0.5) / 1000
         if lastApplied[i] ~= lvl then physics.setAILevel(i, lvl); lastApplied[i] = lvl end   -- only on change (18 cars x 60 Hz otherwise)

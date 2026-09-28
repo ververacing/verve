@@ -51,6 +51,7 @@ local DEFAULTS = {
     careerCurve = true, shareData = false, strategy = true, raceStart = 'calm', sliderCurve = true, repairOnTrack = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     timedFuel = true,    -- DEFAULT 0.14.6 (lib/fuel.lua): fuel a TIMED race's AI for the clock, stop AC's empty-tank pit loop
+    paceAbs = false,     -- harness switch (lib/drivers.lua D.PACE_ABS): profile pace against a fixed reference, not the fastest on the grid
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
 
@@ -63,6 +64,7 @@ local S = ac.storage({
     careerCurve = true, shareData = false, strategy = true, raceStart = 'calm', sliderCurve = true, repairOnTrack = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     timedFuel = true,
+    paceAbs = false,
     autosave = true, schema = 1,
 })
 -- settings migration: 0.12 made crash repair + trouble spots core (they were opt-in experiments; a day-long
@@ -320,6 +322,7 @@ function script.update(dt)
     Difficulty.CAREER_CURVE = G.careerCurve
     Difficulty.SLIDER_CURVE = G.sliderCurve ~= false
     Drivers.LOCKED = Career.active            -- career: the difficulty curve sets the field; profiles are off
+    Drivers.PACE_ABS = G.paceAbs == true      -- (lib/drivers.lua) profile pace against a fixed reference
     Drivers.autoMatch()                       -- once per session: AC driver names that match the roster get their profile
     Human.ENABLED       = true
     Human.HUMAN_VAR     = G.humanVar
@@ -394,7 +397,7 @@ function script.update(dt)
     Recovery.CRASH_REPAIR = G.crashRepair
     Recovery.REPAIR_BODY  = G.repairOnTrack ~= false
     if G.recovery then Recovery.update(dt) end
-    if G.timedFuel then pcall(Fuel.update, sim, dt) end   -- timed races: green fuel load + pit-box guard (lib/fuel.lua)
+    if G.timedFuel and not pcall(Fuel.update, sim, dt) then luaErrors = luaErrors + 1 end   -- timed races: green fuel load + pit-box guard (lib/fuel.lua)
     Troublespots.ENABLED = G.troubleSpots
     Troublespots.update(dt)
 
@@ -417,10 +420,11 @@ function script.update(dt)
         })
     end) end
     Feed.ENABLED = G.raceFeed
-    if G.raceFeed then pcall(Feed.update, dt, { rc = Racecraft.last, recState = Recovery.stateOf, recentDrops = Recovery.recentDrops }) end
-    pcall(Contacts.update, dt)
-    pcall(Fault.update, dt)
-    pcall(Watch.update, dt)
+    -- every module error counts toward luaErrors (the reports' error column), not only the per-car loop's (review 2026-09-28)
+    if G.raceFeed and not pcall(Feed.update, dt, { rc = Racecraft.last, recState = Recovery.stateOf, recentDrops = Recovery.recentDrops }) then luaErrors = luaErrors + 1 end
+    if not pcall(Contacts.update, dt) then luaErrors = luaErrors + 1 end
+    if not pcall(Fault.update, dt) then luaErrors = luaErrors + 1 end
+    if not pcall(Watch.update, dt) then luaErrors = luaErrors + 1 end
     Telemetry.ENABLED = G.shareData == true
     Telemetry.VERSION = Update.LOCAL_VERSION or '0.0.0'
     Telemetry.UNATTENDED = Harness ~= nil and Harness.autopilot == true
@@ -432,7 +436,7 @@ function script.update(dt)
         harnessCamT = os.clock()
         pcall(function() ac.setCurrentCamera(ac.CameraMode.Drivable); ac.setCurrentDrivableCamera(ac.DrivableCamera.Chase) end)
     end
-    if Telemetry.ENABLED then pcall(Telemetry.update, dt, telemetryCtx()) end
+    if Telemetry.ENABLED and not pcall(Telemetry.update, dt, telemetryCtx()) then luaErrors = luaErrors + 1 end
     local tFrame1 = os.preciseClock and os.preciseClock() or os.clock()
     frameMs = frameMs + (tFrame1 - tFrame0) * 1000; frameN = frameN + 1
 end
@@ -688,6 +692,14 @@ function script.windowMain()
         if ui.itemHovered() then ui.setTooltip('Assign every AI car a unique driver from its class (overflow uses the Rookie / Midfielder / Veteran archetypes). Kept through a race weekend on the same grid (practice, qualifying, race); a different grid starts fresh.') end
         ui.sameLine()
         if ui.button('Clear drivers') then Drivers.clearAll() end
+        if ui.button('All Rookies') then Drivers.fillGrid('arch_rookie') end
+        if ui.itemHovered() then ui.setTooltip('Give every AI car the Rookie profile. Use Randomize or Clear to undo.') end
+        ui.sameLine()
+        if ui.button('All Midfielders') then Drivers.fillGrid('arch_midfield') end
+        if ui.itemHovered() then ui.setTooltip('Give every AI car the Midfielder profile.') end
+        ui.sameLine()
+        if ui.button('All Veterans') then Drivers.fillGrid('arch_veteran') end
+        if ui.itemHovered() then ui.setTooltip('Give every AI car the Veteran profile.') end
         driverGridList()
     end
     ui.newLine()

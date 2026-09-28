@@ -37,7 +37,7 @@ H.rainfx        = nil      -- detected at first use: true when the RainFX module
 -- angle past 0.35 deg counted as full cornering: dirty air on every close follow above 80 km/h, straights included; the tow
 -- almost never; every mistake picked as a cornering one (found 2026-09-26). STEER_FRAC reads the angle as a fraction of lock
 -- instead, full cornering at STEER_CORNER of lock; a car without a usable steerLock keeps the old reading.
-H.STEER_FRAC    = false
+H.STEER_FRAC    = false  -- STATUS 2026-09-28: experimental - the unit bug is real, but the fix showed no gain in its A/Bs, so it stays off
 H.STEER_CORNER  = 0.13     -- x lock = full cornering (STEER_FRAC only; not a positive number -> 0.13). A fraction of lock is a
                            -- fraction of the road wheels' maximum angle (~17-23 deg on GT3, ~30 on road cars). Estimated from
                            -- geometry, not yet measured, GT3 (2.7 m wheelbase): ~0.22-0.28 at 80 km/h, ~0.13 at 120, 0.05-0.14

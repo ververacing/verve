@@ -1,5 +1,5 @@
 -- lib/fuel.lua -- TIMED RACES: AC fuels its AI for 1.2 laps, then empties the tank at every stop. Switch G.timedFuel
--- (default off; harness: --settings {"timedFuel":true}).
+-- (default ON since 0.14.6; harness: --settings {"timedFuel":false} to compare).
 --
 -- What AC does, read from its own log.txt (harness races, 2026-09-26):
 --   * as a race session starts, each AI car is fuelled for ([SESSION_n] LAPS + 1) x 1.2 x its fuel per lap ('Race
