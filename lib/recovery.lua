@@ -252,6 +252,9 @@ R.GATE_FAIL_RETRY = false  -- (owner's 30-lap Baku race 2026-09-28) true: a GATE
 R.gateRetry = {}           -- [i] = where the car stopped before its failed gated drop (number); false once the retry is spent
 R.gateRetryT = {}          -- [i] = when that retry was granted: it is for the car's NEXT stop, not one laps later
 R.GATE_RETRY_S = 90        -- seconds a granted retry stays valid (review 2026-09-28: an unused one sent a later stop back to an old spot)
+function R.retryLive(i)    -- a granted, unspent, fresh retry: it may use one rescue past MAX_RESCUES (its castle re-drops used them up)
+    return R.GATE_FAIL_RETRY and type(R.gateRetry[i]) == 'number' and os.clock() - (R.gateRetryT[i] or 0) <= R.GATE_RETRY_S
+end
 local GATE_MARGIN = 0.006  -- how far before the split to drop (~25 m on a 4 km track): the car must CROSS it
 local GATE_BACK_MAX = 0.03 -- ...looking up to this far before it for a STRAIGHT bit of road (a fixed mid-corner drop
                            -- point wrecked the 2026-09-14 19:59 race: 41 drops, 38 incidents, all landing on one spot)
@@ -680,7 +683,7 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
         pendingTemps[i] = { temps = temps, untilT = os.clock() + TEMP_HOLD, fuel = fuel0 }
     end
     if okp then
-        if retrying then R.gateRetry[i] = false end
+        if retrying then R.gateRetry[i] = false; hopeless[i] = nil end   -- (a hopeless mark from before the grant: the retry is judged instead)
         rejoinUntil[i] = os.clock() + REJOIN_RAMP            -- rejoin gently (see REJOIN_RAMP)
         drops[#drops + 1] = { i = i, t = os.clock(), ok = nil, spl = progress, sus = maxSusp(ac.getCar(i)), tt = temps,
                               gs = gated and reqProgress or nil }   -- judged over the next DROP_JUDGE_T; gs = the stop spot of a gated drop
@@ -850,7 +853,8 @@ function R.update(dt)
                 -- kept dragging the brake on a car at 180 km/h, its clock kept running, and after 45 s it was
                 -- "rescued" -- teleported -- or parked mid-race. Up to speed = AC's AI owns it again.
                 if spd > REJOIN_HANDBACK and (recT[i] or 0) > 0 then endRec(i) end
-                if spd > REJOIN_HANDBACK and R.gateRetry[i] then R.gateRetry[i] = false end   -- (GATE_FAIL_RETRY) racing again: the retry was for THAT stop
+                if spd > 60 and R.gateRetry[i] then R.gateRetry[i] = false end   -- (GATE_FAIL_RETRY) racing again at the judge's rejoin speed: the
+                -- retry was for THAT stop (40 km/h is a failing castle landing's own run; review 2026-09-28)
             end
             -- NOTE: we deliberately DO let a given-up car re-enter recovery. An earlier build stopped
             -- re-arming ("handed back to AC") and the data was unambiguous: far-off recoveries fell from
@@ -1038,7 +1042,7 @@ function R.update(dt)
             -- in geometry, not just damaged), or an absolute time backstop. Until then we keep blocking
             -- AC's retirement and working the car (backups, repair, driving it out).
             local exhausted = repaired[i] and repairRecT[i] and (recT[i] - repairRecT[i]) > POST_REPAIR_HOLD
-            if knot[i] and (rescueN[i] or 0) >= MAX_RESCUES then knot[i] = nil end   -- no rescues left: drive it like any other
+            if knot[i] and (rescueN[i] or 0) >= MAX_RESCUES and not R.retryLive(i) then knot[i] = nil end   -- no rescues left: drive it like any other
             if exhausted or recT[i] > GIVEUP_TIME or knot[i] then
                 -- ONE rescue attempt before we EVER let a car retire (this is what breaks a pileup): if it
                 -- isn't terminally wrecked, give it a fresh body and force it back onto the racing line at a
@@ -1046,7 +1050,7 @@ function R.update(dt)
                 -- instead of restacking on the same spot -- then restart recovery and KEEP protecting it from
                 -- AC's retirement while it drives away. Cars in a heap get separated and rejoin, rather than
                 -- all timing out together and mass-retiring.
-                if R.CRASH_REPAIR and dropsAllowed(i) and (rescueN[i] or 0) < MAX_RESCUES and not terminalDamage(car) then
+                if R.CRASH_REPAIR and dropsAllowed(i) and ((rescueN[i] or 0) < MAX_RESCUES or R.retryLive(i)) and not terminalDamage(car) then
                     -- Traffic-aware: wait (protected) for a gap before dropping it on the line, and only
                     -- FORCE the drop after RESCUE_FORCE_T. A forced drop straight in front of a car arriving
                     -- at 150 km/h wrecked both of them.
