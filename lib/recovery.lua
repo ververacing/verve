@@ -250,6 +250,8 @@ R.GATE_FAIL_RETRY = false  -- (owner's 30-lap Baku race 2026-09-28) true: a GATE
                            -- Baku's split 1 is the castle entry: 27 of 35 drops landed there, one failed drop set dropFailed and
                            -- the car's next stop parked it 'hopeless' (7 cars). One retry per car; a second failure is final.
 R.gateRetry = {}           -- [i] = where the car stopped before its failed gated drop (number); false once the retry is spent
+R.gateRetryT = {}          -- [i] = when that retry was granted: it is for the car's NEXT stop, not one laps later
+R.GATE_RETRY_S = 90        -- seconds a granted retry stays valid (review 2026-09-28: an unused one sent a later stop back to an old spot)
 local GATE_MARGIN = 0.006  -- how far before the split to drop (~25 m on a 4 km track): the car must CROSS it
 local GATE_BACK_MAX = 0.03 -- ...looking up to this far before it for a STRAIGHT bit of road (a fixed mid-corner drop
                            -- point wrecked the 2026-09-14 19:59 race: 41 drops, 38 incidents, all landing on one spot)
@@ -360,7 +362,7 @@ local function judgeDrops(now)
             elseif now - d.t > DROP_JUDGE_T or (c and c.isRetired) then
                 d.ok = false
                 local retry = R.GATE_FAIL_RETRY and d.gs and R.gateRetry[d.i] == nil
-                if retry then R.gateRetry[d.i] = d.gs   -- one ungated retry where it stopped
+                if retry then R.gateRetry[d.i] = d.gs; R.gateRetryT[d.i] = now   -- one ungated retry where it stopped
                 else dropFailed[d.i] = true end
                 -- a failure that earns a retry is not scored: the retry is judged on its own. (Counting it dragged
                 -- the session rate down on Baku, where castle-entry landings fail: 4 misses in 5 turn repositioning off.)
@@ -553,9 +555,13 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
     if not center then return false end
     local reqProgress = progress     -- where the car got stuck (the gate moves the landing spot; the escape must see the corner)
     local callerSkip = skipGate      -- the gate's second stage passes true (the same-spot escape sets skipGate itself below)
+    local retrying = false
     if R.GATE_FAIL_RETRY and type(R.gateRetry[i]) == 'number' then   -- (R.GATE_FAIL_RETRY) its gated landing failed: back where it stopped
-        progress = R.gateRetry[i]; reqProgress = progress; R.gateRetry[i] = false; skipGate = true
-        center = ac.trackProgressToWorldCoordinate(progress, false) or center
+        if os.clock() - (R.gateRetryT[i] or 0) > R.GATE_RETRY_S then R.gateRetry[i] = false   -- stale: this is a new stop, drop it as usual
+        else
+            progress = R.gateRetry[i]; reqProgress = progress; retrying = true; skipGate = true   -- (spent below, once the car has moved:
+            center = ac.trackProgressToWorldCoordinate(progress, false) or center              -- a frame held for traffic keeps it)
+        end
     end
     -- same-spot escape: dropped here before (twice within DROP_SAME_M)? go DROP_SKIP_M further on, past whatever it cannot take
     local spots = dropSpots[i]
@@ -671,6 +677,7 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
         pendingTemps[i] = { temps = temps, untilT = os.clock() + TEMP_HOLD, fuel = fuel0 }
     end
     if okp then
+        if retrying then R.gateRetry[i] = false end
         rejoinUntil[i] = os.clock() + REJOIN_RAMP            -- rejoin gently (see REJOIN_RAMP)
         drops[#drops + 1] = { i = i, t = os.clock(), ok = nil, spl = progress, sus = maxSusp(ac.getCar(i)), tt = temps,
                               gs = gated and reqProgress or nil }   -- judged over the next DROP_JUDGE_T; gs = the stop spot of a gated drop
@@ -1362,7 +1369,7 @@ function R.reset()
     lastRepairT = {}
     for i in pairs(overriding) do releaseControls(i) end   -- hand every car's controls back at a session change
     overridesCleared = false     -- and release every throttle / top-speed / stop-counter hold on the next update (they persist across sessions)
-    drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}; R.gateRetry = {}
+    drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}; R.gateRetry = {}; R.gateRetryT = {}
     dropCount, dropSpots, escapeLogged = {}, {}, {}
     R.stallEngT, R.stallRestarts = {}, {}; R.stallRestartN = 0
     R.wetHint = {}
