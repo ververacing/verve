@@ -359,9 +359,12 @@ local function judgeDrops(now)
                 if (d.sus or 0) < R.DROP_RATE_SUSP then R.rateN = R.rateN + 1; R.rateOK = R.rateOK + 1 end
             elseif now - d.t > DROP_JUDGE_T or (c and c.isRetired) then
                 d.ok = false
-                if R.GATE_FAIL_RETRY and d.gs and R.gateRetry[d.i] == nil then R.gateRetry[d.i] = d.gs   -- one ungated retry where it stopped
+                local retry = R.GATE_FAIL_RETRY and d.gs and R.gateRetry[d.i] == nil
+                if retry then R.gateRetry[d.i] = d.gs   -- one ungated retry where it stopped
                 else dropFailed[d.i] = true end
-                if (d.sus or 0) < R.DROP_RATE_SUSP then R.rateN = R.rateN + 1 end
+                -- a failure that earns a retry is not scored: the retry is judged on its own. (Counting it dragged
+                -- the session rate down on Baku, where castle-entry landings fail: 4 misses in 5 turn repositioning off.)
+                if not retry and (d.sus or 0) < R.DROP_RATE_SUSP then R.rateN = R.rateN + 1 end
             end
         end
         if d.ok == nil or now - d.t < DROP_JUDGE_T + 30 then keep[#keep + 1] = d end   -- (kept a bit longer for the diag trace)
