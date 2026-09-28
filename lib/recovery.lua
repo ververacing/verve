@@ -245,6 +245,11 @@ R.GATE_WALK_V2 = true      -- DEFAULT 0.14.6; false = 0.14.5. true: a gate-first
                            -- from the margin and subtracts the stagger afterwards, unchecked: it can land in a corner exit (review 2026-09-26).
                            -- Cost: cars whose staggered start is in a bend all stop at the first straight sample behind it, so their 45 m
                            -- spread shrinks to under one 0.004 step (18 m at 4.5 km, inside DROP_NEAR): A/B it on stacked gate drops too
+R.GATE_FAIL_RETRY = false  -- (owner's 30-lap Baku race 2026-09-28) true: a GATED drop that fails to rejoin does not ban the car's
+                           -- drops; its next drop goes back where it originally stopped, ungated - it loses the lap, not the race.
+                           -- Baku's split 1 is the castle entry: 27 of 35 drops landed there, one failed drop set dropFailed and
+                           -- the car's next stop parked it 'hopeless' (7 cars). One retry per car; a second failure is final.
+R.gateRetry = {}           -- [i] = where the car stopped before its failed gated drop (number); false once the retry is spent
 local GATE_MARGIN = 0.006  -- how far before the split to drop (~25 m on a 4 km track): the car must CROSS it
 local GATE_BACK_MAX = 0.03 -- ...looking up to this far before it for a STRAIGHT bit of road (a fixed mid-corner drop
                            -- point wrecked the 2026-09-14 19:59 race: 41 drops, 38 incidents, all landing on one spot)
@@ -353,7 +358,9 @@ local function judgeDrops(now)
                 d.ok = true; R.dropOK = R.dropOK + 1
                 if (d.sus or 0) < R.DROP_RATE_SUSP then R.rateN = R.rateN + 1; R.rateOK = R.rateOK + 1 end
             elseif now - d.t > DROP_JUDGE_T or (c and c.isRetired) then
-                d.ok = false; dropFailed[d.i] = true
+                d.ok = false
+                if R.GATE_FAIL_RETRY and d.gs and R.gateRetry[d.i] == nil then R.gateRetry[d.i] = d.gs   -- one ungated retry where it stopped
+                else dropFailed[d.i] = true end
                 if (d.sus or 0) < R.DROP_RATE_SUSP then R.rateN = R.rateN + 1 end
             end
         end
@@ -543,6 +550,10 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
     if not center then return false end
     local reqProgress = progress     -- where the car got stuck (the gate moves the landing spot; the escape must see the corner)
     local callerSkip = skipGate      -- the gate's second stage passes true (the same-spot escape sets skipGate itself below)
+    if R.GATE_FAIL_RETRY and type(R.gateRetry[i]) == 'number' then   -- (R.GATE_FAIL_RETRY) its gated landing failed: back where it stopped
+        progress = R.gateRetry[i]; reqProgress = progress; R.gateRetry[i] = false; skipGate = true
+        center = ac.trackProgressToWorldCoordinate(progress, false) or center
+    end
     -- same-spot escape: dropped here before (twice within DROP_SAME_M)? go DROP_SKIP_M further on, past whatever it cannot take
     local spots = dropSpots[i]
     if spots and #spots >= 2 then
@@ -658,7 +669,8 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
     end
     if okp then
         rejoinUntil[i] = os.clock() + REJOIN_RAMP            -- rejoin gently (see REJOIN_RAMP)
-        drops[#drops + 1] = { i = i, t = os.clock(), ok = nil, spl = progress, sus = maxSusp(ac.getCar(i)), tt = temps }   -- judged over the next DROP_JUDGE_T
+        drops[#drops + 1] = { i = i, t = os.clock(), ok = nil, spl = progress, sus = maxSusp(ac.getCar(i)), tt = temps,
+                              gs = gated and reqProgress or nil }   -- judged over the next DROP_JUDGE_T; gs = the stop spot of a gated drop
         pendingDrop[i] = { pos = pos, dir = dir, apiDir = apiDir, t = os.clock(), tries = 0 }   -- verify its heading next frame
         R.dropN = R.dropN + 1
         dropCount[i] = (dropCount[i] or 0) + 1
@@ -1347,7 +1359,7 @@ function R.reset()
     lastRepairT = {}
     for i in pairs(overriding) do releaseControls(i) end   -- hand every car's controls back at a session change
     overridesCleared = false     -- and release every throttle / top-speed / stop-counter hold on the next update (they persist across sessions)
-    drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}
+    drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}; R.gateRetry = {}
     dropCount, dropSpots, escapeLogged = {}, {}, {}
     R.stallEngT, R.stallRestarts = {}, {}; R.stallRestartN = 0
     R.wetHint = {}

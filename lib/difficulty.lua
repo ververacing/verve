@@ -75,6 +75,9 @@ function D.pctToLevel(pct, pts)
     return LEVEL_MIN
 end
 local pctToLevel = D.pctToLevel
+-- % slower than expert -> this car's AI level on its OWN class curve (driver profiles with D.PACE_ABS: a Rookie F1 and a
+-- Rookie GT3 are the same lap-time step off expert pace, not the same raw AC level)
+function D.levelForPct(i, pct) return pctToLevel(pct, (curveFor(i))) end
 -- and the forward direction (what a level costs), for the UI / reports
 function D.levelToPct(level, pts)
     local l = (level or 1) * 100
