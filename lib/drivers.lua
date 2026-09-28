@@ -649,7 +649,7 @@ function D.applyPace(i, base)
             -- the fastest profile on the grid runs at `base`; the rest are spread BELOW it by pace rating,
             -- in lap-time terms (SPREAD_PCT per 1.0 of rating), converted to a level through the measured curve
             local basePct = Difficulty.levelToPct(base)
-            if D.PACE_ABS then
+            if D.PACE_ABS and not D.LOCKED then   -- (a career event keeps its difficulty curve: an auto-matched name must not override it)
                 lvl = Difficulty.levelForPct(i, math.max(0, (D.PACE_REF - st.pace) * D.PACE_K))   -- (D.PACE_ABS) the profile's own pace
             else
                 lvl = math.min(base, Difficulty.pctToLevel(basePct + (fieldMaxPace - st.pace) * SPREAD_PCT))
