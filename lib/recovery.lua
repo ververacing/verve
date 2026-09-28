@@ -361,9 +361,10 @@ local function judgeDrops(now)
                 if (d.sus or 0) < R.DROP_RATE_SUSP then R.rateN = R.rateN + 1; R.rateOK = R.rateOK + 1 end
             elseif now - d.t > DROP_JUDGE_T or (c and c.isRetired) then
                 d.ok = false
-                local retry = R.GATE_FAIL_RETRY and d.gs and R.gateRetry[d.i] == nil
+                local retry = R.GATE_FAIL_RETRY and d.gs and R.gateRetry[d.i] == nil and not (c and c.isRetired)   -- (a parked car: parkInPits set false)
                 if retry then R.gateRetry[d.i] = d.gs; R.gateRetryT[d.i] = now   -- one ungated retry where it stopped
-                else dropFailed[d.i] = true end
+                elseif not (R.gateRetryT[d.i] and d.t < R.gateRetryT[d.i]) then dropFailed[d.i] = true end   -- (a drop made BEFORE the
+                -- retry was granted, judged after it, must not void it: the retry's own record decides. Review 2026-09-28)
                 -- a failure that earns a retry is not scored: the retry is judged on its own. (Counting it dragged
                 -- the session rate down on Baku, where castle-entry landings fail: 4 misses in 5 turn repositioning off.)
                 if not retry and (d.sus or 0) < R.DROP_RATE_SUSP then R.rateN = R.rateN + 1 end
@@ -479,6 +480,8 @@ end
 local function parkInPits(i, why)
     if parked[i] or not R.raceSession or i == 0 then return end   -- never the player's car: a human may take the wheel back
     parked[i] = true
+    if type(R.gateRetry[i]) == 'number' then R.rateN = R.rateN + 1 end   -- (GATE_FAIL_RETRY) a parked car can't use a retry: a granted one
+    R.gateRetry[i] = false                                               -- counts as the miss it was, and none is granted after this
     -- THE LEDGER: why, and the damage as it was. The teleport below zeroes car.damage, which is how 40 parked Baku
     -- cars read "dmg 0" and were called repeat offenders (2026-09-24). Read first, kept on R for stateOf and the diag.
     R.parkWhy[i] = why or 'unknown'
@@ -847,6 +850,7 @@ function R.update(dt)
                 -- kept dragging the brake on a car at 180 km/h, its clock kept running, and after 45 s it was
                 -- "rescued" -- teleported -- or parked mid-race. Up to speed = AC's AI owns it again.
                 if spd > REJOIN_HANDBACK and (recT[i] or 0) > 0 then endRec(i) end
+                if spd > REJOIN_HANDBACK and R.gateRetry[i] then R.gateRetry[i] = false end   -- (GATE_FAIL_RETRY) racing again: the retry was for THAT stop
             end
             -- NOTE: we deliberately DO let a given-up car re-enter recovery. An earlier build stopped
             -- re-arming ("handed back to AC") and the data was unambiguous: far-off recoveries fell from
