@@ -133,6 +133,7 @@ local function jbool(v) if v == nil then return 'null' end; return v and 'true' 
 
 -- build the report row (a JSON object string) from the current stats + the context Verve hands us
 function T.buildReport(sim, ctx, completed, abortReason)
+    if type(ctx) == 'function' then ctx = ctx() end
     ctx = ctx or {}
     -- the mirror tables come from newStats, but buildReport runs inside pcall: a session shape that predates
     -- them (a resumed session, a hot reload mid-race - CSP reloads this app on any file write) would lose the
@@ -287,12 +288,14 @@ function T.update(dt, ctx)
     local now = os.clock()
     if now - lastT >= 1.0 then
         lastT = now; pcall(sample, sim)
-        if st and ctx and ctx.recState then                 -- mirror 'parked' while the race is still live
+        local c = ctx
+        if type(c) == 'function' then c = c() end            -- (Verve passes the builder: once a second, not every frame; an error in it
+        if st and c and c.recState then                      -- is not caught here, so the caller's pcall counts it) mirror 'parked' live
             pcall(function()
                 for i = 0, sim.carsCount - 1 do
-                    local rs = ctx.recState(i)
+                    local rs = c.recState(i)
                     if rs then st.mPark[i] = rs.parked == true end
-                    if st.mCls[i] == nil and ctx.classOf then st.mCls[i] = ctx.classOf(i) end
+                    if st.mCls[i] == nil and c.classOf then st.mCls[i] = c.classOf(i) end
                 end
             end)
         end
@@ -309,6 +312,7 @@ function T.update(dt, ctx)
     if over then
         flagT = flagT + dt
         if flagT > 15 then
+            if type(ctx) == 'function' then ctx = ctx() end    -- (outside the pcall below, so an error reaches the caller's count)
             sentThis = true
             pcall(function()
                 local leaderLaps = 0

@@ -132,6 +132,7 @@ local function sessionReset(restart)
         -- same weekend (same track, car count and model per slot); a different grid wipes them as before
         local sig = gridSignature()
         pcall(Drivers.reset, sig ~= nil and sig == weekendSig)
+        if sig ~= nil and weekendSig ~= nil and sig ~= weekendSig then Racecraft.aggrPrev = {} end   -- a different grid: no aggression base carried by slot (review 2026-09-28)
         weekendSig = sig
     end
     pcall(Recovery.reset)         -- clear per-car recovery + pit-rescue state
@@ -436,7 +437,7 @@ function script.update(dt)
         harnessCamT = os.clock()
         pcall(function() ac.setCurrentCamera(ac.CameraMode.Drivable); ac.setCurrentDrivableCamera(ac.DrivableCamera.Chase) end)
     end
-    if Telemetry.ENABLED and not pcall(Telemetry.update, dt, telemetryCtx()) then luaErrors = luaErrors + 1 end
+    if Telemetry.ENABLED and not pcall(Telemetry.update, dt, telemetryCtx) then luaErrors = luaErrors + 1 end   -- the builder, not a table: built inside the pcall, once a second
     local tFrame1 = os.preciseClock and os.preciseClock() or os.clock()
     frameMs = frameMs + (tFrame1 - tFrame0) * 1000; frameN = frameN + 1
 end
