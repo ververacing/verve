@@ -444,7 +444,7 @@ end
 -- everything the anonymous race report needs from the other modules (no names, no paths)
 telemetryCtx = function()
     local settings = {}
-    for _, k in ipairs({ 'humanErrors', 'drsDiscipline', 'controlGrip', 'careerCurve', 'intensity', 'rcIntensity', 'baseGrip', 'raceStart', 'sliderCurve', 'repairOnTrack' }) do
+    for _, k in ipairs({ 'humanErrors', 'drsDiscipline', 'controlGrip', 'careerCurve', 'intensity', 'rcIntensity', 'baseGrip', 'raceStart', 'sliderCurve', 'repairOnTrack', 'paceAbs' }) do
         local v = G[k]; settings[#settings + 1] = string.format('"%s":%s', k, type(v) == 'number' and string.format('%.2f', v) or (type(v) == 'string' and ('"' .. v .. '"') or tostring(v == true)))
     end
     local pu, au = 0, 0
@@ -452,7 +452,8 @@ telemetryCtx = function()
     local playerModel = ''; pcall(function() playerModel = ac.getCarID(0) or '' end)
     local cspBuild = nil; pcall(function() cspBuild = ac.getPatchVersionCode() end)
     return {
-        classOf = Classes.keyOf, recState = Recovery.stateOf, levelOf = Difficulty.levelFor,
+        classOf = Classes.keyOf, recState = Recovery.stateOf,
+        levelOf = function(i) local a = Drivers.appliedLevel(i); if a ~= nil then return a end; return Difficulty.levelFor(i) end,   -- what the car runs at (a driver profile sets its own)
         meter = Career.meter, isCareer = Career.active, careerEvent = Career.active and (Career.series .. '/' .. Career.event) or nil,
         laps = Career.laps, playerModel = playerModel, cspBuild = cspBuild,
         retiredByVerve = Recovery.retiredCount, crashRepairs = Recovery.repairedCount, limpRepairs = Recovery.limpCount, suspPits = Recovery.suspPitCount,
