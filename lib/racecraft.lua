@@ -237,6 +237,11 @@ R.LONE_FRAC = 0.4             -- with nobody within CV.LONE_M either way, the tr
 R.OL_STAR_CONVOY = false      -- a top-tier driver is exempt from the convoy's gap-based throttle limit (the staggered release and the
                               -- reaction time stay: he launches with his row, then may close on the car ahead)
 R.OL_STAR_AGGR = 0            -- >0: a top-tier driver keeps this fraction of the opening-lap aggression trim (0.5 = half of it)
+R.OL_STAR_ROOM = 0            -- 0-1: a top-tier driver's row caution and opening-lap caution scale down by this fraction times his
+                              -- PACE EDGE over a rookie (0 = a 0.30-pace driver, 1 = a 0.96+ one; NOT a flat cut like OL_STAR_AGGR,
+                              -- so a midfielder gets little relief and a star gets most of it). Capped at 70% relief even at 1.0:
+                              -- scaling row caution down by aggression alone sent the star off the road at 127 km/h (2026-09-16);
+                              -- caution still protects him from a closing-speed mistake, this just asks for less of it. 0 = off.
 R.SHIFT_UP = 0                -- >0: AI shift-up threshold handed to physics.setAIShiftingThresholds (units per CSP; probe first). Harness A/B
 R.SHIFT_DOWN = 0.5            -- ...and the shift-down threshold that goes with it
 -- TURN-1 LANE DISCIPLINE (harness A/B: R.OL_LANES): from the lights to just past the first apex, odd rows hold the INSIDE
@@ -1101,16 +1106,22 @@ function R.evaluate(i, dt)
             openingLap = openingLap * startX
         end
         if openingLap > 0 then
+            local roomEase = 0   -- (R.OL_STAR_ROOM) this car's caution relief, 0-0.7, computed first so caut/rowcaut below can use it
+            if R.OL_STAR_ROOM > 0 and Strategy.tierOf(i) >= 2 then
+                local st = Drivers.statsOf(i)
+                local edge = clamp(((st and st.pace or 0) - 0.30) / 0.70, 0, 1)   -- 0.30 = rookie, 1.0 = a 1.0-pace driver
+                roomEase = clamp(R.OL_STAR_ROOM * edge, 0, 0.7)
+            end
             -- caution by the gap ahead: extra caution only matters with a car a few lengths ahead; the leaders keep
             -- braking normally, so they don't trigger the concertina behind them
             local prox = 1
             if R.OL_CAUT_PROX then prox = clamp((CV.PROX_FAR - gapA * trackLen) / (CV.PROX_FAR - CV.PROX_NEAR), 0, 1) end
-            caut = caut + K.OPENLAP_CAUT * openingLap * (1 + crash) * prox   -- crashy tracks get extra start caution (kills the opening-lap pile-ups)
+            caut = caut + K.OPENLAP_CAUT * openingLap * (1 + crash) * prox * (1 - roomEase)   -- crashy tracks get extra start caution (kills the opening-lap pile-ups); (R.OL_STAR_ROOM) less of it for a fast driver
             if R.OL_ROWCAUT and myLap == 0 and cv2.back[i] then    -- row ten brakes on the lights of the car ahead: earlier the further back
                 -- (scaling this by aggression was tried 2026-09-16: the star went off the road at 127 km/h; it protects him)
                 local fuelX = (R.OL_FUEL_K > 0) and (1 + R.OL_FUEL_K * clamp(((me.fuel or 20) - 20) / 50, 0, 1.5)) or 1
                 local rowCap = (R.OL_GRID_DEPTH > 0) and math.max(1, (cv2.depth or 0) / CV.ROWCAUT_M) or 1   -- a deep grid: the ramp does not stop at 90 m
-                caut = caut + CV.ROWCAUT * R.ROWCAUT_X * fuelX * clamp(cv2.back[i] / CV.ROWCAUT_M, 0, rowCap) * openingLap * prox
+                caut = caut + CV.ROWCAUT * R.ROWCAUT_X * fuelX * clamp(cv2.back[i] / CV.ROWCAUT_M, 0, rowCap) * openingLap * prox * (1 - roomEase)
             end
             local olAggr = K.OPENLAP_AGGR
             if R.OL_STAR_AGGR > 0 and Strategy.tierOf(i) >= 2 then olAggr = K.OPENLAP_AGGR * R.OL_STAR_AGGR end
