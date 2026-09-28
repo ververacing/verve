@@ -190,13 +190,13 @@ local function releaseControls(i)
 end
 local drops = {}           -- recent repositions being judged: { i, t, ok, spl }
 local dropCount, dropSpots, escapeLogged = {}, {}, {}   -- per car: repositions this race, and the spline of each (same-spot escape)
-R.WET_TYRES = false        -- OFF until the harness rain A/B says otherwise. On: hint the AI onto rain tyres
-                           -- (physics.setAIRainTyres) whenever the road is wet, for a race that BEGINS wet.
-                           -- (2026-09-22: the field pitting for wets at the end of lap 1 in the owner's race was
-                           -- correct - the rain arrived after the lights, so they started on slicks rightly.)
-R.WET_ON = 0.25            -- road wetness above this -> rain tyres hinted on
-R.WET_OFF = 0.10           -- ...and below this -> hinted off again (a drying track)
-R.wetHint = {}             -- per car: what we last hinted (nil = never)
+R.WET_TYRES = false        -- OFF until the harness rain A/B says otherwise. On: hint the AI onto rain tyres
+                           -- (physics.setAIRainTyres) whenever the road is wet, for a race that BEGINS wet.
+                           -- (2026-09-22: the field pitting for wets at the end of lap 1 in the owner's race was
+                           -- correct - the rain arrived after the lights, so they started on slicks rightly.)
+R.WET_ON = 0.25            -- road wetness above this -> rain tyres hinted on
+R.WET_OFF = 0.10           -- ...and below this -> hinted off again (a drying track)
+R.wetHint = {}             -- per car: what we last hinted (nil = never)
 R.STALL_RESTART = false    -- a stalled AI engine (rpm < STALL_RPM for STALL_T s) is restarted in place instead of waiting for a drop
                            -- (26 % of all repositions on 2026-09-20/21 were engine-off cars, mostly F3 and the Huracan). Harness A/B.
 R.STALL_RPM = 150; R.STALL_T = 1.0; R.STALL_IDLE = 1500
@@ -759,17 +759,17 @@ function R.update(dt)
                     end
                 end
             end
-            if not car.isAIControlled then return end
-            if R.WET_TYRES and physics.setAIRainTyres then
-                local wet = 0
-                pcall(function() wet = sim.rainWetness or sim.roadWetness or 0 end)
-                local want = R.wetHint[i]
-                if wet >= R.WET_ON then want = true elseif wet <= R.WET_OFF then want = false end
-                if want ~= nil and want ~= R.wetHint[i] then
-                    R.wetHint[i] = want
-                    pcall(physics.setAIRainTyres, i, want)
-                end
-            end
+            if not car.isAIControlled then return end
+            if R.WET_TYRES and physics.setAIRainTyres then
+                local wet = 0
+                pcall(function() wet = sim.rainWetness or sim.roadWetness or 0 end)
+                local want = R.wetHint[i]
+                if wet >= R.WET_ON then want = true elseif wet <= R.WET_OFF then want = false end
+                if want ~= nil and want ~= R.wetHint[i] then
+                    R.wetHint[i] = want
+                    pcall(physics.setAIRainTyres, i, want)
+                end
+            end
             if R.STALL_RESTART and R.raceSession and not car.isInPitlane and not car.isRetired and not car.isRaceFinished then
                 -- engine off on the road (a spin, AC's own stall): restart it where it stands, the drop is not needed
                 if (car.rpm or 1000) < R.STALL_RPM then R.stallEngT[i] = (R.stallEngT[i] or 0) + dt else R.stallEngT[i] = 0 end
@@ -1371,8 +1371,8 @@ function R.reset()
     overridesCleared = false     -- and release every throttle / top-speed / stop-counter hold on the next update (they persist across sessions)
     drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}; R.gateRetry = {}; R.gateRetryT = {}
     dropCount, dropSpots, escapeLogged = {}, {}, {}
-    R.stallEngT, R.stallRestarts = {}, {}; R.stallRestartN = 0
-    R.wetHint = {}
+    R.stallEngT, R.stallRestarts = {}, {}; R.stallRestartN = 0
+    R.wetHint = {}
     R.dropN, R.dropOK, R.dropsOff, R.dropFlips, R.gateMoves = 0, 0, false, 0, 0
     R.rateOK, R.rateN = 0, 0
     gateStage = {}
