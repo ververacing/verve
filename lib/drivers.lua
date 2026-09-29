@@ -562,9 +562,6 @@ function D.clearAll()
     for i in pairs(assigned) do assigned[i] = nil; applyName(i) end
     assigned = {}; paceDirty = true
 end
--- (declared before D.reset: when it sat further down, D.reset's `named0 = false` wrote a global and slot 0's public name
--- was never re-applied in a new session; found 2026-09-28)
-local named0 = false               -- slot 0's public name applied (needs the car to be AI-driven, which lags the autopilot switch by a frame)
 function D.reset(keepPicks)
     -- keepPicks: the same weekend moved to its next session (practice -> qualifying -> race). The picks and AC's
     -- original names stay; the levels are re-read (AC re-creates them per session) and the names re-applied.
@@ -637,6 +634,7 @@ end
 
 -- `base` = the level the difficulty module wants for this car (configured / career curve); nil = AC's own.
 -- A driver profile spreads the field BELOW that base by pace rating (the fastest profile runs at base).
+local named0 = false               -- slot 0's public name applied (needs the car to be AI-driven, which lags the autopilot switch by a frame)
 function D.applyPace(i, base)
     pcall(function()
         if i == 0 and not named0 and assigned[0] then named0 = true; applyName(0) end
