@@ -77,12 +77,17 @@ def acs_running():
     return "acs.exe" in out
 
 
+OWNED = {"game": False, "lua": False}   # what THIS process started / wrote: cleanup touches nothing else (2026-09-28: an
+                                        # import or --help from a scratch copy force-killed a live race through this hook)
+
+
 def cleanup():
     """Whatever happens (Ctrl+C, crash, kill), never leave a game instance or a live harness.lua behind --
     a leftover blocks the next run and a stale harness.lua could hijack a real race (it self-expires, but
-    don't rely on it)."""
-    subprocess.run(["taskkill", "/IM", "acs.exe", "/F"], capture_output=True)
-    if os.path.exists(HARNESS_LUA):
+    don't rely on it). Only what this process launched or wrote: an import, --help or a refused run leaves the game alone."""
+    if OWNED["game"]:
+        subprocess.run(["taskkill", "/IM", "acs.exe", "/F"], capture_output=True)
+    if OWNED["lua"] and os.path.exists(HARNESS_LUA):
         try:
             os.remove(HARNESS_LUA)
         except OSError:
@@ -416,6 +421,7 @@ def write_harness_lua(arm, ttl_s, ncars=0, laps=0, weekend=False):
         "strategy": arm.get("strategy", {}),           # lib/strategy.lua S.* fields (Verve.lua merges them), e.g. {"SETUP_X": 0}
         "fuel": arm.get("fuel", 0),                    # litres for EVERY car when the autopilot arms (0 = AC's own load); a quali-load pace probe
     }
+    OWNED["lua"] = True
     with open(HARNESS_LUA, "w", encoding="utf-8") as f:
         f.write("-- written by tools/harness.py; self-expiring; never shipped\nreturn " + lua_literal(body) + "\n")
 
@@ -864,6 +870,7 @@ def run_once(args, arm, run_idx):
     pure_bak = apply_pure_for_weather(getattr(args, "weather_type", None))
     t_launch = time.time()
     proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
+    OWNED["game"] = True
     # AC occasionally dies at load (a crash box, or an exit within a minute); one relaunch after a pause fixes it
     csp_log = os.path.join(DOCS, "logs", "custom_shaders_patch.log")
     for attempt in range(3):
