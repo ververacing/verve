@@ -337,6 +337,7 @@ function script.update(dt)
     Racecraft.VARIABILITY = G.intensity     -- spreads per-driver aggression across the field
     Overrides.autosave    = S.autosave
     Racecraft.beginFrame()
+    Drivers.WILD_ON = Racecraft.WILD ~= false   -- one master switch (Racecraft.WILD) for the chaos driver in every module
 
     local behaviourOn = G.humanVar or G.classPhys or G.racecraft
     local n = 0
@@ -372,6 +373,8 @@ function script.update(dt)
                 physics.setExtraAIGrip(i, gripApplied)
             end
             local rcCaut = Racecraft.evaluate(i, dt)
+            local wd = (Racecraft.WILD ~= false and Racecraft.WILD_NOLEARN and Drivers.isWild(i)) or nil
+            Troublespots.mute[i] = wd; Recovery.wildCar[i] = wd   -- (R.WILD_NOLEARN) a chaos driver's own crashes don't teach the field
             local cautApplied = clamp(1.0 + cOff + rcCaut, 0.0, 16.0)
             if behaviourOn then
                 physics.setAICaution(i, cautApplied)

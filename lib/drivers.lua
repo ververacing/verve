@@ -555,6 +555,7 @@ function D.statsOf(i)
     if not k then return nil end
     return BY_KEY[k]
 end
+D.WILD_ON = true   -- mirrored from Racecraft.WILD each frame (Verve.lua): one master switch for the chaos driver in every module
 function D.isWild(i) local k = assigned[i]; local d = k and BY_KEY[k]; return d ~= nil and d.wild == true end   -- the chaos driver (wild row)
 function D.anyAssigned() for _ in pairs(assigned) do return true end return false end
 function D.clearAll()

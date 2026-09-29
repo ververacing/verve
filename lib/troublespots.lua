@@ -14,6 +14,7 @@ local T = {}
 T.ENABLED = false
 T.FRESH = false      -- harness: this session neither loads nor saves the persisted map (learns within the race only), so an
                      -- A/B measures the rule under test, not the heat a day of sprints left behind (Spa maxed out 2026-09-16)
+T.mute = {}          -- [car] = true (Verve.lua, Racecraft.WILD_NOLEARN): a chaos driver's own incidents feed neither the heat nor crashiness
 
 -- bins are sized in METRES, not a fixed count, so resolution is ~constant on every track (a long
 -- track gets more bins, a short one fewer -- a "corner" is the same size in metres everywhere).
@@ -138,6 +139,7 @@ function T.reset()
     lookaheadFrac = clamp(LOOKAHEAD_M / len, 0.001, 0.05)
     data = {}
     recent = 0
+    T.mute = {}
     if not T.FRESH then pcall(function()
         local td = loadAll()[trackKey]
         if type(td) == 'table' then data = td end
@@ -157,7 +159,8 @@ function T.reset()
 end
 
 -- Report an incident (a car crashed/spun/beached) at a track position, for a class.
-function T.incident(spline, cls)
+function T.incident(spline, cls, i)
+    if i and T.mute[i] then return end   -- (a muted car: the chaos driver; his victims' incidents still count)
     if not T.ENABLED or type(spline) ~= 'number' then return end
     cls = cls or 'road'
     local bin = math.floor((spline % 1) * nbins) % nbins

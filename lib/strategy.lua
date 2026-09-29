@@ -216,11 +216,13 @@ local function run(i, p, c, g, book)
     finish(i); return nil
 end
 
--- c = { dt, gapA, spd, aheadSpd, aheadIdx, prog, dLat, myLat, wide, baseA, prof, classKey, off, passGap, attackGap, isOval }
+-- c = { dt, gapA, spd, aheadSpd, aheadIdx, prog, dLat, myLat, wide, baseA, prof, classKey, off, passGap, attackGap, isOval, lap, crowd,
+--       wild, wLunge, wCool, wReach, wDive0 }   (wild: racecraft's R.WILD layer, a chaos-driver car only; the w* are its R.WILD_* values)
 -- Called by racecraft while a car is in ATTACK. Returns nil (no opinion) or { target, caut, aggr, hold, code }.
 function S.evaluate(i, c)
     S.last[i] = 0
     local tier = S.tierOf(i)
+    if c.wild and S.ENABLED and tier < 1 then tier = 1 end   -- the chaos driver always has the lunge (the switchback still needs tier 2)
     if tier == 0 then return nil end
     local book = BOOK[c.classKey] or BOOK.road
     if c.isOval and book.slingshot == nil then book = BOOK.nascar end   -- any class on an oval drafts
@@ -239,25 +241,25 @@ function S.evaluate(i, c)
         if ov then S.last[i] = ov.code; return ov end
         return nil
     end
-    if cool[i] and now < cool[i] then return nil end
+    if cool[i] and now < cool[i] - (c.wild and math.max(0, COOLDOWN - c.wCool) or 0) then return nil end   -- (a wild car: R.WILD_COOL)
 
     -- plan something? Aggressive drivers try more; a driver's RISK rating feeds the lunge (the risky move).
     -- not on the opening lap, not in a pack: those are where a planned dive turns into a pile-up
-    if (c.lap or 1) == 0 or (c.crowd or 0) >= PACK_MAX then return nil end
+    if not (c.wild and c.wDive0) and ((c.lap or 1) == 0 or (c.crowd or 0) >= PACK_MAX + (c.wild and 1 or 0)) then return nil end   -- (a wild car: one more in the pack; R.WILD_DIVE0 none of it)
     local risk = c.prof and c.prof.risk or 0.35
     local eager = (0.35 + 0.65 * c.baseA) * EAGER_SCALE
     local roll = hash01(i * 13 + st.corners * 7 + math.floor(st.t0))   -- one roll per car-and-corner, not per frame
-    local closeIn = c.gapA < c.passGap * 1.5
+    local closeIn = c.gapA < c.passGap * 1.5 * (c.wild and c.wReach or 1)   -- (a wild car goes from further back: R.WILD_REACH)
     local keepingUp = c.spd >= c.aheadSpd - 3
     local closing = c.spd >= c.aheadSpd + 2          -- a lunge needs a genuine run, not a parity dive
 
     -- SET-UP: a NEW car ahead, and this class serves a corner or two in the tow first
-    if (book.setup or 0) > 0 and tier >= MIN_TIER.setup and st.corners < (book.setupCorners or 0) and closeIn and now - st.t0 < 0.5 then
+    if not c.wild and (book.setup or 0) > 0 and tier >= MIN_TIER.setup and st.corners < (book.setupCorners or 0) and closeIn and now - st.t0 < 0.5 then   -- (a wild car never sets it up)
         start(i, 'setup', { car = c.aheadIdx })
         S.last[i] = CODE.setup
         return { target = 0, caut = -0.15 * book.setup, aggr = 0, code = CODE.setup }
     end
-    if st.corners < (book.setupCorners or 0) then return nil end   -- still serving the set-up
+    if not c.wild and st.corners < (book.setupCorners or 0) then return nil end   -- still serving the set-up
 
     if c.isOval or book.slingshot then
         if (book.slingshot or 0) > 0 and tier >= MIN_TIER.slingshot and g.phase == 'straight' and closeIn and keepingUp and roll < eager * 0.6 then
@@ -272,7 +274,8 @@ function S.evaluate(i, c)
 
     if g.phase == 'entry' and g.inside ~= 0 and closeIn and keepingUp then
         local insideOpen = c.dLat * g.inside < 0.3
-        if insideOpen and closing and (book.lunge or 0) > 0 and tier >= MIN_TIER.lunge and roll < eager * (0.4 + 0.6 * risk) * book.lunge then
+        if insideOpen and (closing or c.wild) and (book.lunge or 0) > 0 and tier >= MIN_TIER.lunge
+           and roll < math.min(0.95, eager * (0.4 + 0.6 * risk) * book.lunge * (c.wild and c.wLunge or 1)) then   -- (a wild car: no run needed, x R.WILD_LUNGE)
             start(i, 'lunge', { car = c.aheadIdx, side = g.inside })
             S.last[i] = CODE.lunge
             return { target = g.inside * c.off * 1.4, caut = -0.5 * book.lunge, aggr = 0.2, hold = 1.0, code = CODE.lunge }

@@ -20,6 +20,7 @@ H.INTENSITY     = 0.5      -- variability scale (0 = none, 1 = subtle, 1.5 = str
 H.HUMAN_VAR     = true     -- personality / drift / fade / pressure / slipstream
 H.HUMAN_ERRORS  = true     -- occasional gentle bobbles
 H.CLASS_PHYSICS = true     -- cold-tyre warm-up / wet / dirty air
+H.WILD_ERR      = 1.5      -- mistake-rate multiplier for a wild profile (the Wrecking Crew; off with Racecraft.WILD=false); lockups allowed; 1 = off
 -- RainFX (CSP preview builds) models wet grip physically and puts cars on rain tyres: Verve's own wet rule, written for
 -- installs without rain physics, then stacks on top (Spa GT3 in the wet ran +35 % on lap time, real is +10-15 %; 2026-09-18).
 -- When the module is enabled these scale the grip cut and the extra caution; both are harness switches until the A/B is in.
@@ -372,6 +373,7 @@ function H.getModifiers(i)
                     rate = (MISTAKE_BASE + MISTAKE_RATE * p) * (0.15 + 1.15 * prof.risk) * (0.30 + 0.70 * frag)
                     sevScale = 0.45 + 0.55 * frag
                     avoidSharp = frag < 0.7                       -- no sharp lockup on fragile cars
+                    if prof.wild and Drivers.WILD_ON ~= false and H.WILD_ERR ~= 1 then rate = rate * H.WILD_ERR; avoidSharp = false end   -- (H.WILD_ERR) the chaos driver
                 elseif classGate > 0 then
                     rate = (MISTAKE_BASE + MISTAKE_RATE * p) * classGate
                 end

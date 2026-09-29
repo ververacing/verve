@@ -348,6 +348,33 @@ R.AGGR_BASE_FIX = false   -- STATUS 2026-09-28: proven (7/7 regression pairs at 
 R.AGGR_BASE_TOL = 0.03       -- a session's first read this close to Verve's last write is Verve's value (the override survives a restart)
 R.baseAggr = {}              -- [i] = the car's own aggression as read this session (-1 = unreadable); cleared by R.reset
 R.aggrPrev = {}              -- [i] = { base, set }: the last session's capture and Verve's last write to the car, for that guard
+-- WRECKING CREW (owner 2026-09-28): the chaos driver profile (lib/drivers.lua, key wrecking_crew, wild=true). Everything below
+-- acts ONLY on a car assigned a wild profile: assigning the profile is the opt-in, and with no wild car on the grid none of it
+-- runs. R.WILD=false keeps the row's own numbers (pace 0.95, aggr and risk 1.0) and switches this layer off: the A/B control.
+-- The risky extras (WILD_START, WILD_DIVE0, WILD_BH, WILD_BLUE, WILD_TILT) are harness switches, off.
+R.WILD = true                 -- master; mirrored to Drivers.WILD_ON each frame (Verve.lua) for the human, strategy and recovery modules
+R.WILD_CAUT = 0.40            -- flat caution removed
+R.WILD_SAFE = 0.5             -- share of the stacked positive back-off he keeps (rear-end guard, leave room, opening lap)
+R.WILD_BASEA = 1.3            -- aggression used only by the pass thresholds and strategy eagerness; capped at 1.35 (minAdv goes negative at 1.4)
+R.WILD_AFLOOR = 0.9           -- aggression floor once the opening lap has faded, except while nursing damage or yielding
+R.WILD_OL = 0.5               -- share of the opening-lap aggression trim and brake-guard cut he ignores
+R.WILD_CONVOY = true          -- exempt from the lap-0 convoy throttle (reaction time and the staggered release stay)
+R.WILD_START = false          -- harness arm: also exempt on laps 0-1 from the brake guard, lanes, funnel and road-space ban
+R.WILD_ELBOWS = 0.5           -- alongside a car that has the corner: target x(0.2 + 0.8 x this) instead of x0.2
+R.WILD_LUNGE = 1.25           -- lunge chance multiplier (each class's playbook is kept)
+R.WILD_COOL = 6               -- s between his manoeuvres (the strategy layer's own cooldown is 12)
+R.WILD_REACH = 1.5            -- lunge from further back: the strategy layer's close-in gap x this
+R.WILD_DIVE0 = false          -- harness arm: lunges on lap 0 and in packs
+R.WILD_BH = 1.0               -- harness arm: brake-hint multiplier while attacking; above 1 = later braking (1 = off)
+R.WILD_BLUE = 0               -- harness arm: chance per lapper per lap that he ignores a blue flag (0 = always obeys)
+R.WILD_NOLEARN = true         -- his own incidents don't feed trouble-spot heat or crashiness; his drops don't count toward the reposition switch-off
+R.WILD_TILT = false           -- harness arm (night 2): after losing a place or an 8 km/h hit, 14-26 s of caution -0.30 more and lunge chance x1.5
+R.WILD_TILT_T = 20            -- (WILD_TILT) mean tilt length, s (x0.7-1.3 per tilt)
+R.WILD_TILT_COOL = 25         -- (WILD_TILT) s after a tilt ends before the next one can start
+R.WILD_TILT_CAUT = 0.30       -- (WILD_TILT) extra caution removed while tilted
+R.WILD_TILT_LUNGE = 1.5       -- (WILD_TILT) lunge chance multiplier while tilted
+R.WILD_MAX_HITS = 4           -- (WILD_TILT) no more tilts after this many 8 km/h hits
+R.wild = { till = {}, cool = {}, pos = {}, posT = {}, dmg = {}, hits = {}, tilts = 0 }   -- (WILD_TILT) per-car state; cleared by R.reset
 K.OFFSET_SLEW = 0.8        -- units/sec offset may move (lower = smoother, less skittish)
 K.DEADZONE = 0.12       -- ignore tiny offsets (stay on the line)
 K.SIDE_HOLD = 1.2        -- s to hold a chosen side before allowing a flip (anti-dart)
@@ -536,6 +563,23 @@ function R.aggrBase(i, car)
     return a
 end
 
+-- (R.WILD_TILT) the chaos driver's temper: 1 = tilted, 0 = calm. Its own function, so R.evaluate's upvalue count is unchanged.
+function R.wildTick(i, me, myLap, myDmg)
+    local w, now = R.wild, os.clock()
+    local pos = me.racePosition or 0
+    local lost = w.pos[i] ~= nil and now - (w.posT[i] or 0) < 1.0 and pos > w.pos[i] and myLap >= 1
+                 and not (R.last[i] and R.last[i].yield)          -- (a >1 s gap = pit/recovery: resync, no verdict)
+    w.pos[i], w.posT[i] = pos, now
+    local hit = myDmg >= (w.dmg[i] or 0) + 8
+    w.dmg[i] = myDmg
+    if hit then w.hits[i] = (w.hits[i] or 0) + 1 end
+    if (w.hits[i] or 0) >= R.WILD_MAX_HITS then w.till[i] = nil; return 0 end
+    if (lost or (hit and myLap >= 1)) and now > (w.cool[i] or 0) then
+        w.till[i] = now + R.WILD_TILT_T * (0.7 + 0.6 * hash01(i * 17 + w.tilts)); w.cool[i] = w.till[i] + R.WILD_TILT_COOL; w.tilts = w.tilts + 1
+    end
+    return now < (w.till[i] or 0) and 1 or 0
+end
+
 function R.evaluate(i, dt)
     if not R.ENABLED then return 0 end
     local caut, state = 0, 0
@@ -565,6 +609,8 @@ function R.evaluate(i, dt)
         local classKey = Classes.keyOf(i)
         local t = TACTICS[classKey] or TACTICS.road
         local crash = Troublespots.crashiness()    -- 0..1: how crash-prone this track has proven
+        local prof = Drivers.statsOf(i)            -- the driver profile (moved up from the aggression block: the start rules below need it)
+        local wild = R.WILD and prof ~= nil and prof.wild == true   -- (R.WILD) the Wrecking Crew: his margins are relaxed below
 
         local myLap = Recovery.lapsOf(i)           -- Verve's own count: AC's drops a lap after a teleport
         -- lap-0 progress with the grid's wrap undone: a grid before the line reads 0.98-0.99, which made every
@@ -740,7 +786,7 @@ function R.evaluate(i, dt)
             if R.CV_TGAP > 0 then cvGap = math.max(CV.GAP_M, spd / 3.6 * R.CV_TGAP); cvNear = cvGap * (CV.NEAR_M / CV.GAP_M) end   -- a time gap: the faster I arrive, the further out I ease
             if roomF then cvGap = math.max(cvGap, spd / 3.6 * R.ROOM_TG * tightHere); cvNear = cvGap * (CV.NEAR_M / CV.GAP_M) end   -- ROOM_FOLLOW: a time gap in tight room, every lap
             if ((olS < CV.END and myLap == 0) or roomF) and aheadIdx >= 0 and gapA * trackLen < cvGap and spd > aheadSpd + CV.CLOSING
-               and not (R.OL_STAR_CONVOY and Strategy.tierOf(i) >= 2) then
+               and not (R.OL_STAR_CONVOY and Strategy.tierOf(i) >= 2) and not (wild and (R.WILD_CONVOY or R.WILD_START)) then
                 local aCar = ac.getCar(aheadIdx)
                 if aCar and math.abs(latOf(aCar.position) - latOf(me.position)) < CV.LAT then
                     local gm = gapA * trackLen
@@ -768,13 +814,14 @@ function R.evaluate(i, dt)
         elseif cv2.thr[i] then cv2.thr[i] = nil; pcall(physics.setAIThrottleLimit, i, 1.0) end
         -- BRAKE-ZONE GUARD (lap 0): the car ahead on my line is on the brakes and I'm inside CV.BG_M -> raise my brake
         -- hint (earlier brake point) in proportion to the gap. R.BG_ALL: whole-race multiplier, direction test only.
-        if (R.OL_BRAKEGUARD or R.BG_ALL > 0 or roomB) and physics.setAIBrakeHint then
+        if (R.OL_BRAKEGUARD or R.BG_ALL > 0 or roomB or (wild and R.WILD_BH ~= 1)) and physics.setAIBrakeHint then
             if cv2.base[i] == nil then
                 cv2.base[i] = 1.0
                 pcall(function() cv2.base[i] = ac.INIConfig.carData(i, 'ai.ini'):get('PEDALS', 'BRAKE_HINT', 1.0) end)
             end
             local mul = R.BG_ALL > 0 and R.BG_ALL or 1.0
-            if ((R.OL_BRAKEGUARD and startX > 0 and myLap <= 1) or roomB) and aheadIdx >= 0 and not (Recovery.stateOf(i) or {}).rec then
+            if wild and R.WILD_BH ~= 1 and R.last[i] and R.last[i].state == 1 then mul = mul * R.WILD_BH end   -- (R.WILD_BH) attacking: his own brake point
+            if ((R.OL_BRAKEGUARD and startX > 0 and myLap <= 1 and not (wild and R.WILD_START)) or roomB) and aheadIdx >= 0 and not (Recovery.stateOf(i) or {}).rec then
                 local gm = gapA * trackLen
                 local reach = CV.BG_M
                 if roomB then reach = reach * (1 + R.ROOM_BG * tightHere) end   -- ROOM_FOLLOW: a longer reach into tight room (the corridor entries, at any speed)
@@ -788,7 +835,7 @@ function R.evaluate(i, dt)
                         -- LOWER hint = earlier braking (x1.5 field-wide: 18/18 lap-1 contact, 101 repairs, 2026-09-16).
                         -- The cut scales with how fast I'm closing on a braking car and how close it already is.
                         local closing = clamp((spd - aheadSpd) / CV.BG_CLOSE, 0, 1)
-                        mul = mul * (1 - CV.BG_HINT * closing * clamp(1 - gm / reach, 0, 1))
+                        mul = mul * (1 - CV.BG_HINT * closing * clamp(1 - gm / reach, 0, 1) * (wild and (1 - R.WILD_OL) or 1))   -- (R.WILD_OL) he takes part of the cut
                         if roomB and myLap > 1 then R.roomAct = (R.roomAct or 0) + 1 end
                     end
                 end
@@ -800,12 +847,11 @@ function R.evaluate(i, dt)
         local attackGap = K.ATTACK_GAP * t.gap
         local defendGap = K.DEFEND_GAP
         -- baseline aggression: a driver profile sets it directly; otherwise the car's own (slider)
-        -- value plus a per-driver spread (scaled by Variability) so the field isn't uniform.
-        local prof = Drivers.statsOf(i)
+        -- value plus a per-driver spread (scaled by Variability) so the field isn't uniform. (prof: read above)
         local baseA
         if R.AGGR_BASE_FIX then baseA = R.aggrBase(i, me) end   -- read once per session, every car (a profile can be cleared mid-race)
         if prof then
-            baseA = clamp(prof.aggr, 0.15, 1.0)
+            baseA = wild and math.min(math.max(prof.aggr, R.WILD_BASEA), 1.35) or clamp(prof.aggr, 0.15, 1.0)   -- (R.WILD_BASEA) above 1: pass thresholds only
         else
             baseA = baseA or me.aiAggression                     -- (switch off: the per-frame read-back, as before)
             if not baseA or baseA < 0 then baseA = K.AGGR_CRUISE end
@@ -813,11 +859,12 @@ function R.evaluate(i, dt)
             baseA = clamp(baseA + (hash01(i * 11 + 5) * 2 - 1) * K.AGGR_SPREAD * R.VARIABILITY, 0.15, 1.0)
         end
         local myLat = latOf(me.position)          -- current lateral on track (-1 left .. +1 right)
-        local target, aggr, wide = 0, baseA, 0    -- wide = 0..1 extra track width earned by an exit-speed run
+        local target, aggr, wide = 0, math.min(baseA, 1.0), 0    -- wide = 0..1 extra track width earned by an exit-speed run (baseA passes 1 only for a wild car)
         -- body damage SINCE the car's last repair (km/h). Not raw `me.damage`: that's a never-decreasing
         -- record of the worst hit, so a repaired car would read as wrecked for the rest of the race.
         local myDmg = 0
         pcall(function() myDmg = Recovery.damageOf(i) end)
+        local wm = (wild and R.WILD_TILT) and R.wildTick(i, me, myLap, myDmg) or 0   -- (R.WILD_TILT) 1 = tilted
 
         -- BLOCKAGE detect: scan a short window ahead for the SLOWEST car -- a stalled/crashed/crawling car
         -- is an obstacle, not a rival. Crucially we key off the genuinely-slow car (usually the crash),
@@ -968,7 +1015,8 @@ function R.evaluate(i, dt)
             -- reactive pass above. Skill- and difficulty-gated inside; nil = no opinion.
             local ov = Strategy.evaluate(i, { dt = dt, gapA = gapA, spd = spd, aheadSpd = aheadSpd, aheadIdx = aheadIdx,
                 prog = progZ, dLat = dLat, myLat = myLat, wide = wide, baseA = baseA, prof = prof, classKey = classKey,
-                off = off, passGap = K.PASS_GAP, attackGap = attackGap, isOval = R.isOval, lap = myLap, crowd = crowd })
+                off = off, passGap = K.PASS_GAP, attackGap = attackGap, isOval = R.isOval, lap = myLap, crowd = crowd,
+                wild = wild or nil, wLunge = R.WILD_LUNGE * (wm > 0 and R.WILD_TILT_LUNGE or 1), wCool = R.WILD_COOL, wReach = R.WILD_REACH, wDive0 = R.WILD_DIVE0 })
             if ov then
                 if ov.target ~= nil then target = ov.target end
                 caut = caut + (ov.caut or 0)
@@ -982,7 +1030,7 @@ function R.evaluate(i, dt)
             -- for a gap on lap 1). Once the field has strung out it is neutral-to-better on contact.
             if R.ROADSPACE and ov == nil and passActive and aheadIdx >= 0
                and (myLap >= 2 or (myLap == 1 and mySpline >= K.OPENLAP_TAIL)
-                    or (R.RS_OL_METER > 0 and crowd <= R.RS_OL_CROWD and Strategy.tierOf(i) >= 2 and Strategy.meterOK(R.RS_OL_METER)))
+                    or (R.RS_OL_METER > 0 and crowd <= R.RS_OL_CROWD and Strategy.tierOf(i) >= 2 and Strategy.meterOK(R.RS_OL_METER)) or (wild and R.WILD_START))
                and runAdv > K.OUTSIDE_MIN_ADV * (1.4 - baseA) * CV.RS_ADV then
                 local half = 6.0                                          -- half track width here (m): track units per metre
                 pcall(function() local sd = ac.getTrackAISplineSides(mySpline); if sd then half = math.max(3.0, (sd.x + sd.y) * 0.5) end end)
@@ -1027,7 +1075,7 @@ function R.evaluate(i, dt)
             end
             if concede then
                 -- a clearly faster star behind: stay on the racing line, no extra aggression, no elbows (owner: Max takes the space)
-                aggr = baseA; caut = 0; target = 0; state = 3   -- state 3 = conceding, visible in the diag 'st' field
+                aggr = math.min(baseA, 1.0); caut = 0; target = 0; state = 3   -- state 3 = conceding, visible in the diag 'st' field
             elseif gapA >= K.PACK_LEAD_GAP then
                 -- clear road ahead: don't defend a slow line -- just drive away on the racing line.
                 target = 0
@@ -1130,6 +1178,7 @@ function R.evaluate(i, dt)
             end
             local olAggr = K.OPENLAP_AGGR
             if R.OL_STAR_AGGR > 0 and Strategy.tierOf(i) >= 2 then olAggr = K.OPENLAP_AGGR * R.OL_STAR_AGGR end
+            if wild then olAggr = olAggr * (1 - R.WILD_OL) end   -- (R.WILD_OL) he ignores part of the opening-lap trim
             aggr = aggr * (1 - olAggr * openingLap)
             if R.OL_AGGR_FORMULA > 0 and (classKey == 'formula' or classKey == 'formula_jr') then
                 aggr = aggr * (1 - R.OL_AGGR_FORMULA * openingLap)   -- open-wheelers: no bodywork to lean on
@@ -1138,7 +1187,7 @@ function R.evaluate(i, dt)
         end
         -- bring-it-home -- clear track both ways: nothing to race, so ease off a touch.
         local catchable = R.ISO_PACE and aheadIdx >= 0 and gapA * trackLen < CV.ISO_REACH_M and Strategy.tierOf(i) >= 2
-        if gapA > K.ISOLATED_GAP and gapB > K.ISOLATED_GAP and not catchable then
+        if gapA > K.ISOLATED_GAP and gapB > K.ISOLATED_GAP and not catchable and not wild then   -- (a wild car never eases off)
             aggr = aggr * (1 - K.ISOLATED_AGGR)
             caut = caut + K.ISOLATED_CAUT
         -- pack leader -- clear road ahead but a pack right behind: a small pace stretch so the leader
@@ -1187,13 +1236,14 @@ function R.evaluate(i, dt)
             local nearLat = latOf(ac.getCar(nearIdx).position)
             if math.abs(nearLat - myLat) < K.ALONGSIDE_LAT then
                 local towardSign = (nearLat >= myLat) and 1 or -1
-                if target * towardSign > 0 then target = target * 0.2 end   -- stop leaning into them
+                if target * towardSign > 0 then target = target * (wild and (0.2 + 0.8 * R.WILD_ELBOWS) or 0.2) end   -- stop leaning into them ((R.WILD_ELBOWS) he leans)
                 caut = caut + K.LEAVEROOM_CAUT
             end
         end
 
         -- blue-flag yield -- a car on a higher lap is coming through: concede the line and lift,
         -- rather than racing the leader. Overrides attack/defend; edge-safety below keeps it honest.
+        if wild and lapperIdx >= 0 and R.WILD_BLUE > 0 and hash01(i * 31 + lapperIdx * 17 + myLap * 7) < R.WILD_BLUE then lapperIdx = -1 end   -- (R.WILD_BLUE) not this lap
         if lapperIdx < 0 then yieldT[i] = 0; letbyDone[i] = nil; letbyFor[i] = nil; letbyT[i] = nil end
         if lapperIdx >= 0 and letbyFor[i] ~= lapperIdx then letbyFor[i] = lapperIdx; letbyDone[i] = nil; letbyT[i] = nil; yieldT[i] = 0 end
         if lapperIdx >= 0 then
@@ -1330,7 +1380,7 @@ function R.evaluate(i, dt)
         -- stays smooth. Gated to a packed field (crowd) so it never fires on a lone practice lap.
         local laneHeld = false
         if R.OL_LANES and myLap == 0 and crowd >= 1 and cv2.lane and cv2.back[i] and olS < cv2.lane.endS
-           and not (R.RS_OL_METER > 0 and Strategy.tierOf(i) >= 2 and Strategy.meterOK(R.RS_OL_METER)) then   -- stars shoot the gaps (owner)
+           and not (R.RS_OL_METER > 0 and Strategy.tierOf(i) >= 2 and Strategy.meterOK(R.RS_OL_METER)) and not (wild and R.WILD_START) then   -- stars shoot the gaps (owner)
             -- hold the side you STARTED on (your grid column), at a full lane's offset, until past the first apex. By column, not
             -- by row: assigning a row's two cars the same side sent them into each other off the line (Barcelona 2026-09-17,
             -- 13/18 in contact). A car that started dead centre takes the side its row parity gives it.
@@ -1347,7 +1397,7 @@ function R.evaluate(i, dt)
             funnelFade = funnelFade * (1 - clamp(R.OL_STAR_FUNNEL * edge, 0, 0.6))
         end
         if not laneHeld and myLap == 0 and crowd >= 1 and olS < funnelFade
-           and not (R.LANE_MIN_HALF > 0 and (cv2.halfMin or 6.0) < R.LANE_MIN_HALF) then   -- a one-car road has no columns to hold
+           and not (R.LANE_MIN_HALF > 0 and (cv2.halfMin or 6.0) < R.LANE_MIN_HALF) and not (wild and R.WILD_START) then   -- a one-car road has no columns to hold
             if gridLat[i] == nil and olS < K.GRID_CAPTURE then
                 gridLat[i] = myLat
                 if R.GRID_HOLD_MAXLAT > 0 and math.abs(myLat) > R.GRID_HOLD_MAXLAT then gridLat[i] = 0 end   -- off the road: aim for the line
@@ -1387,6 +1437,11 @@ function R.evaluate(i, dt)
         -- FREE PASS: the car ahead is a lap down and already yielding -- go by, don't tiptoe. Lapping cars ran
         -- 6-13 km/h under their own pace behind yielding backmarkers (Zandvoort 72-lap GP, 2026-09-14).
         if lappedAhead then caut = caut - K.FREEPASS_CAUT; if state == 0 then state = 1 end end
+        -- (R.WILD) the chaos driver keeps only part of the stacked back-off, then drops a flat slice of caution
+        if wild then
+            if caut > 0 then caut = caut * R.WILD_SAFE end
+            caut = caut - R.WILD_CAUT - (wm > 0 and R.WILD_TILT_CAUT or 0)
+        end
         -- cap the stacked back-off (see CAUT_MAX); the attack/defend NEGATIVE caution is left alone
         if caut > K.CAUT_MAX then caut = K.CAUT_MAX end
         if passFinish and caut > R.PASS_CAUT then caut = R.PASS_CAUT end   -- finishing a pass: no hedging (see PASS_FINISH)
@@ -1413,11 +1468,13 @@ function R.evaluate(i, dt)
         curOffset[i] = cur
 
         physics.setAISplineOffset(i, clamp(cur, -1, 1), false)
+        if wild and openingLap == 0 and not nursing and not yielding then aggr = math.max(aggr, R.WILD_AFLOOR) end   -- (R.WILD_AFLOOR) elbows out once the start has faded
         physics.setAIAggression(i, clamp(aggr, 0, 1))
         -- what we actually applied this frame, for the diagnostics log (reused table: no per-frame garbage)
         local L = R.last[i] or {}
         L.off, L.aggr, L.caut, L.state, L.yield, L.block, L.dmg = cur, aggr, caut, state, yielding, blockSide, myDmg
         L.rs = rsPass
+        L.wild = wild and (wm > 0 and 'tilt' or 'calm') or nil   -- (R.WILD) the feed's verve.wild
         L.mv = Strategy.last[i] or 0
         R.last[i] = L
     end)
@@ -1608,6 +1665,7 @@ function R.reset()
     end
     R.baseAggr = {}
     R.last = {}
+    R.wild = { till = {}, cool = {}, pos = {}, posT = {}, dmg = {}, hits = {}, tilts = 0 }
     pcall(Strategy.reset)
     scaled = false
     R.isOval, R.ovalChecked = detectOval()     -- classify the track (oval vs road course); re-checked in beginFrame until the AI line samples
