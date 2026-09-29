@@ -38,7 +38,7 @@ local CLASS_BUCKET = {
 }
 D.DRIVERS = {
     -- F1-modern
-    { key='max_verstappen', name='Pass Nearstappen', say='pass NEER-stuh-pen', bucket='f1', pace=0.87, aggr=0.76, risk=0.29, cons=0.93 },
+    { key='max_verstappen', name='Pass Nearstappen', say='pass NEER-stuh-pen', bucket='f1', pace=1.00, aggr=0.90, risk=0.29, cons=0.95 },   -- owner 2026-09-29: the best on the grid at pace and aggression,
     { key='lewis_hamilton', name='Bruisin Yamilton', say='BROO-zin yuh-MIL-tun', bucket='f1', pace=0.96, aggr=0.53, risk=0.23, cons=0.97 },
     { key='lando_norris', name='Wambo Boris', say='WOM-boh BOR-iss', bucket='f1', pace=0.71, aggr=0.53, risk=0.20, cons=0.86 },
     { key='charles_leclerc', name='Charlie LeKlay', say='CHAR-lee luh-KLAY', bucket='f1', pace=0.71, aggr=0.60, risk=0.46, cons=0.66 },

@@ -438,6 +438,11 @@ K.YELLOW_FAR = 250   -- the zone starts this far out...
 K.YELLOW_CAP_FAR = 200   -- ...at this cap (km/h), easing linearly to YELLOW_CAP
 K.FREEPASS_CAUT = 0.15  -- caution taken OFF a car lapping a yielding backmarker
 R.CAUT_BASE = 0.0       -- flat caution offset on every AI car (harness: is there pace in braking later? 0 = as today)
+-- TOP PACE (owner 2026-09-29: Veterans and stars must lap like the best humans; the Wrecking Crew's control arm showed how much
+-- margin the AI keeps). A car's weight w = its profile pace from TOP_FROM (0) to TOP_FULL (1); unprofiled cars count as
+-- TOP_UNPROF (0 = today). From lap 1 on, not while yielding: caution - TOP_CAUT x w, and the lone-car ease-off x (1 - w x TOP_ISO).
+R.TOP_CAUT = 0.0; R.TOP_ISO = 0.0; R.TOP_FROM = 0.80; R.TOP_FULL = 0.95; R.TOP_UNPROF = 0.0
+R.ISO_X = 1.0           -- x the lone-car ease-off (K.ISOLATED_CAUT / _AGGR) for every car (harness A/B; 1 = today, 0 = off)
 K.YELLOW_LAT = 1.3   -- a stopped car this far from the centre line still counts (edge/kerb); deep in the gravel doesn't
 -- SLOW-CAR YELLOW (harness A/B: R.YELLOW_SLOW > 0). The yellow above only sees a car under K.BLOCK_SPEED (24 km/h), so at
 -- Baku's flat-out kink (0.74, 255-270 km/h) cars ran into a damaged crawler or a just-repositioned car doing 30-90 km/h with
@@ -636,6 +641,10 @@ function R.hurtOf(i, me, myLap)
 end
 -- (H.MISTAKE_V2) Verve.lua skips R.evaluate for a pit-lane car, so a visible mistake's throttle cap or late-brake hint set on the
 -- way in would ride down the pit lane: release them. Only the mistake's own flags: at defaults they are never set (no-op)
+function R.topW(prof)   -- (R.TOP_*) 0..1: how much of the top-pace trim a car gets (its profile pace; unprofiled = TOP_UNPROF)
+    if not prof then return R.TOP_UNPROF end
+    return clamp(((prof.pace or 0) - R.TOP_FROM) / math.max(0.01, R.TOP_FULL - R.TOP_FROM), 0, 1)
+end
 function R.pitRelease(i)
     if cv2.mvThr[i] then cv2.mvThr[i] = nil; cv2.thr[i] = nil; pcall(physics.setAIThrottleLimit, i, 1.0) end
     if cv2.mvBg[i] then
@@ -1291,8 +1300,10 @@ function R.evaluate(i, dt)
         -- bring-it-home -- clear track both ways: nothing to race, so ease off a touch.
         local catchable = R.ISO_PACE and aheadIdx >= 0 and gapA * trackLen < CV.ISO_REACH_M and (R.ISO_PACE_ALL or Strategy.tierOf(i) >= 2)
         if gapA > K.ISOLATED_GAP and gapB > K.ISOLATED_GAP and not catchable and not wild then   -- (a wild car never eases off)
-            aggr = aggr * (1 - K.ISOLATED_AGGR)
-            caut = caut + K.ISOLATED_CAUT
+            local isoX = R.ISO_X                              -- (R.ISO_X, R.TOP_ISO) how much of the ease-off this car takes
+            if R.TOP_ISO > 0 then isoX = isoX * (1 - R.TOP_ISO * R.topW(prof)) end
+            aggr = aggr * (1 - K.ISOLATED_AGGR * isoX)
+            caut = caut + K.ISOLATED_CAUT * isoX
         -- pack leader -- clear road ahead but a pack right behind: a small pace stretch so the leader
         -- noses away and strings the field out, instead of the front artificially anchoring the bunch.
         elseif gapA > K.PACK_LEAD_GAP and crowd >= 2 then
@@ -1597,6 +1608,7 @@ function R.evaluate(i, dt)
             if caut > 0 then caut = caut * R.WILD_SAFE end
             caut = caut - R.WILD_CAUT - (wm > 0 and R.WILD_TILT_CAUT or 0)
         end
+        if R.TOP_CAUT > 0 and myLap >= 1 and not yielding then caut = caut - R.TOP_CAUT * R.topW(prof) end   -- (R.TOP_CAUT)
         -- cap the stacked back-off (see CAUT_MAX); the attack/defend NEGATIVE caution is left alone
         if caut > K.CAUT_MAX then caut = K.CAUT_MAX end
         if passFinish and caut > R.PASS_CAUT then caut = R.PASS_CAUT end   -- finishing a pass: no hedging (see PASS_FINISH)
