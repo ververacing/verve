@@ -133,7 +133,7 @@ local CV = { END = 0.45, GAP = 0.006, LAT = 0.35, MARGIN = 6.0,          -- v1: 
              RS_EDGE = 0.80, RS_MARGIN_M = 0.8, RS_CARW_M = 1.9, RS_BACK_M = 12.0, RS_FWD_M = 10.0, RS_REAREND = 0.35, RS_ADV = 0.5,
              ISO_REACH_M = 300.0, LONE_M = 50.0,
              LANE_OFF = 0.45, LANE_APEX_M = 40.0, LANE_SCAN_M = 20.0, LANE_MAX_M = 900.0 }   -- turn-1 lanes: offset, hold this far past the apex, corner-scan step, give up looking this far out   -- alone-on-track: a car ahead within this is 'catchable' for a top-tier driver; nobody within this either way = lone   -- road space: usable edge (track units), margin + fallback car width (m), scan window behind me / past the car ahead (m), rear-end ease left while pulling out, run needed (x the aggression-scaled minimum)
-local cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, crossed = {} }      -- v2 state: lights-out clock, distance behind the front car, cars we throttled, guard applied, base brake hints
+local cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, crossed = {}, mvThr = {}, mvBg = {} }      -- v2 state: lights-out clock, distance behind the front car, cars we throttled, guard applied, base brake hints
 R.cv2 = cv2                                                               -- (read by diag's contact trace)
 -- CONVOY v2 (harness A/B: R.CONVOY2_ON): throttle, never a speed cap. A follower closing on the car ahead on the
 -- same line loses throttle in proportion to the gap; the field is released from the lights row by row.
@@ -341,6 +341,10 @@ R.ISO_PACE_ALL = false        -- ISO_PACE's exemption from the lone ease-off for
 R.STEER_FRAC = false          -- pounce and TOW_ATTACK read the wheel angle as a fraction of lock (R.steerIn) instead of raw degrees
 R.POUNCE_STEER = 0.02         -- STEER_FRAC: pounce under this fraction of lock (a straight reads under 0.02), off the brakes, lap 2+
 R.TOW_STEER = 0.02            -- STEER_FRAC: TOW_ATTACK under this fraction of lock
+R.MV_SIDE_M = 6.0             -- (H.MISTAKE_V2) no run-wide into a car overlapping this close (centre to centre, m) on the side it runs to
+R.MV_CHASE = 0                -- (H.MISTAKE_V2, optional) caution relief behind a car mid-mistake that has left my line; 0 = off
+R.MV_CHASE_M = 40             -- ...within this many metres
+R.humanMv = nil               -- set by Verve.lua: lib/human.lua's H.mv (a visible mistake's levers per car), applied in R.evaluate
 
 K.ATTACK_GAP = 0.008
 K.PASS_GAP = 0.0035
@@ -648,6 +652,7 @@ function R.evaluate(i, dt)
             -- clear last frame's flags: a car that stops or retires otherwise keeps its last yield/attack/block in the
             -- diag for the rest of the race (Baku read 292 "yield congas", 12 once dead cars were excluded, 2026-09-24)
             if R.last[i] then R.last[i].yield = false; R.last[i].state = 0; R.last[i].block = 0; R.last[i].rs = false end
+            if cv2.mvThr[i] then cv2.mvThr[i] = nil; cv2.thr[i] = nil; pcall(physics.setAIThrottleLimit, i, 1.0) end   -- (H.MISTAKE_V2) a lift's cap never outlives a stop
             return
         end
         local mySpline = me.splinePosition
@@ -873,11 +878,16 @@ function R.evaluate(i, dt)
         end
         local pc = R.penCap and R.penCap[i]                 -- serving a penalty (lib/fault.lua): throttle cap until it's paid
         if pc and os.clock() < pc.till then thr = math.min(thr, pc.cap) end
+        -- VISIBLE MISTAKE (lib/human.lua H.MISTAKE_V2): human wrote this frame's levers just before (Verve.lua: getModifiers, then evaluate);
+        -- lv = valid-until. A lift's throttle cap here, a late brake's hint in the guard below, a run-wide's offset after the side-hold.
+        local hm = R.humanMv and R.humanMv[i]
+        if hm and (os.clock() >= (hm.lv or 0) or (Recovery.stateOf(i) or {}).rec) then hm = nil end
+        if hm and hm.thr then thr = math.min(thr, hm.thr); cv2.mvThr[i] = true end
         if thr < 1.0 then cv2.thr[i] = true; pcall(physics.setAIThrottleLimit, i, thr)
-        elseif cv2.thr[i] then cv2.thr[i] = nil; pcall(physics.setAIThrottleLimit, i, 1.0) end
+        elseif cv2.thr[i] then cv2.thr[i] = nil; cv2.mvThr[i] = nil; pcall(physics.setAIThrottleLimit, i, 1.0) end
         -- BRAKE-ZONE GUARD (lap 0): the car ahead on my line is on the brakes and I'm inside CV.BG_M -> raise my brake
         -- hint (earlier brake point) in proportion to the gap. R.BG_ALL: whole-race multiplier, direction test only.
-        if (R.OL_BRAKEGUARD or R.BG_ALL > 0 or roomB or (wild and R.WILD_BH ~= 1)) and physics.setAIBrakeHint then
+        if (R.OL_BRAKEGUARD or R.BG_ALL > 0 or roomB or (wild and R.WILD_BH ~= 1) or (hm and hm.bh) or cv2.mvBg[i]) and physics.setAIBrakeHint then
             if cv2.base[i] == nil then
                 cv2.base[i] = 1.0
                 pcall(function() cv2.base[i] = ac.INIConfig.carData(i, 'ai.ini'):get('PEDALS', 'BRAKE_HINT', 1.0) end)
@@ -903,6 +913,8 @@ function R.evaluate(i, dt)
                     end
                 end
             end
+            if hm and hm.bh then mul = mul * hm.bh end      -- (H.MISTAKE_V2) the late brake; the release below resets it (cv2.bg)
+            cv2.mvBg[i] = (hm and hm.bh) and true or nil     -- ...and brings this block back the frame after, whatever the guard switches say
             if mul ~= 1.0 then cv2.bg[i] = true; pcall(physics.setAIBrakeHint, i, cv2.base[i] * mul)
             elseif cv2.bg[i] then cv2.bg[i] = nil; pcall(physics.setAIBrakeHint, i, cv2.base[i]) end
         end
@@ -1303,6 +1315,13 @@ function R.evaluate(i, dt)
                 if roomF then R.roomAct = (R.roomAct or 0) + 1 end
             end
         end
+        -- (R.MV_CHASE) the car ahead is mid-mistake and has left my line: the door is open, go
+        if R.MV_CHASE > 0 and aheadIdx >= 0 and myLap >= 2 and gapA * trackLen < R.MV_CHASE_M then
+            local ah = R.humanMv and R.humanMv[aheadIdx]
+            if ah and ah.t0 and os.clock() < (ah.lv or 0) and math.abs(myLat - latOf(ac.getCar(aheadIdx).position)) >= K.REAREND_LAT then
+                caut = caut - R.MV_CHASE
+            end
+        end
 
         -- high-speed damping: smaller line changes at speed (a big lateral move at 300 km/h is
         -- what unsettles fast cars). Full effect up to ~180 km/h, tapering to half by ~360.
@@ -1514,6 +1533,27 @@ function R.evaluate(i, dt)
         if R.OL_CORNER_PRIO and myLap <= 1 and sideBy then
             local isC, inside = cornerAhead(mySpline)
             if isC and inside ~= 0 then target = clamp(-inside * CV.PRIO_OUT, -0.85, 0.85) end
+        end
+
+        -- VISIBLE MISTAKE (lib/human.lua H.MISTAKE_V2): a lock-up or a missed apex runs wide toward the outside of the corner. Here, after
+        -- the edge easing and the side-hold (a run-wide goes toward the edge by definition); the blockage sweep keeps the last word.
+        if hm and hm.wide and not yielding then
+            if (hm.side or 0) == 0 and os.clock() >= (hm.scanT or 0) then     -- which way is out: the next corner within ~2.5 s of travel
+                hm.scanT = os.clock() + 0.25                                  -- (cached once found; a miss rescans 4x a second)
+                local from = hm.lookM or 0
+                for m = from, from + math.max(40, spd / 3.6 * 2.5), 20 do
+                    local isC, ins = cornerAhead(mySpline + m / trackLen)
+                    if isC and ins ~= 0 then hm.side = -ins; break end
+                end
+            end
+            local s = hm.side or 0
+            if s ~= 0 and not (nearIdx >= 0 and nearGap * trackLen < R.MV_SIDE_M
+                               and (latOf(ac.getCar(nearIdx).position) - myLat) * s > 0.1) then   -- a car overlapping on that side: hold the line
+                local add = hm.wide
+                if not hm.big then add = add * clamp((K.EDGE_HARD - myLat * s) / (K.EDGE_HARD - K.EDGE_SOFT), 0, 1) end   -- an ordinary one stays on the road
+                local lim = hm.big and 1.0 or K.EDGE_HARD
+                target = clamp(target + s * add, -lim, lim)
+            end
         end
 
         -- BLOCKAGE sweep (final word): a stopped/crawling car is on my line just ahead -> commit to the
@@ -1752,7 +1792,7 @@ function R.reset()
     dmgSeen, dmgLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     letbyT, letbyDone, letbyFor = {}, {}, {}
-    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {} }; R.cv2 = cv2
+    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {} }; R.cv2 = cv2
     R.crawlN = 0
     R.roomN = 0; R.roomAct = 0; R.evalN = 0; R.fastTuckN = 0; R.yellowSlowN = 0
     -- AGGR_BASE_FIX: the next session reads each car afresh; this session's capture and Verve's last write carry over for

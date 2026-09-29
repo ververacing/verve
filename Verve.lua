@@ -20,6 +20,25 @@ local Strategy  = require('lib.strategy')     -- planned manoeuvres (racecraft d
 local Fuel      = require('lib.fuel')         -- timed races: AC's 1.2-lap AI fuel load and its empty-tank pit loop (G.timedFuel)
 Racecraft.penCap = Fault.penCap            -- penalty throttle caps, read by racecraft's throttle setter (shared table)
 Fault.attach(Recovery.recentDrops, Feed.event)
+Racecraft.humanMv = Human.mv               -- (lib/human.lua H.MISTAKE_V2) a visible mistake's levers, applied by racecraft (shared table)
+Human.feedEvent = Feed.event               -- ...its feed events ('mistake', 'mistake_model', 'mistake_drop')
+Human.busy = function(i)                   -- ...never drawn or fired for a car recovery is driving or ramping back up
+    local ok, b = pcall(function() return Recovery.rampCap(i) < 1e9 or (Recovery.stateOf(i) or {}).rec == true end)
+    return ok and b == true
+end
+do  -- ...and an off it started heats the learned trouble-spot map at Human.MV_TS_W (the saved maps on players' machines)
+    local tsIncident = Troublespots.incident
+    Troublespots.incident = function(spline, cls, i, wt)   -- (i: the car; lib/troublespots.lua mutes a chaos driver's own)
+        if Human.MISTAKE_V2 and type(spline) == 'number' then
+            local now = os.clock()
+            for _, st in pairs(Human.mv) do
+                if st.sp and (st.t0 or now - (st.endT or -1e9) < Human.MV_TS_WIN)
+                   and math.abs((st.sp - spline + 0.5) % 1 - 0.5) < 0.02 then wt = (wt or 1) * Human.MV_TS_W; break end
+            end
+        end
+        return tsIncident(spline, cls, i, wt)
+    end
+end
 local Diag = nil; pcall(function() Diag = require('diag') end)   -- LOCAL dev diagnostics; absent in the shipped build
 -- LOCAL test harness (tools/harness.py writes harness.lua right before launching a run, and it self-expires):
 -- can put the player's car on autopilot, override settings for the run, and label the diagnostics file.
