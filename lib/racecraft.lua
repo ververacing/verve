@@ -375,6 +375,10 @@ R.WILD_TILT_CAUT = 0.30       -- (WILD_TILT) extra caution removed while tilted
 R.WILD_TILT_LUNGE = 1.5       -- (WILD_TILT) lunge chance multiplier while tilted
 R.WILD_MAX_HITS = 4           -- (WILD_TILT) no more tilts after this many 8 km/h hits
 R.wild = { till = {}, cool = {}, pos = {}, posT = {}, dmg = {}, hits = {}, tilts = 0 }   -- (WILD_TILT) per-car state; cleared by R.reset
+-- EDGE_CAP (found 2026-09-28 reading for the Wrecking Crew): edgeSoft = EDGE_SOFT + wide x OUTSIDE_EDGE passes EDGE_HARD once
+-- wide > 4/3 (aggression above ~0.83 with a real run), and the kerb guard is then off on outside passes. The existing 0.84
+-- rows (Diablo Blastoya, Hansel Struck) already reach it. On in every wild harness arm; a default only after the suite.
+R.EDGE_CAP = false            -- harness switch: cap edgeSoft at EDGE_HARD - 0.05 (any car)
 K.OFFSET_SLEW = 0.8        -- units/sec offset may move (lower = smoother, less skittish)
 K.DEADZONE = 0.12       -- ignore tiny offsets (stay on the line)
 K.SIDE_HOLD = 1.2        -- s to hold a chosen side before allowing a flip (anti-dart)
@@ -1346,6 +1350,7 @@ function R.evaluate(i, dt)
         -- kerbs). A car with a real speed run is allowed a bit closer to the edge to finish an outside
         -- pass, but EDGE_HARD still keeps it on the road.
         local edgeSoft = K.EDGE_SOFT + wide * K.OUTSIDE_EDGE
+        if R.EDGE_CAP and edgeSoft > K.EDGE_HARD - 0.05 then edgeSoft = K.EDGE_HARD - 0.05 end   -- (R.EDGE_CAP) keep the kerb guard alive
         if (target > 0 and myLat > edgeSoft) or (target < 0 and myLat < -edgeSoft) then
             target = target * clamp((K.EDGE_HARD - math.abs(myLat)) / (K.EDGE_HARD - edgeSoft), 0, 1)
         end
