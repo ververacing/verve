@@ -92,6 +92,9 @@ function D.levelToPct(level, pts)
     return pts[#pts][2]
 end
 
+-- a car's level -> % off expert pace on ITS class curve (the inverse of levelForPct); Drivers.paceOf reads an unprofiled car's pace from it
+function D.pctOf(i, level) return D.levelToPct(level, (curveFor(i))) end
+
 local DELIB_SPREAD = 10   -- per-car levels further apart than this were set by hand in the grid: honoured as written
 D.sliderOverride = nil    -- one-line notice for the UI when the slider overrode the grid's per-car levels
 local cache = {}          -- [i] = level

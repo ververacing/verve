@@ -413,6 +413,7 @@ def write_harness_lua(arm, ttl_s, ncars=0, laps=0, weekend=False):
         "troublespots": arm.get("troublespots", {}),   # e.g. {"FRESH": true}: this run neither loads nor saves the learned map
         "fault": arm.get("fault", {}),                 # lib/fault.lua switches, e.g. {"ENABLED": true, "ENFORCE": false}
         "human": arm.get("human", {}),                 # lib/human.lua fields, e.g. {"RAINFX_GRIP": 1.0}
+        "strategy": arm.get("strategy", {}),           # lib/strategy.lua S.* fields (Verve.lua merges them), e.g. {"SETUP_X": 0}
         "fuel": arm.get("fuel", 0),                    # litres for EVERY car when the autopilot arms (0 = AC's own load); a quali-load pace probe
     }
     with open(HARNESS_LUA, "w", encoding="utf-8") as f:
@@ -1057,7 +1058,7 @@ def run_once(args, arm, run_idx):
     if rt_med is not None and rt_med < realtime.SUSPECT:
         print(f"  !! the sim ran at {rt_med:.2f}x real time over {rt_laps} laps (CPU occupancy): "
               f"treat this race's timings as suspect")
-    m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots", "fault", "csp", "human", "fuel")}, sort_keys=True)
+    m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots", "fault", "csp", "human", "strategy", "fuel")}, sort_keys=True)
     m["weather"] = args.weather or ""
     m["ambient_c"] = args.ambient if args.ambient is not None else DEFAULT_AMBIENT
     m["road_c"] = args.road if args.road is not None else DEFAULT_ROAD
@@ -1122,6 +1123,7 @@ def main():
     ap.add_argument("--recovery", help="JSON of Recovery module fields to override for the run, e.g. {\"DROP_API\":\"car\"}")
     ap.add_argument("--racecraft", help="JSON of Racecraft module fields to override for the run")
     ap.add_argument("--troublespots", help="JSON of Troublespots module fields, e.g. {\"FRESH\":true} = clean learned map for this run")
+    ap.add_argument("--strategy", help="JSON of Strategy module fields (lib/strategy.lua S.*), e.g. {\"SETUP_X\":0}")
     ap.add_argument("--human", help="JSON of Human module fields, e.g. {\"RAINFX_GRIP\":1.0,\"RAINFX_CAUT\":1.0}")
     ap.add_argument("--csp", help="JSON of CSP per-user config overrides for this run only, e.g. {\"new_behaviour\":{\"AI_RACE_RUBBERBANDING\":{\"ENABLED\":1}}}")
     ap.add_argument("--minutes", type=int, default=0, help="TIMED race of N minutes (LAPS 0; AC adds a lap after the clock). --laps then only fills race.ini's RACE_LAPS "
@@ -1149,7 +1151,7 @@ def main():
     else:
         arms = [{"label": args.label, "settings": json.loads(args.settings) if args.settings else {}, "drivers": args.drivers, "profiles": args.profiles,
                  "recovery": json.loads(args.recovery) if args.recovery else {}, "racecraft": json.loads(args.racecraft) if args.racecraft else {},
-                 "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}, "human": json.loads(args.human) if args.human else {}, "fuel": args.fuel,
+                 "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}, "human": json.loads(args.human) if args.human else {}, "strategy": json.loads(args.strategy) if args.strategy else {}, "fuel": args.fuel,
                  "assists": json.loads(args.assists) if args.assists else {}, "stop_laps": args.stop_laps}]
 
     results = []

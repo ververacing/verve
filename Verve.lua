@@ -178,6 +178,7 @@ function script.update(dt)
             if type(Harness.racecraft) == 'table' then for k, v in pairs(Harness.racecraft) do Racecraft[k] = v end end
             if type(Harness.fault) == 'table' then for k, v in pairs(Harness.fault) do Fault[k] = v end end
             if type(Harness.human) == 'table' then for k, v in pairs(Harness.human) do Human[k] = v end end
+            if type(Harness.strategy) == 'table' then for k, v in pairs(Harness.strategy) do Strategy[k] = v end end
             if Diag and Harness.label then Diag.label = tostring(Harness.label) end
         end
         -- AC loads to a pre-session screen and waits for the Drive button; nothing (not even the AI grid)
@@ -730,7 +731,7 @@ function script.windowMain()
         if G.racecraft then
             ui.text(string.format('Attacking: %d   Defending: %d', Racecraft.attacking or 0, Racecraft.defending or 0))
             ui.text('Track read as: ' .. (Racecraft.isOval and 'Oval / speedway' or 'Road course'))
-            if G.strategy ~= false then ui.text(string.format('Planned manoeuvres: %d (%d gained a place)', Strategy.attempts or 0, Strategy.ok or 0)) end
+            if G.strategy ~= false then ui.text(string.format('Planned manoeuvres: %d (%d got past)', Strategy.attempts or 0, Strategy.ok or 0)) end
         end
         if G.troubleSpots then
             ui.text(string.format('Trouble spots learned on this track: %d', Troublespots.hotCount()))

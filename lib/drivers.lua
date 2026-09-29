@@ -672,4 +672,27 @@ end
 
 function D.appliedLevel(i) return lastApplied[i] end   -- what Verve last wrote (the conflict watchdog reads it back)
 
+-- A car's pace on the profile scale (Rookie 0.30 .. 0.90 = expert, the paceAbs reference): its profile's, else read back from the level
+-- Verve applied, through its class curve (the inverse of paceAbs: level 100 -> 0.90, slider 90 -> 0.60, slider 80 -> 0.30; a career
+-- band or a spread grid reads as what the car actually runs at). One scale for the manoeuvre tier (strategy S.TIER_MODE 1) and the
+-- visible-mistake rate (human H.MISTAKE_V2). Cached 2 s per car.
+D.paceCache = {}
+function D.paceOf(i)
+    local now = os.clock()
+    local c = D.paceCache[i]
+    if c and now - c.t < 2.0 then return c.p end
+    local st = D.statsOf(i)
+    local p = st and st.pace
+    if type(p) ~= 'number' then
+        local lvl = lastApplied[i]
+        if type(lvl) ~= 'number' then pcall(function() lvl = ac.getCar(i).aiLevel end) end
+        if type(lvl) ~= 'number' or lvl <= 0 then lvl = 1 end
+        p = D.PACE_REF - Difficulty.pctOf(i, lvl) / D.PACE_K
+    end
+    p = clamp(p, 0, 1)
+    if not c then c = {}; D.paceCache[i] = c end
+    c.p, c.t = p, now
+    return p
+end
+
 return D

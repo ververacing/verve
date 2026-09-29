@@ -48,6 +48,9 @@ H.STEER_CORNER  = 0.13     -- x lock = full cornering (STEER_FRAC only; not a po
                            -- about dev0146's corner dose. A/B arm 0.35 (the -1..1 reading the code was written for) also cuts
                            -- corner dirty air 50-80 %, most in the fast corners where following is hardest. Longer term,
                            -- lateral g (car.acceleration.x) would track aero load better than the steering angle.
+H.DIRTY_LAT = 0            -- >0 (from lap 1): dirty air fades out as the car ahead moves off my line - full within DIRTY_LAT/2 of it, none
+                           -- beyond DIRTY_LAT (track half-widths; 0.35 = about one car width on a 12 m road); pit-lane and parked cars
+                           -- (under 30 km/h) make no wake. 0 = today (spline gap only, every car)
 
 -- amplitudes
 local PERSONALITY_AMP = 0.020
@@ -289,19 +292,27 @@ local function dirtyair01(i, myCar)
         if corner <= 0 then return end
         local mySpline = myCar.splinePosition
         if mySpline == nil then return end
+        local lat = H.DIRTY_LAT > 0 and (myCar.lapCount or 0) >= 1   -- (H.DIRTY_LAT) the wake is behind a car, not beside it; lap 0 as before
         local sim = ac.getSim()
-        local best = 1e9
+        local best, bestJ = 1e9, -1
         for j = 0, sim.carsCount - 1 do
             if j ~= i then
                 local oc = ac.getCar(j)
-                if oc and oc.splinePosition then
+                if oc and oc.splinePosition and not (lat and (oc.isInPitlane or (oc.speedKmh or 0) < 30)) then
                     local gap = oc.splinePosition - mySpline
                     if gap < 0 then gap = gap + 1 end
-                    if gap > 0 and gap < best then best = gap end
+                    if gap > 0 and gap < best then best = gap; bestJ = j end
                 end
             end
         end
-        if best < DIRTY_GAP then d = (1 - best / DIRTY_GAP) * corner end
+        if best < DIRTY_GAP then
+            d = (1 - best / DIRTY_GAP) * corner
+            if lat and bestJ >= 0 then
+                local a = ac.worldCoordinateToTrack(myCar.position)
+                local b = ac.worldCoordinateToTrack(ac.getCar(bestJ).position)
+                if a and b then d = d * clamp(1 - (math.abs(a.x - b.x) - 0.5 * H.DIRTY_LAT) / (0.5 * H.DIRTY_LAT), 0, 1) end
+            end
+        end
     end)
     return d
 end
