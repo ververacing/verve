@@ -448,8 +448,9 @@ telemetryCtx = function()
     for _, k in ipairs({ 'humanErrors', 'drsDiscipline', 'controlGrip', 'careerCurve', 'intensity', 'rcIntensity', 'baseGrip', 'raceStart', 'sliderCurve', 'repairOnTrack', 'paceAbs' }) do
         local v = G[k]; settings[#settings + 1] = string.format('"%s":%s', k, type(v) == 'number' and string.format('%.2f', v) or (type(v) == 'string' and ('"' .. v .. '"') or tostring(v == true)))
     end
-    local pu, au = 0, 0
-    pcall(function() pu, au = Drivers.counts() end)
+    local pu, au, wu = 0, 0, 0
+    pcall(function() pu, au, wu = Drivers.counts() end)
+    if (wu or 0) > 0 then settings[#settings + 1] = string.format('"wildDrivers":%d', wu) end   -- chaos drivers: in the settings JSON (no schema change), only when one races
     local playerModel = ''; pcall(function() playerModel = ac.getCarID(0) or '' end)
     local cspBuild = nil; pcall(function() cspBuild = ac.getPatchVersionCode() end)
     return {
@@ -506,6 +507,7 @@ local function driverComboFor(idx)
         for _, d in ipairs(Drivers.rosterFor(cls)) do
             if fl == '' or d.name:lower():find(fl, 1, true) then
                 if ui.selectable(d.name, d.key == curKey) then Drivers.setProfile(idx, d.key) end
+                if d.wild and ui.itemHovered() then ui.setTooltip('Chaos driver: top pace, elbows out, almost no margin. He dives from too far back, squeezes and rarely backs out. Expect contact. Never picked by Randomize.') end
             end
         end
     end)
@@ -528,6 +530,7 @@ local function driverGridList()
         -- (sameLine only when a label follows -- a dangling sameLine pulled the NEXT row up onto this one)
         if i == 0 then ui.sameLine(); ui.textColored(drv .. '  (you)', rgbm(0.6, 0.6, 0.6, 1))
         elseif not Drivers.profileOf(i) then ui.sameLine(); ui.textColored(drv, rgbm(0.5, 0.5, 0.5, 1)) end
+        if Drivers.isWild(i) then ui.sameLine(); ui.textColored('chaos', rgbm(0.95, 0.45, 0.3, 1)) end   -- the Wrecking Crew (a label follows this sameLine)
     end
 end
 

@@ -451,13 +451,19 @@ D.DRIVERS = {
     { key='arch_rookie',     name='Rookie',     bucket='archetype', pace=0.30, aggr=0.50, risk=0.60, cons=0.50 },
     { key='arch_midfield',   name='Midfielder', bucket='archetype', pace=0.60, aggr=0.55, risk=0.35, cons=0.80 },
     { key='arch_veteran',    name='Veteran',    bucket='archetype', pace=0.85, aggr=0.55, risk=0.20, cons=0.95 },
+
+    -- Chaos driver (owner 2026-09-28): not a person, not an archetype. Listed at the top of every class's picker with the
+    -- archetypes; never picked by Randomize or name matching; never the pace anchor. wild=true lets racecraft's R.WILD layer
+    -- relax his margins (R.WILD=false: the row's numbers only). Keep the field order key, name, say, bucket: the regexes in
+    -- tools/harness.py and tools/apply_names.py depend on it.
+    { key='wrecking_crew', name='Wrecking Crew', say='RECK-ing crew', bucket='wild', pace=0.95, aggr=1.00, risk=1.00, cons=0.10, wild=true },
 }
 
 -- indexes
-local BY_KEY, ARCHETYPES = {}, {}
+local BY_KEY, ARCHETYPES, WILD = {}, {}, {}
 for _, d in ipairs(D.DRIVERS) do
     BY_KEY[d.key] = d
-    if d.bucket == 'archetype' then ARCHETYPES[#ARCHETYPES + 1] = d end
+    if d.bucket == 'archetype' then ARCHETYPES[#ARCHETYPES + 1] = d elseif d.wild then WILD[#WILD + 1] = d end
 end
 
 function D.nameOf(key) local d = BY_KEY[key]; return d and d.name or key end
@@ -466,6 +472,7 @@ function D.rosterFor(classKey)
     local bucket = CLASS_BUCKET[classKey]
     local out = {}
     for _, d in ipairs(ARCHETYPES) do out[#out + 1] = d end     -- archetypes first, then the class roster
+    for _, d in ipairs(WILD) do out[#out + 1] = d end           -- (the chaos driver sits with them, in every class)
     if bucket then
         for _, d in ipairs(D.DRIVERS) do if d.bucket == bucket then out[#out + 1] = d end end
     end
@@ -492,7 +499,7 @@ local function recomputeFieldMaxPace()
     for i, k in pairs(assigned) do
         if i ~= 0 or slot0AI then
             local d = BY_KEY[k]
-            if d and d.pace and d.pace > m then m = d.pace end
+            if d and d.pace and d.pace > m and not d.wild then m = d.pace end   -- (the chaos driver is never the anchor)
         end
     end
     fieldMaxPace = (m > 0) and m or 1.0
@@ -532,7 +539,7 @@ function D.autoMatch()
     pcall(function()
         local sim = ac.getSim(); if not sim then return end
         local byName = {}
-        for _, d in ipairs(D.DRIVERS) do byName[d.name:lower()] = d end
+        for _, d in ipairs(D.DRIVERS) do if not d.wild then byName[d.name:lower()] = d end end   -- (never the chaos driver)
         for i = 1, sim.carsCount - 1 do
             local car = ac.getCar(i)
             if car and car.isAIControlled and not assigned[i] then
@@ -548,6 +555,7 @@ function D.statsOf(i)
     if not k then return nil end
     return BY_KEY[k]
 end
+function D.isWild(i) local k = assigned[i]; local d = k and BY_KEY[k]; return d ~= nil and d.wild == true end   -- the chaos driver (wild row)
 function D.anyAssigned() for _ in pairs(assigned) do return true end return false end
 function D.clearAll()
     for i in pairs(assigned) do assigned[i] = nil; applyName(i) end
@@ -586,11 +594,11 @@ function D.fillGrid(key)
     end)
 end
 
--- how many real-name profiles vs archetypes are on the grid (telemetry)
+-- how many real-name profiles vs archetypes (vs chaos drivers) are on the grid (telemetry)
 function D.counts()
-    local real, arch = 0, 0
-    for _, k in pairs(assigned) do local d = BY_KEY[k]; if d then if d.bucket == 'archetype' then arch = arch + 1 else real = real + 1 end end end
-    return real, arch
+    local real, arch, wild = 0, 0, 0
+    for _, k in pairs(assigned) do local d = BY_KEY[k]; if d then if d.bucket == 'archetype' then arch = arch + 1 elseif d.wild then wild = wild + 1 else real = real + 1 end end end
+    return real, arch, wild
 end
 
 function D.randomizeGrid()
@@ -649,7 +657,8 @@ function D.applyPace(i, base)
             -- the fastest profile on the grid runs at `base`; the rest are spread BELOW it by pace rating,
             -- in lap-time terms (SPREAD_PCT per 1.0 of rating), converted to a level through the measured curve
             local basePct = Difficulty.levelToPct(base)
-            if D.PACE_ABS and not D.LOCKED then   -- (a career event keeps its difficulty curve: an auto-matched name must not override it)
+            if st.wild and not D.PACE_ABS then lvl = base    -- the chaos driver runs at the slider level (he is never the anchor)
+            elseif D.PACE_ABS and not D.LOCKED then   -- (a career event keeps its difficulty curve: an auto-matched name must not override it)
                 lvl = Difficulty.levelForPct(i, math.max(0, (D.PACE_REF - st.pace) * D.PACE_K))   -- (D.PACE_ABS) the profile's own pace
             else
                 lvl = math.min(base, Difficulty.pctToLevel(basePct + (fieldMaxPace - st.pace) * SPREAD_PCT))
