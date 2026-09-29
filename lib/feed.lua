@@ -44,13 +44,26 @@ local function emit(line)
     buf[#buf + 1] = line
 end
 
+-- F.KEEP_OPEN (2026-09-29): one handle per session file, flushed every 5 s. Opening and closing the file on every flush cost
+-- ~40 ms per MB already written (an antivirus re-scans the whole file on close): a 200 ms hitch every 5 s after ~20 min of a
+-- 20-car race. false = the old open/append/close per flush.
+F.KEEP_OPEN = true
+local fh = nil
+local function closeFh() if fh then pcall(function() fh:close() end); fh = nil end end
 local function flush()
     if not file or #buf == 0 then return end
-    local ok = pcall(function()
-        local f = io.open(file, 'a')
-        if f then f:write(table.concat(buf, '\n'), '\n'); f:close() end
+    local wrote = false
+    pcall(function()
+        if F.KEEP_OPEN then
+            fh = fh or io.open(file, 'a')
+            if fh then fh:write(table.concat(buf, '\n'), '\n'); fh:flush(); wrote = true end   -- (not keyed on write's return value:
+                                                                                    -- CSP's io may return nothing on success)
+        else
+            local f = io.open(file, 'a')
+            if f then f:write(table.concat(buf, '\n'), '\n'); f:close(); wrote = true end
+        end
     end)
-    if ok then buf = {} end
+    if wrote then buf = {} else closeFh() end   -- (a failed write keeps the lines for the next try, on a fresh handle)
 end
 
 local function event(t, typ, fields)
@@ -69,6 +82,7 @@ local function newFile(sim)
     if not dir then return end
     pcall(function() io.createDir(dir) end)
     local track = 'track'; pcall(function() track = ac.getTrackFullID('/') or track end)
+    closeFh()
     file = string.format('%s/%s_%s.jsonl', dir, os.date('%Y%m%d_%H%M%S'), tostring(track):gsub('[^%w]', '_'))
     buf = {}
     pcall(function() if sim.trackLengthM and sim.trackLengthM > 200 then trackLen = sim.trackLengthM end end)
@@ -93,7 +107,7 @@ function F.reset()
     feedEvSeen = {}
     F.wildSent = {}
     namesSent, namesT = '', 0
-    flush()
+    flush(); closeFh()
     file = nil; started = false
     prev = {}; prevOrder = nil; lapStart = {}; bestLap = {}; overallBest = nil
     stuckSince = {}; stuckReported = {}; battles = {}
@@ -348,7 +362,7 @@ function F.finish()
         end
         event(now(), 'race_end', '"results":[' .. table.concat(parts, ',') .. ']')
     end
-    flush()
+    flush(); closeFh()
 end
 
 -- other modules' events (lib/fault.lua penalties): typed like the built-in ones, same clock

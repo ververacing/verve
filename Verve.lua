@@ -490,7 +490,7 @@ telemetryCtx = function()
         settingsJson = '{' .. table.concat(settings, ',') .. '}',
     }
 end
-ac.onRelease(function() pcall(function() local okS, simR = pcall(ac.getSim); if okS and simR then Telemetry.abort('quit', simR, telemetryCtx()) end end) end)
+ac.onRelease(function() pcall(function() local okS, simR = pcall(ac.getSim); if okS and simR then Telemetry.abort('quit', simR, telemetryCtx()) end end); pcall(Feed.finish) end)   -- (Feed.finish: race_end + the last lines; it was never called)
 
 ac.onSessionStart(function()
     -- harness: every session of a weekend needs its own Drive press + autopilot arming
