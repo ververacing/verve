@@ -35,7 +35,7 @@ def q(s):
 def sub(m):
     global changed, kept
     head, key, name, _tail, rest, bucket = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5), m.group(6)
-    if bucket == "archetype":
+    if bucket in ("archetype", "wild"):   # types, not people (the chaos driver 'Wrecking Crew' is not a real name)
         return m.group(0)
     if name in mapping:
         new, say = mapping[name]

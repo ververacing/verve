@@ -23,6 +23,7 @@ local INCIDENT_MIN  = 8        -- km/h of new body damage that counts as an inci
 local Contacts = require('lib.contacts')
 local Classes = require('lib.classes')    -- the header's per-car class (the classifier the app and the reports use)
 local feedEvSeen = {}       -- per car: last collision event id already reported
+F.wildSent = {}             -- per car: the one-off 'wild' decision already sent (the Wrecking Crew, a chaos driver profile)
 
 local file, buf, started = nil, {}, false
 local lastState, lastFlush = -1e9, -1e9
@@ -90,6 +91,7 @@ end
 
 function F.reset()
     feedEvSeen = {}
+    F.wildSent = {}
     namesSent, namesT = '', 0
     flush()
     file = nil; started = false
@@ -142,6 +144,7 @@ function F.update(dt, stats)
                 i = i, lap = c.lapCount or 0, pos = c.racePosition or 0, spline = c.splinePosition or 0, spd = c.speedKmh or 0,
                 pit = c.isInPitlane == true, ret = c.isRetired == true, dmg = dmg, lat = lat01(c.position),
                 st = r.state or 0, yl = r.yield == true, bl = (r.block or 0) ~= 0, rec = st.rec == true, park = st.parked == true, mv = r.mv or 0,
+                wd = r.wild,   -- a chaos driver: 'calm' / 'tilt' (racecraft R.WILD); nil for every other car
                 tyre = (c.wheels and c.wheels[0] and c.wheels[0].tyreCoreTemperature) or 0,
             }
             cars[#cars + 1] = e
@@ -178,9 +181,9 @@ function F.update(dt, stats)
             if c.spd > 5 then local gs = d * trackLen / (c.spd / 3.6); gapAhead[c.i] = gs; g = string.format('%.2f', gs) end
         end
         local stName = (c.st == 1) and 'attack' or ((c.st == 2) and 'defend' or 'cruise')
-        parts[#parts + 1] = string.format('{"i":%d,"pos":%d,"lap":%d,"spline":%.4f,"spd":%d,"gap_ahead_s":%s,"pit":%s,"ret":%s,"dmg":%d,"tyre":%d,"verve":{"state":"%s","yield":%s,"block":%s,"recovering":%s}}',
+        parts[#parts + 1] = string.format('{"i":%d,"pos":%d,"lap":%d,"spline":%.4f,"spd":%d,"gap_ahead_s":%s,"pit":%s,"ret":%s,"dmg":%d,"tyre":%d,"verve":{"state":"%s","yield":%s,"block":%s,"recovering":%s%s}}',
             c.i, c.pos, c.lap, c.spline, math.floor(c.spd), g, tostring(c.pit), tostring(c.ret), math.floor(c.dmg), math.floor(c.tyre),
-            stName, tostring(c.yl), tostring(c.bl), tostring(c.rec))
+            stName, tostring(c.yl), tostring(c.bl), tostring(c.rec), c.wd and (',"wild":"' .. c.wd .. '"') or '')   -- "wild" only on a chaos driver
     end
     local leaderLap = (#running > 0) and running[1].lap or 0
     emit(string.format('{"v":1,"t":%.1f,"type":"state","leader_lap":%d,"running":%d,"cars":[%s]}', t, leaderLap, #running, table.concat(parts, ',')))
@@ -257,9 +260,12 @@ function F.update(dt, stats)
                 local MV = { [1] = { 'switchback', 'wide in, cutting back underneath on the exit' }, [2] = { 'lunge', 'braking late, diving for the inside' },
                              [3] = { 'setup', 'sitting in the tow, setting up the pass' }, [4] = { 'slingshot', 'in the draft, pulling out at the last moment' } }
                 local m = MV[c.mv]
+                if m and c.mv == 2 and c.wd then m = { 'divebomb', 'sending it from way back, braking late' } end   -- a chaos driver's lunge
                 if m then event(t, 'verve', string.format('"car":%d,"decision":"%s","detail":"%s"', i, m[1], m[2])) end
             end
             if c.bl and not p.bl then event(t, 'verve', string.format('"car":%d,"decision":"go_around","detail":"swerving around a stopped car"', i)) end
+            if c.wd and not F.wildSent[i] then F.wildSent[i] = true; event(t, 'verve', string.format('"car":%d,"decision":"wild","detail":"races with almost no margin"', i)) end
+            if c.wd and p.wd and c.wd ~= p.wd then event(t, 'verve', string.format('"car":%d,"decision":"%s","detail":"%s"', i, c.wd, c.wd == 'tilt' and 'loses his temper - no margin now' or 'settles down')) end
             if c.rec and not p.rec then event(t, 'verve', string.format('"car":%d,"decision":"crash_repair","detail":"Verve is getting the car going again"', i)) end
         else
             lapStart[i] = t
