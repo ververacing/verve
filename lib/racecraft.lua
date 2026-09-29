@@ -443,6 +443,8 @@ R.CAUT_BASE = 0.0       -- flat caution offset on every AI car (harness: is ther
 -- TOP_UNPROF (0 = today). From lap 1 on, not while yielding: caution - TOP_CAUT x w, and the lone-car ease-off x (1 - w x TOP_ISO).
 R.TOP_CAUT = 0.0; R.TOP_ISO = 0.0; R.TOP_FROM = 0.80; R.TOP_FULL = 0.95; R.TOP_UNPROF = 0.0
 R.ISO_X = 1.0           -- x the lone-car ease-off (K.ISOLATED_CAUT / _AGGR) for every car (harness A/B; 1 = today, 0 = off)
+R.TOP_GRIP = 0.0        -- extra AI grip x the car's top-pace weight (Verve.lua; 29 Sep: grip is the one lever past AC's level-100 ceiling -
+                        -- 1.20 -> 1.40 took Monza GT3 from +4.0 % to +3.1 % off the RSR top-10; 0 = off)
 K.YELLOW_LAT = 1.3   -- a stopped car this far from the centre line still counts (edge/kerb); deep in the gravel doesn't
 -- SLOW-CAR YELLOW (harness A/B: R.YELLOW_SLOW > 0). The yellow above only sees a car under K.BLOCK_SPEED (24 km/h), so at
 -- Baku's flat-out kink (0.74, 255-270 km/h) cars ran into a damaged crawler or a just-repositioned car doing 30-90 km/h with

@@ -386,6 +386,7 @@ function script.update(dt)
             local gripApplied = nil
             if G.controlGrip then
                 local grip = G.baseGrip + gOff
+                if Racecraft.TOP_GRIP > 0 then grip = grip + Racecraft.TOP_GRIP * Racecraft.topW(Drivers.statsOf(i)) end   -- (R.TOP_GRIP) top-tier pace
                 -- launch assist: a brief traction boost off a standing start (AC's AI bogs down off the
                 -- line), fading out as the car gets up to speed. Only at the very start of lap 1.
                 if (car.lapCount or 0) == 0 and (car.splinePosition or 1) < 0.012 then
