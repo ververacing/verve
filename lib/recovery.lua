@@ -1042,7 +1042,7 @@ function R.update(dt)
             -- in geometry, not just damaged), or an absolute time backstop. Until then we keep blocking
             -- AC's retirement and working the car (backups, repair, driving it out).
             local exhausted = repaired[i] and repairRecT[i] and (recT[i] - repairRecT[i]) > POST_REPAIR_HOLD
-            if knot[i] and (rescueN[i] or 0) >= MAX_RESCUES and not R.retryLive(i) then knot[i] = nil end   -- no rescues left: drive it like any other
+            if knot[i] and (rescueN[i] or 0) >= MAX_RESCUES and not (R.retryLive(i) and dropsAllowed(i)) then knot[i] = nil end   -- no rescues left: drive it like any other
             if exhausted or recT[i] > GIVEUP_TIME or knot[i] then
                 -- ONE rescue attempt before we EVER let a car retire (this is what breaks a pileup): if it
                 -- isn't terminally wrecked, give it a fresh body and force it back onto the racing line at a
