@@ -6,14 +6,20 @@ Each diag file is paired with its race feed (verve_feed/<stamp>_<track>.jsonl, t
 also be given directly). From the feed:
   real      `overtake` events with the passer on lap index 2+ (lapCount >= 2), not over a car that was yielding
             (verve.yield in the state at or one before the pass), a lap down, or in the pit lane (P1)
-  fake      passes over a SAME-LAP car that was yielding (P5); `lapped` and `pit` passes are counted apart
+  fake      passes over a SAME-LAP car that was yielding (P5), from lap index 1 (the pace yield acts from there; "lap1" =
+            how many of them were on lap index 1); `lapped` and `pit` passes (lap 2+) are counted apart
   ttp       time to pass (P2): a follower within --gap m of the next car ahead in race distance, same lap, whose best lap
             so far (feed `lap` events, laps 2+) is at least --edge quicker. Ends with a pass (5 m ahead), a fall-back
             (beyond 2 x gap), abandoned (pit / retire / park) or unresolved at the flag. Median over the passes
   lead      `lead_change` events
+  attacks   P3's baseline: an attack episode opens when a car's state turns `attack` within 1.5 s of the car ahead in
+            position (the feed's own `attack` decision test), passer on lap index 1+, same lap, neither car the player; its
+            target is that car. `planned` if the car announces a plan (verve switchback / lunge / setup / slingshot /
+            divebomb) while it lasts, else `plain`. Won = a pass on the target (not over a yielding, lapped or pit-lane car)
+            within 20 s of the start and before the car's next episode
 From the diag `mv` rows (lib/strategy.lua episodes, P3): attempts and wins per manoeuvre and per `how` (run / left /
-abort / clear), strict (`won`: S.VERDICT_V2 when on) and legacy (`lw`, the old place-gained test; rows without it
-count `won` as both).
+abort / clear), strict (`won`: S.VERDICT_V2 when on) and legacy (`lw`, the old place-gained test). Rows from an
+unpatched diag.lua carry neither: they are counted as `untagged`, the legacy column reads n/a and a warning is printed.
 
 --group pools the runs of a label (trailing _<n> stripped): counts are summed, medians pooled over episodes.
 """
@@ -29,6 +35,9 @@ from collections import Counter, defaultdict
 FEED_DIRS = [os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa", "verve_feed"), "D:/verve_archive/verve_feed"]
 TRACK_M = {"spa": 7004, "monza": 5793, "ks_barcelona": 4655, "ks_silverstone": 5891, "ks_brands_hatch": 3908,
            "ks_zandvoort": 4252, "ks_nurburgring": 5148}
+PLANS = {"switchback", "lunge", "setup", "slingshot", "divebomb"}   # feed `verve` decisions that announce a plan (lib/feed.lua MV)
+ATTACK_S = 1.5        # s to the car ahead: the feed's own `attack` decision test
+ATTACK_WIN_S = 20.0   # s after an attack starts for a pass on its target to count (Strategy's VERDICT_T)
 
 
 def stamp_of(p):
@@ -131,18 +140,69 @@ def score_feed(feed, gap_m=40.0, edge=0.005):
         out["overtakes_all"] += 1
         g, g0 = at(e["t"])
         a, b = g.get(e.get("car")), g.get(e.get("over"))
-        if not a or not b or (a.get("lap") or 0) < 2:
+        if not a or not b or (a.get("lap") or 0) < 1:
             continue
-        out["passes_lap2p"] += 1
+        lap2p = (a.get("lap") or 0) >= 2            # P1 counts laps 2+; P5 (fake) has no lap limit, from lap index 1
+        if lap2p:
+            out["passes_lap2p"] += 1
         a0, b0 = g0.get(e.get("car")) or a, g0.get(e.get("over")) or b
         if a["pit"] or b["pit"] or a0["pit"] or b0["pit"]:
-            out["passes_pit"] += 1
+            out["passes_pit"] += lap2p
         elif rd(a) - rd(b) > 0.5:
-            out["passes_lapped"] += 1
+            out["passes_lapped"] += lap2p
         elif yl(b) or yl(b0):
             out["passes_fake"] += 1
-        else:
+            out["passes_fake_lap1"] += not lap2p
+        elif lap2p:
             out["passes_real"] += 1
+
+    # P3 baseline: attack episodes, plain against planned, and how many ended with a pass on the target
+    plan_t = defaultdict(list)
+    for e in events:
+        if e.get("type") == "verve" and e.get("decision") in PLANS:
+            plan_t[e.get("car")].append(e["t"])
+    open_att, atts = {}, []          # car -> [t0, target, t1]
+    for s in states:
+        t = s["t"]
+        cars = {c["i"]: c for c in s.get("cars", [])}
+        by_pos = {c.get("pos"): c for c in cars.values()}
+        for i in list(open_att):
+            c = cars.get(i)
+            if not c or c["pit"] or (c.get("verve") or {}).get("state") != "attack":
+                open_att[i][2] = t
+                atts.append(open_att.pop(i))
+        for i, c in cars.items():
+            if i in open_att or i == player or c["pit"] or (c.get("lap") or 0) < 1:
+                continue
+            if (c.get("verve") or {}).get("state") != "attack":
+                continue
+            ga = c.get("gap_ahead_s")
+            B = by_pos.get((c.get("pos") or 0) - 1)
+            if ga is None or ga >= ATTACK_S or not B or B["i"] == player or B["pit"] or abs(rd(B) - rd(c)) > 0.5:
+                continue
+            open_att[i] = [t, B["i"], None, i]
+    for i, ep in open_att.items():
+        ep[2] = states[-1]["t"]
+        atts.append(ep)
+    starts = defaultdict(list)
+    for t0, _, _, i in atts:
+        starts[i].append(t0)
+    passes = [(e["t"], e.get("car"), e.get("over")) for e in events if e.get("type") == "overtake"]
+    for t0, tgt, t1, i in atts:
+        planned = any(t0 - 1.0 <= pt_ <= t1 for pt_ in plan_t.get(i, []))
+        end = min([t0 + ATTACK_WIN_S] + [s0 for s0 in starts[i] if s0 > t0])
+        won = False
+        for tp, a_, o_ in passes:
+            if a_ == i and o_ == tgt and t0 <= tp <= end:
+                g, g0 = at(tp)
+                A, B = g.get(i), g.get(tgt)
+                B0 = g0.get(tgt) or B
+                if A and B and not (A["pit"] or B["pit"] or yl(B) or yl(B0)) and rd(A) - rd(B) <= 0.5:
+                    won = True
+                    break
+        k = "att_plan" if planned else "att_plain"
+        out[k] += 1
+        out[k + "_won"] += won
 
     # time to pass
     laps = sorted((e["t"], e["car"], float(e["time_s"])) for e in events
@@ -195,9 +255,11 @@ def verdicts(diag):
             e = json.loads(line)
         except ValueError:
             continue
-        name, how = e.get("name", "?"), e.get("how", "run")
+        name, how = e.get("name", "?"), e.get("how") or "untagged"   # untagged: an unpatched diag.lua (no "how" / "lw")
         won = int(e.get("won", 0) or 0)
-        lw = int(e.get("lw", won) or 0)
+        lw = int(e.get("lw", 0) or 0)
+        c["untagged_how"] += "how" not in e
+        c["untagged_lw"] += "lw" not in e
         c["mv_%s" % name] += 1
         c["mv_%s_won" % name] += won
         c["mv_%s_lw" % name] += lw
@@ -210,14 +272,22 @@ def verdicts(diag):
     return c
 
 
+def pct(a, b):
+    return 100.0 * a / b if b else 0.0
+
+
 def fmt_row(label, c, ttp):
-    share = 100.0 * c["ttp_pass"] / c["ttp_episodes"] if c["ttp_episodes"] else 0.0
+    share = pct(c["ttp_pass"], c["ttp_episodes"])
     med = statistics.median(ttp) if ttp else 0.0
-    return ("%-34s real %3d  fake %2d  lapped %2d  pit %2d  (lap2+ %3d, all %3d)  lead %2d | ttp %3d eps, %3d passed (%3.0f%%) "
-            "median %4.0f s, fell %3d, open %2d, lost %2d | mv %3d won %3d (legacy %3d)" % (
-                label[:34], c["passes_real"], c["passes_fake"], c["passes_lapped"], c["passes_pit"], c["passes_lap2p"],
+    legacy = "n/a" if c["untagged_lw"] else "%3d" % c["mv_all_lw"]
+    return ("%-34s real %3d  fake %2d (lap1 %d)  lapped %2d  pit %2d  (lap2+ %3d, all %3d)  lead %2d | ttp %3d eps, %3d passed (%3.0f%%) "
+            "median %4.0f s, fell %3d, open %2d, lost %2d | mv %3d won %3d (legacy %s) | attacks plain %3d won %3d (%3.0f%%), "
+            "planned %3d won %3d (%3.0f%%)" % (
+                label[:34], c["passes_real"], c["passes_fake"], c["passes_fake_lap1"], c["passes_lapped"], c["passes_pit"], c["passes_lap2p"],
                 c["overtakes_all"], c["lead_changes"], c["ttp_episodes"], c["ttp_pass"], share, med, c["ttp_fell_back"],
-                c["ttp_unresolved"], c["ttp_abandoned"], c["mv_all"], c["mv_all_won"], c["mv_all_lw"]))
+                c["ttp_unresolved"], c["ttp_abandoned"], c["mv_all"], c["mv_all_won"], legacy,
+                c["att_plain"], c["att_plain_won"], pct(c["att_plain_won"], c["att_plain"]),
+                c["att_plan"], c["att_plan_won"], pct(c["att_plan_won"], c["att_plan"])))
 
 
 def mv_lines(c):
@@ -225,9 +295,9 @@ def mv_lines(c):
     lines = []
     for n in names:
         a = c["mv_%s" % n]
-        parts = ["%s: %d, won %d (%.0f%%), legacy %d" % (n, a, c["mv_%s_won" % n], 100.0 * c["mv_%s_won" % n] / a if a else 0,
-                                                          c["mv_%s_lw" % n])]
-        for how in ("run", "left", "abort", "clear"):
+        parts = ["%s: %d, won %d (%.0f%%), legacy %s" % (n, a, c["mv_%s_won" % n], 100.0 * c["mv_%s_won" % n] / a if a else 0,
+                                                          "n/a" if c["untagged_lw"] else str(c["mv_%s_lw" % n]))]
+        for how in ("run", "left", "abort", "clear", "untagged"):
             h = c["mv_%s_%s" % (n, how)]
             if h:
                 parts.append("%s %d/%d" % (how, c["mv_%s_%s_won" % (n, how)], h))
@@ -255,6 +325,9 @@ def main():
         lab = label_of(p)
         if not r:
             print("%-34s (no race feed found: verdicts only)" % lab[:34])
+        if c["untagged_how"] or c["untagged_lw"]:
+            print("%-34s !! %d of %d mv rows carry no how/lw (diag.lua not patched): the how split and legacy wins are n/a" % (
+                lab[:34], max(c["untagged_how"], c["untagged_lw"]), c["mv_all"]))
         print(fmt_row(lab, c, r["ttp"] if r else []))
         if a.mv:
             for line in mv_lines(c):

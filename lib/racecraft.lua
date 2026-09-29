@@ -22,6 +22,7 @@ local Drivers   = require('lib.drivers')
 local Troublespots = require('lib.troublespots')
 local Recovery  = require('lib.recovery')     -- for damage-since-repair (recovery never requires racecraft: no cycle)
 local Strategy  = require('lib.strategy')     -- planned manoeuvres on top of attack mode (set-up, lunge, switchback, slingshot)
+Strategy.lapsOf = Recovery.lapsOf              -- (S.VERDICT_V2) the verdict's lap count is Verve's own: AC's drops a lap after a teleport
 
 local R = {}
 local K = {}               -- tuning constants (one table = one upvalue: LuaJIT allows a function 120, R.evaluate had 115)
@@ -326,6 +327,8 @@ R.PACE_YIELD_MODE = 0         -- 0 = today: a same-class car whose best lap is P
 R.PACE_YIELD_RATIO = 1.04     -- mode 0 threshold (was K.PACE_YIELD_RATIO)
 R.PACE_YIELD_DMG = 25         -- mode 1: km/h of damage since the last repair that can make a car hurt (nursing starts at K.DAMAGE_YIELD 55)...
 R.PACE_YIELD_SLOW = 0.02      -- ...when fresh (K.DAMAGE_NURSE_LAPS) or still costing pace: last lap > best lap x (1 + this)
+R.hurtSeen, R.hurtLap = {}, {} -- mode 1 only: per car, damage since repair last seen and the lap of the last fresh hit (a repair lowers it;
+                              -- nursing's dmgSeen / dmgLap keep today's worst-seen reading)
 R.LEAVEROOM_MODE = 0          -- 0 = today: leave-room fires for any car ahead within 11 m on my line. From lap 1 past OPENLAP_TAIL (the
                               -- lap-0 pack keeps today's spacing): 1 = only a car I overlap (centre gap < LEAVEROOM_LEN_M); 2 = as 1, and
                               -- not when I hold the inside of the corner ahead (the corner is mine)
@@ -621,7 +624,7 @@ function R.hurtOf(i, me, myLap)
     pcall(function()
         if Recovery.damageOf(i) >= R.PACE_YIELD_DMG then
             local best, prev = me.bestLapTimeMs, me.previousLapTimeMs
-            hurt = (myLap - (dmgLap[i] or myLap)) < K.DAMAGE_NURSE_LAPS
+            hurt = (myLap - (R.hurtLap[i] or myLap)) < K.DAMAGE_NURSE_LAPS
                 or (type(best) == 'number' and best > 0 and type(prev) == 'number' and prev > best * (1 + R.PACE_YIELD_SLOW))
         end
         if not hurt and me.wheels then
@@ -630,6 +633,15 @@ function R.hurtOf(i, me, myLap)
         if not hurt and Recovery.rampCap(i) < 1e9 then hurt = true end
     end)
     return hurt
+end
+-- (H.MISTAKE_V2) Verve.lua skips R.evaluate for a pit-lane car, so a visible mistake's throttle cap or late-brake hint set on the
+-- way in would ride down the pit lane: release them. Only the mistake's own flags: at defaults they are never set (no-op)
+function R.pitRelease(i)
+    if cv2.mvThr[i] then cv2.mvThr[i] = nil; cv2.thr[i] = nil; pcall(physics.setAIThrottleLimit, i, 1.0) end
+    if cv2.mvBg[i] then
+        cv2.mvBg[i] = nil
+        if cv2.bg[i] and cv2.base[i] then cv2.bg[i] = nil; pcall(physics.setAIBrakeHint, i, cv2.base[i]) end
+    end
 end
 function R.lockOf(car) return car.steerLock end   -- (read under pcall: an older CSP's car state may not have the field)
 -- (R.STEER_FRAC) the steering wheel angle as a fraction of lock (car.steer and car.steerLock are both degrees); nil when unreadable
@@ -1340,6 +1352,7 @@ function R.evaluate(i, dt)
                 local mine = false
                 if lrNew and R.LEAVEROOM_MODE == 2 then
                     local isC, ins = cornerAhead(mySpline)
+                    if not isC then isC, ins = cornerAhead((mySpline + spd / 3.6 * 1.2 / trackLen) % 1) end   -- the braking zone: 1.2 s out
                     mine = isC and ins ~= 0 and (myLat - nearLat) * ins > 0.15   -- I hold the inside of the corner ahead: it is mine
                 end
                 if not mine then
@@ -1442,6 +1455,10 @@ function R.evaluate(i, dt)
         -- ON the line and moves over when someone's on their tail.
         -- how fresh is the damage? (a real driver nurses a fresh hit, then gets on with it unless the car is wrecked)
         if myDmg > (dmgSeen[i] or 0) + 3 then dmgSeen[i] = myDmg; dmgLap[i] = myLap end
+        if R.PACE_YIELD_MODE == 1 then                     -- (R.PACE_YIELD_MODE 1) R.hurtOf's clock: a repair resets it, a new hit restarts it
+            local hs = R.hurtSeen[i] or 0
+            if myDmg < hs - 3 then R.hurtSeen[i] = myDmg elseif myDmg > hs + 3 then R.hurtSeen[i] = myDmg; R.hurtLap[i] = myLap end
+        end
         local nursing = myDmg > K.DAMAGE_YIELD and (myDmg > K.DAMAGE_HEAVY or (myLap - (dmgLap[i] or myLap)) < K.DAMAGE_NURSE_LAPS)
         if not yielding and nursing then
             state = 0
@@ -1790,6 +1807,7 @@ function R.beginFrame()
 end
 function R.reset()
     dmgSeen, dmgLap = {}, {}
+    R.hurtSeen, R.hurtLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     letbyT, letbyDone, letbyFor = {}, {}, {}
     cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {} }; R.cv2 = cv2

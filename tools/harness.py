@@ -1095,6 +1095,9 @@ def run_once(args, arm, run_idx):
     return m
 
 
+BASE148 = {"racecraft": {"AGGR_BASE_FIX": True}, "recovery": {"GATE_FAIL_RETRY": True}, "settings": {"paceAbs": True}}   # --base148
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--track"); ap.add_argument("--layout")
@@ -1137,6 +1140,9 @@ def main():
     ap.add_argument("--ab", nargs=2, metavar=("A.json", "B.json"), help="two arm files; runs alternate A,B,A,B...")
     ap.add_argument("--lap-budget-s", type=int, default=150, help="seconds allowed per lap before a run is killed")
     ap.add_argument("--ai-level", type=int, default=0, help="force every AI car's AI_LEVEL (career events and --models grids alike); 0 = as configured")
+    ap.add_argument("--base148", action="store_true", help="a build cut before v0.14.8 (wild0151, dev0152) run on the v0.14.8 defaults: merges "
+                    "AGGR_BASE_FIX into --racecraft, GATE_FAIL_RETRY into --recovery and paceAbs into --settings (a key given explicitly wins); "
+                    "the merged values land in results.csv's arm column")
     args = ap.parse_args()
     global SKIN_MATCH, AI_AGGRESSION
     SKIN_MATCH = getattr(args, "skin_match", None)
@@ -1153,6 +1159,19 @@ def main():
                  "recovery": json.loads(args.recovery) if args.recovery else {}, "racecraft": json.loads(args.racecraft) if args.racecraft else {},
                  "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}, "human": json.loads(args.human) if args.human else {}, "strategy": json.loads(args.strategy) if args.strategy else {}, "fuel": args.fuel,
                  "assists": json.loads(args.assists) if args.assists else {}, "stop_laps": args.stop_laps}]
+    if args.base148:
+        for arm in arms:
+            for mod, kv in BASE148.items():
+                d = arm.get(mod) or {}
+                for k, v in kv.items():
+                    d.setdefault(k, v)
+                arm[mod] = d
+    try:   # the dev0152 verdict columns need the patched diag.lua (spec 0151 section 3); without it they read blank
+        dsrc = open(os.path.join(VERVE, "diag.lua"), encoding="utf-8", errors="replace").read()
+        if '"ev":"mv"' in dsrc and '"how"' not in dsrc:
+            print('!! diag.lua writes no "how" / "lw" on its mv rows: mv_won_* and mv_legacy_ok will be blank (patch diag.lua first)')
+    except OSError:
+        pass
 
     results = []
     for r in range(args.runs):

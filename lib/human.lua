@@ -370,26 +370,30 @@ local function dirtyair01(i, myCar)
         local mySpline = myCar.splinePosition
         if mySpline == nil then return end
         local lat = H.DIRTY_LAT > 0 and (myCar.lapCount or 0) >= 1   -- (H.DIRTY_LAT) the wake is behind a car, not beside it; lap 0 as before
+        local a = lat and ac.worldCoordinateToTrack(myCar.position) or nil
         local sim = ac.getSim()
-        local best, bestJ = 1e9, -1
+        local best = 1e9
         for j = 0, sim.carsCount - 1 do
             if j ~= i then
                 local oc = ac.getCar(j)
                 if oc and oc.splinePosition and not (lat and (oc.isInPitlane or (oc.speedKmh or 0) < 30)) then
                     local gap = oc.splinePosition - mySpline
                     if gap < 0 then gap = gap + 1 end
-                    if gap > 0 and gap < best then best = gap; bestJ = j end
+                    if a then
+                        -- (H.DIRTY_LAT) every car within DIRTY_GAP, each faded by its own offset from my line: the strongest wake wins
+                        -- (the nearest car, alongside, must not hide the one right in front a few metres further on)
+                        if gap > 0 and gap < DIRTY_GAP then
+                            local b = ac.worldCoordinateToTrack(oc.position)
+                            local w = 1 - gap / DIRTY_GAP
+                            if b then w = w * clamp(1 - (math.abs(a.x - b.x) - 0.5 * H.DIRTY_LAT) / (0.5 * H.DIRTY_LAT), 0, 1) end
+                            if w > d then d = w end
+                        end
+                    elseif gap > 0 and gap < best then best = gap end
                 end
             end
         end
-        if best < DIRTY_GAP then
-            d = (1 - best / DIRTY_GAP) * corner
-            if lat and bestJ >= 0 then
-                local a = ac.worldCoordinateToTrack(myCar.position)
-                local b = ac.worldCoordinateToTrack(ac.getCar(bestJ).position)
-                if a and b then d = d * clamp(1 - (math.abs(a.x - b.x) - 0.5 * H.DIRTY_LAT) / (0.5 * H.DIRTY_LAT), 0, 1) end
-            end
-        end
+        if a then d = d * corner
+        elseif best < DIRTY_GAP then d = (1 - best / DIRTY_GAP) * corner end
     end)
     return d
 end
@@ -545,8 +549,8 @@ function H.mistakeV2(i, car, prof, cm, now)
     if not st.k and not st.t0 and now >= (st.next or 0) and (car.lapCount or 0) >= H.MV_MIN_LAP and (car.bestLapTimeMs or 0) > 0 then
         if not sk.sent and H.feedEvent then
             sk.sent = true
-            pcall(H.feedEvent, 'mistake_model', string.format('"car":%d,"pace":%.2f,"laps_per":%.1f,"tier":"%s","top":%s,"profiled":%s,"cons":%.2f,"risk":%.2f',
-                i, sk.pace, sk.laps, sk.tier, tostring(sk.top == true), tostring(sk.prof), sk.cons, sk.risk))
+            pcall(H.feedEvent, 'mistake_model', string.format('"car":%d,"pace":%.2f,"laps_per":%.1f,"rate_x":%.2f,"tier":"%s","top":%s,"profiled":%s,"cons":%.2f,"risk":%.2f',
+                i, sk.pace, sk.laps, H.MV_RATE_X * (H.MV_CLASS_RATE[sk.cls] or 1), sk.tier, tostring(sk.top == true), tostring(sk.prof), sk.cons, sk.risk))
         end
         local p = H.pressureV2(i, car, now)
         local perLap = H.MV_RATE_X * (H.MV_CLASS_RATE[sk.cls] or 1) * (1 + H.MV_PRESS * p * (1 - sk.cons)) / sk.laps

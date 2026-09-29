@@ -27,6 +27,7 @@ S.byTypeOK     = {}     -- name -> attempts that completed the pass
 local pending  = {}     -- finished manoeuvres waiting for their verdict: { i, target, pos0, at, name }
 S.episodes     = {}     -- judged manoeuvres for the diagnostics log (drained by diag): { i, name, dur, pos0, pos1, won, target, phases }
 local VERDICT_T = 20.0  -- s after the move to judge it: ahead of the car we attacked (or a place gained) = success
+S.lapsOf = nil          -- (VERDICT_V2) racecraft sets Recovery.lapsOf: Verve's own lap count (AC's drops a lap after a teleport)
 local CODE = { switchback = 1, lunge = 2, setup = 3, slingshot = 4 }
 local MIN_TIER = { setup = 1, lunge = 1, slingshot = 1, switchback = 2 }
 local COOLDOWN = 12.0   -- s after a manoeuvre before the same car plans another (7 -> 12: one move per car per lap was too many)
@@ -155,7 +156,7 @@ local function start(i, name, fields)
         local c = ac.getCar(i); p.pos0 = c and c.racePosition or 0
         local tc = (type(p.car) == 'number' and p.car >= 0) and ac.getCar(p.car) or nil
         if c and tc and c.splinePosition and tc.splinePosition then   -- (VERDICT_V2) the target is on my lap, ahead of me on the road
-            local d = ((tc.lapCount or 0) + tc.splinePosition) - ((c.lapCount or 0) + c.splinePosition)
+            local d = ((S.lapsOf and S.lapsOf(p.car) or tc.lapCount or 0) + tc.splinePosition) - ((S.lapsOf and S.lapsOf(i) or c.lapCount or 0) + c.splinePosition)
             p.sameLap = d > 0 and d < 0.5
         end
     end)
@@ -196,7 +197,7 @@ function S.tick()
                 if not legacy and tc and not tc.isRetired and (tc.racePosition or 0) > myPos then legacy = true end   -- we are past the car we attacked
                 local past = false
                 if q.sameLap and tc and not tc.isRetired and not tc.isInPitlane and c.splinePosition and tc.splinePosition then
-                    past = (c.lapCount or 0) + c.splinePosition > (tc.lapCount or 0) + tc.splinePosition
+                    past = (S.lapsOf and S.lapsOf(q.i) or c.lapCount or 0) + c.splinePosition > (S.lapsOf and S.lapsOf(q.target) or tc.lapCount or 0) + tc.splinePosition
                 end
                 local won = legacy
                 if S.VERDICT_V2 then won = past end

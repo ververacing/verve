@@ -5,7 +5,8 @@
 Each diag file is paired with its race feed (verve_feed/<stamp>_<track>.jsonl by the diag's timestamp; a feed file can be
 given directly). Slot 0 (the harness autopilot) is left out everywhere. Per race, by tier:
   rate      visible mistakes per car-lap, lap index 1+ (car-laps = race distance past the first lap), shown as laps per
-            mistake next to the model's own laps_per (mistake_model events); drops = mistake_drop / (fired + dropped)
+            mistake next to the model's own (mistake_model events: laps_per / rate_x, rate_x = MV_RATE_X x the class rate,
+            1 when the event predates it; the pressure term is not in it); drops = mistake_drop / (fired + dropped)
   own       own_moment share of the fired mistakes (a forced kind always reads 100 %)
   cost      the mistake lap's time minus the car's median clean lap (laps 2+ with no mistake, incident, off or pit stop),
             laps with exactly one mistake; median per kind and the share costing 0.25 s or more
@@ -171,8 +172,10 @@ def analyse(feed, spec, level, ros):
         if len(clean.get(car, [])) >= 3:
             R["sd"][tier.get(car, "?")].append(statistics.pstdev(clean[car]))
     for car, e in model.items():
-        if car not in skip:
-            R["model"][tier.get(car, "?")].append(e.get("laps_per") or 0)
+        rx = e.get("rate_x")
+        rx = 1.0 if rx is None else float(rx)
+        if car not in skip and rx > 0:              # rate_x 0: this class never errs (MV_CLASS_RATE 0), no model rate
+            R["model"][tier.get(car, "?")].append((e.get("laps_per") or 0) / rx)
     cnt["drops"] = len(drops)
     for d in drops:
         cnt["drop_" + str(d.get("why"))] += 1

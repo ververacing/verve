@@ -142,11 +142,13 @@ def metrics(path):
     out["mv_ok"] = last.get("mvOK", 0)          # follows S.VERDICT_V2 from dev0152 (a win = past the same-lap target on the road)
     out["mv_types"] = last.get("mvT", "")
     # the diag 'mv' rows (dev0152 diag adds "how" and "lw"): verdicts by how the plan ended, strict and legacy wins.
-    # A row without "how" ran its course; without "lw" (an older diag) its legacy verdict is its "won"
+    # An unpatched diag writes neither: on dev0152 its rows mix cleared plans in with the rest and its "won" is the strict
+    # verdict, so the split and the legacy count are left blank rather than guessed (they would look valid and are not)
     out["mv_verdicts"] = len(mvs)
+    tagged = any("how" in e for e in mvs)
     for how in ("run", "left", "abort"):
-        out["mv_won_" + how] = sum(1 for e in mvs if e.get("how", "run") == how and e.get("won"))
-    out["mv_legacy_ok"] = sum(1 for e in mvs if e.get("lw", e.get("won")))
+        out["mv_won_" + how] = sum(1 for e in mvs if e.get("how") == how and e.get("won")) if tagged else ""
+    out["mv_legacy_ok"] = sum(1 for e in mvs if e.get("lw")) if any("lw" in e for e in mvs) else ""
     out.update(tyre_views(rows, n))
     out.update(lapping_views(rows, n))
     out.update(reality_score(out, hdr))
