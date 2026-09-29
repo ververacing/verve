@@ -344,7 +344,7 @@ K.AGGR_CRUISE = 0.55       -- fallback baseline only if the car's aggression can
 -- per-driver spread and every attack/defend boost compounded frame on frame (a positive-spread car ratchets to 1.0
 -- while cruising, a negative one sinks to 0.15). With this on, each car's own aggression is read ONCE per session,
 -- before Verve's first write to it that session (R.aggrBase), and stays its base all session.
-R.AGGR_BASE_FIX = false   -- STATUS 2026-09-28: proven (7/7 regression pairs at launcher aggression 60, no cost; a no-op for profiled cars), proposed as the 0.14.8 default
+R.AGGR_BASE_FIX = true  -- DEFAULT 0.14.8.   -- STATUS 2026-09-28: proven (7/7 regression pairs at launcher aggression 60, no cost; a no-op for profiled cars), proposed as the 0.14.8 default
 R.AGGR_BASE_TOL = 0.03       -- a session's first read this close to Verve's last write is Verve's value (the override survives a restart)
 R.baseAggr = {}              -- [i] = the car's own aggression as read this session (-1 = unreadable); cleared by R.reset
 R.aggrPrev = {}              -- [i] = { base, set }: the last session's capture and Verve's last write to the car, for that guard

@@ -245,7 +245,7 @@ R.GATE_WALK_V2 = true      -- DEFAULT 0.14.6; false = 0.14.5. true: a gate-first
                            -- from the margin and subtracts the stagger afterwards, unchecked: it can land in a corner exit (review 2026-09-26).
                            -- Cost: cars whose staggered start is in a bend all stop at the first straight sample behind it, so their 45 m
                            -- spread shrinks to under one 0.004 step (18 m at 4.5 km, inside DROP_NEAR): A/B it on stacked gate drops too
-R.GATE_FAIL_RETRY = false  -- (owner's 30-lap Baku race 2026-09-28) true: a GATED drop that fails to rejoin does not ban the car's
+R.GATE_FAIL_RETRY = true   -- DEFAULT 0.14.8. (owner's 30-lap Baku race 2026-09-28) true: a GATED drop that fails to rejoin does not ban the car's
                            -- drops; its next drop goes back where it originally stopped, ungated - it loses the lap, not the race.
                            -- Baku's split 1 is the castle entry: 27 of 35 drops landed there, one failed drop set dropFailed and
                            -- the car's next stop parked it 'hopeless' (7 cars). One retry per car; a second failure is final.

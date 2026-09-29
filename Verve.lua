@@ -51,7 +51,7 @@ local DEFAULTS = {
     careerCurve = true, shareData = false, strategy = true, raceStart = 'calm', sliderCurve = true, repairOnTrack = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     timedFuel = true,    -- DEFAULT 0.14.6 (lib/fuel.lua): fuel a TIMED race's AI for the clock, stop AC's empty-tank pit loop
-    paceAbs = false,     -- harness switch (lib/drivers.lua D.PACE_ABS): profile pace against a fixed reference, not the fastest on the grid
+    paceAbs = true,      -- DEFAULT 0.14.8 (lib/drivers.lua D.PACE_ABS): a driver profile sets the car's pace outright
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
 
@@ -64,7 +64,7 @@ local S = ac.storage({
     careerCurve = true, shareData = false, strategy = true, raceStart = 'calm', sliderCurve = true, repairOnTrack = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     timedFuel = true,
-    paceAbs = false,
+    paceAbs = true,
     autosave = true, schema = 1,
 })
 -- settings migration: 0.12 made crash repair + trouble spots core (they were opt-in experiments; a day-long
@@ -685,7 +685,7 @@ function script.windowMain()
     ui.newLine()
     ui.separator()
     ui.textColored('Drivers (per grid slot)', rgbm(0.6, 0.6, 0.6, 1))
-    ui.textWrapped('Give any individual racer its own driver -- a real racer or a generic archetype -- and each grid slot is separate, so even a grid of identical cars can be all different drivers. Each gets that driver\'s pace, aggression and risk. Kept through a race weekend on the same grid; a new grid starts fresh. Tip: pause on the grid with ESC to set up, or just hit Randomize.')
+    ui.textWrapped('Give any individual racer its own driver -- a real racer or a generic archetype -- and each grid slot is separate, so even a grid of identical cars can be all different drivers. Each gets that driver\'s pace, aggression and risk: a driver sets the car\'s pace outright (Rookie = difficulty 80, Midfielder = 90, Veteran about 98, the fastest real drivers 99-100), and the difficulty slider sets cars without a driver. Kept through a race weekend on the same grid; a new grid starts fresh. Tip: pause on the grid with ESC to set up, or just hit Randomize.')
     if Career.active then
         ui.textColored('Career event: driver profiles are off. The career difficulty curve sets the field (see Options).', rgbm(0.8, 0.7, 0.4, 1))
         ui.textColored(Difficulty.describe(), rgbm(0.6, 0.6, 0.6, 1))

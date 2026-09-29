@@ -1,5 +1,5 @@
 {
-  "version": "0.14.7",
+  "version": "0.14.8",
   "url": "https://github.com/ververacing/verve/releases/latest",
-  "summary": "Repositioned cars keep their lap wherever they stopped: no more cars classified a lap down after a crash in the last sector."
+  "summary": "Driver profiles set their own pace (Rookie = difficulty 80), one-click all-Rookie / Midfielder / Veteran grids, steadier aggression without profiles, a second try for a car whose reposition at a sector line fails."
 }

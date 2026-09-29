@@ -1,3 +1,16 @@
+0.14.8
+- Driver profiles set a car's pace outright: Rookie = difficulty 80, Midfielder = 90, Veteran about 98, the fastest real
+  drivers 99-100. Before, profiles were relative to the fastest driver on the grid, so an all-Rookie grid raced at full pace.
+  The difficulty slider now sets the cars without a driver. Career events keep their own difficulty.
+- Drivers panel: buttons to make every AI car a Rookie, a Midfielder or a Veteran in one click.
+- Cars without a driver profile keep the AI aggression you set in the launcher. Before, it drifted to the extremes within
+  about two minutes, so most of such a field ended up either reckless or passive.
+- Repositioned cars: a car put back just before a sector line that can't get going now gets one more try where it
+  originally stopped (it loses the lap, not the race), and that failed try no longer counts toward switching repositioning off
+  for the race. Tight street circuits with full Rookie grids still lose too many damaged cars; a repair fix is next.
+- Race reports: each car's level is the one it actually runs at (a driver sets its own), and errors in the fuel, race
+  feed, contact, penalty, watchdog and report code are counted too, not only the per-car loop.
+
 0.14.7
 - Repositioned cars keep their lap. A car that stops anywhere after the first sector line (up to 10 km on) is now put
   back just before that line, so AC counts the lap. Before, a car that stopped in the last sector lost the lap and was
