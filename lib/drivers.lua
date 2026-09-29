@@ -561,8 +561,11 @@ function D.profileOf(i) return assigned[i] end
 -- Match AC's own driver names to the roster (Content Manager grids often carry real names): a slot whose
 -- in-game name is a known driver gets that profile automatically. Unknown/random names stay unassigned.
 local matched = false
+-- D.AUTO_MATCH (owner 2026-09-29: off): a car whose AC driver name equals a roster name (Verve's own display names) got
+-- that profile automatically. A profile now applies only when the player picks one (true = the old behaviour).
+D.AUTO_MATCH = false
 function D.autoMatch()
-    if matched then return end
+    if matched or not D.AUTO_MATCH then return end
     matched = true
     pcall(function()
         local sim = ac.getSim(); if not sim then return end
