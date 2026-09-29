@@ -466,6 +466,34 @@ for _, d in ipairs(D.DRIVERS) do
     if d.bucket == 'archetype' then ARCHETYPES[#ARCHETYPES + 1] = d elseif d.wild then WILD[#WILD + 1] = d end
 end
 
+-- D.RATING_V2 (setting ratingV2; owner 2026-09-29): every real driver is a pro. Each roster's pace is compressed into
+-- V2_LO..V2_HI on a square-root curve that keeps the order (the weakest near V2_LO, a roster's solid middle at about a
+-- Veteran, its best at V2_HI), the Veteran moves up to V2_VET, and pace maps to lap time against V2_REF (1.00: the best
+-- name on the grid is the one at the ceiling) with V2_K % per 1.0 of rating (Rookie 0.30 stays +10 %). Off = 0.14.8.
+D.RATING_V2 = false
+D.V2_LO, D.V2_HI, D.V2_VET, D.V2_MID, D.V2_REF, D.V2_K = 0.86, 1.00, 0.93, 0.65, 1.00, 10 / 0.70
+D.V2_VET_AGGR = 0.65
+local V2 = {}
+do
+    local lo, hi = {}, {}
+    for _, d in ipairs(D.DRIVERS) do
+        if d.bucket ~= 'archetype' and not d.wild then
+            lo[d.bucket] = math.min(lo[d.bucket] or 1, d.pace); hi[d.bucket] = math.max(hi[d.bucket] or 0, d.pace)
+        end
+    end
+    for _, d in ipairs(D.DRIVERS) do
+        local c = {}; for k, v in pairs(d) do c[k] = v end
+        if d.key == 'arch_veteran' then c.pace = D.V2_VET; c.aggr = D.V2_VET_AGGR   -- (a Veteran races harder than a weak pro, e.g. Stroll 0.60)
+        elseif d.key == 'arch_midfield' then c.pace = D.V2_MID
+        elseif d.bucket ~= 'archetype' and not d.wild then
+            local l, h = lo[d.bucket], hi[d.bucket]
+            local n = (h and l and h > l) and clamp((d.pace - l) / (h - l), 0, 1) or 1
+            c.pace = D.V2_LO + math.sqrt(n) * (D.V2_HI - D.V2_LO)
+        end
+        V2[d.key] = c
+    end
+end
+
 function D.nameOf(key) local d = BY_KEY[key]; return d and d.name or key end
 
 function D.rosterFor(classKey)
@@ -553,6 +581,7 @@ end
 function D.statsOf(i)
     local k = assigned[i]
     if not k then return nil end
+    if D.RATING_V2 then return V2[k] or BY_KEY[k] end
     return BY_KEY[k]
 end
 D.WILD_ON = true   -- mirrored from Racecraft.WILD each frame (Verve.lua): one master switch for the chaos driver in every module
@@ -662,7 +691,9 @@ function D.applyPace(i, base)
             local basePct = Difficulty.levelToPct(base)
             if st.wild and not D.PACE_ABS then lvl = base    -- the chaos driver runs at the slider level (he is never the anchor)
             elseif D.PACE_ABS and not D.LOCKED then   -- (a career event keeps its difficulty curve: an auto-matched name must not override it)
-                lvl = Difficulty.levelForPct(i, math.max(0, (D.PACE_REF - st.pace) * D.PACE_K))   -- (D.PACE_ABS) the profile's own pace
+                local ref, k = D.PACE_REF, D.PACE_K
+                if D.RATING_V2 then ref, k = D.V2_REF, D.V2_K end
+                lvl = Difficulty.levelForPct(i, math.max(0, (ref - st.pace) * k))   -- (D.PACE_ABS) the profile's own pace
             else
                 lvl = math.min(base, Difficulty.pctToLevel(basePct + (fieldMaxPace - st.pace) * SPREAD_PCT))
             end

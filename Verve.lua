@@ -71,6 +71,7 @@ local DEFAULTS = {
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     timedFuel = true,    -- DEFAULT 0.14.6 (lib/fuel.lua): fuel a TIMED race's AI for the clock, stop AC's empty-tank pit loop
     paceAbs = false,     -- harness switch (lib/drivers.lua D.PACE_ABS): profile pace against a fixed reference, not the fastest on the grid
+    ratingV2 = false,    -- harness switch (lib/drivers.lua D.RATING_V2): real drivers rated as pros around a Veteran (owner 2026-09-29)
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
 
@@ -84,6 +85,7 @@ local S = ac.storage({
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     timedFuel = true,
     paceAbs = false,
+    ratingV2 = false,
     autosave = true, schema = 1,
 })
 -- settings migration: 0.12 made crash repair + trouble spots core (they were opt-in experiments; a day-long
@@ -344,6 +346,7 @@ function script.update(dt)
     Difficulty.SLIDER_CURVE = G.sliderCurve ~= false
     Drivers.LOCKED = Career.active            -- career: the difficulty curve sets the field; profiles are off
     Drivers.PACE_ABS = G.paceAbs == true      -- (lib/drivers.lua) profile pace against a fixed reference
+    Drivers.RATING_V2 = G.ratingV2 == true    -- (lib/drivers.lua) real drivers rated as pros around a Veteran
     Drivers.autoMatch()                       -- once per session: AC driver names that match the roster get their profile
     Human.ENABLED       = true
     Human.HUMAN_VAR     = G.humanVar
