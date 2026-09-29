@@ -16,11 +16,13 @@ Per race:
                          damaged other, he is ahead  (noseAhead true),  closing >= 3  -> suffered
                        anything else between the two -> side; his incident with no other car -> solo
   offs                 his off_track events (feed)
-  flt fmed             'Verve fault:' verdicts naming him (CSP log), and the field's median per car (without him)
+  flt fmed             'Verve fault:' verdicts naming him (CSP log), and the field's median per car (without him); '-' when
+                       the log has no verdicts at all (judging off: run with --fault {"ENABLED":true})
   lunge lwon           lunges attempted / completed (diag "mv" episodes)
   caut agg             his median applied caution and aggression (x100) from lap 2 on, at speed, not recovering
   rn                   crash repairs (diag "rn")
   tilt live            'tilt' decisions (R.WILD_TILT) and whether the feed's one-off 'wild' decision appeared (layer live)
+                       (caused suff side solo offs tilt live: '-' when the race's feed file isn't found)
   fh80 fout            the field without him: contact events at 80+ km/h (diag), cars retired or parked at the end
   doff                 repositioning switched itself off this race (diag dropsOff)
 """
@@ -103,14 +105,15 @@ def score(p, hero):
     out_field = sum(1 for c in snaps[-1]["grid"] if c["i"] != hero and (c.get("ret") in (True, 1) or c.get("park")))
     r = {"label": stamp_of(p)[2], "start": first.get("pos"), "fin": last.get("pos"), "gain": (first.get("pos") or 0) - (last.get("pos") or 0),
          "win": int(last.get("pos") == 1 and not dnf), "dnf": int(dnf), "pw": pw, "laps": laps,
-         "caused": 0, "suff": 0, "side": 0, "solo": 0, "offs": 0, "inc100": None, "flt": None, "fmed": None,
+         "caused": None, "suff": None, "side": None, "solo": None, "offs": None, "inc100": None, "flt": None, "fmed": None,
          "lunge": sum(1 for m in mvs if m.get("car") == hero and m.get("name") == "lunge"),
          "lwon": sum(1 for m in mvs if m.get("car") == hero and m.get("name") == "lunge" and m.get("won")),
-         "caut": caut, "agg": agg, "rn": max(g.get("rn", 0) for _, g in rows), "tilt": 0, "live": 0,
+         "caut": caut, "agg": agg, "rn": max(g.get("rn", 0) for _, g in rows), "tilt": None, "live": None,
          "fh80": sum(1 for c in contacts if c.get("car") != hero and c.get("dmg", 0) >= 80), "fout": out_field,
          "doff": int(any(s.get("dropsOff") for s in snaps))}
     f = feed_for(p)
     if f:
+        r.update(caused=0, suff=0, side=0, solo=0, offs=0, tilt=0, live=0)   # feed found: the counts are real (None = unknown)
         seen = {}
         for l in open(f, encoding="utf-8", errors="replace"):
             if '"type"' not in l:
@@ -138,16 +141,18 @@ def score(p, hero):
         r["inc100"] = 100.0 * n / laps if laps else None
     lg = csp_log_for(p)
     if lg:
-        per = Counter()
+        per, nf = Counter(), 0
         for l in open(lg, encoding="utf-8", errors="replace"):
             m = FAULT.search(l)
             if not m:
                 continue
+            nf += 1
             for c in (re.findall(r"\d+", m.group(2)) if m.group(2).startswith("car") else []):   # "car 5" / "cars 5 and 7"
                 per[int(c)] += 1
-        field = [per.get(c["i"], 0) for c in snaps[-1]["grid"] if c["i"] != hero]
-        r["flt"] = per.get(hero, 0)
-        r["fmed"] = stats.median(field) if field else None
+        if nf:   # no verdicts at all = judging was off (F.ENABLED false), not "nobody caused anything": leave them unknown
+            field = [per.get(c["i"], 0) for c in snaps[-1]["grid"] if c["i"] != hero]
+            r["flt"] = per.get(hero, 0)
+            r["fmed"] = stats.median(field) if field else None
     return r
 
 

@@ -351,11 +351,13 @@ R.aggrPrev = {}              -- [i] = { base, set }: the last session's capture 
 -- WRECKING CREW (owner 2026-09-28): the chaos driver profile (lib/drivers.lua, key wrecking_crew, wild=true). Everything below
 -- acts ONLY on a car assigned a wild profile: assigning the profile is the opt-in, and with no wild car on the grid none of it
 -- runs. R.WILD=false keeps the row's own numbers (pace 0.95, aggr and risk 1.0) and switches this layer off: the A/B control.
+-- Two pace rules in lib/drivers.lua stay on with R.WILD=false (he is never the pace anchor; with relative pace he runs at the
+-- slider level), so the field's pace is the same in both arms.
 -- The risky extras (WILD_START, WILD_DIVE0, WILD_BH, WILD_BLUE, WILD_TILT) are harness switches, off.
 R.WILD = true                 -- master; mirrored to Drivers.WILD_ON each frame (Verve.lua) for the human, strategy and recovery modules
 R.WILD_CAUT = 0.40            -- flat caution removed
 R.WILD_SAFE = 0.5             -- share of the stacked positive back-off he keeps (rear-end guard, leave room, opening lap)
-R.WILD_BASEA = 1.3            -- aggression used only by the pass thresholds and strategy eagerness; capped at 1.35 (minAdv goes negative at 1.4)
+R.WILD_BASEA = 1.3            -- aggression used only by the pass thresholds (and so the outside-pass width: the edge cap is always on for him) and strategy eagerness; capped at 1.35 (minAdv goes negative at 1.4)
 R.WILD_AFLOOR = 0.9           -- aggression floor once the opening lap has faded, except while nursing damage or yielding
 R.WILD_OL = 0.5               -- share of the opening-lap aggression trim and brake-guard cut he ignores
 R.WILD_CONVOY = true          -- exempt from the lap-0 convoy throttle (reaction time and the staggered release stay)
@@ -378,7 +380,7 @@ R.wild = { till = {}, cool = {}, pos = {}, posT = {}, dmg = {}, hits = {}, tilts
 -- EDGE_CAP (found 2026-09-28 reading for the Wrecking Crew): edgeSoft = EDGE_SOFT + wide x OUTSIDE_EDGE passes EDGE_HARD once
 -- wide > 4/3 (aggression above ~0.83 with a real run), and the kerb guard is then off on outside passes. The existing 0.84
 -- rows (Diablo Blastoya, Hansel Struck) already reach it. On in every wild harness arm; a default only after the suite.
-R.EDGE_CAP = false            -- harness switch: cap edgeSoft at EDGE_HARD - 0.05 (any car)
+R.EDGE_CAP = false            -- harness switch: cap edgeSoft at EDGE_HARD - 0.05 (any car; always on for a wild car)
 K.OFFSET_SLEW = 0.8        -- units/sec offset may move (lower = smoother, less skittish)
 K.DEADZONE = 0.12       -- ignore tiny offsets (stay on the line)
 K.SIDE_HOLD = 1.2        -- s to hold a chosen side before allowing a flip (anti-dart)
@@ -790,7 +792,7 @@ function R.evaluate(i, dt)
             if R.CV_TGAP > 0 then cvGap = math.max(CV.GAP_M, spd / 3.6 * R.CV_TGAP); cvNear = cvGap * (CV.NEAR_M / CV.GAP_M) end   -- a time gap: the faster I arrive, the further out I ease
             if roomF then cvGap = math.max(cvGap, spd / 3.6 * R.ROOM_TG * tightHere); cvNear = cvGap * (CV.NEAR_M / CV.GAP_M) end   -- ROOM_FOLLOW: a time gap in tight room, every lap
             if ((olS < CV.END and myLap == 0) or roomF) and aheadIdx >= 0 and gapA * trackLen < cvGap and spd > aheadSpd + CV.CLOSING
-               and not (R.OL_STAR_CONVOY and Strategy.tierOf(i) >= 2) and not (wild and (R.WILD_CONVOY or R.WILD_START)) then
+               and not (R.OL_STAR_CONVOY and Strategy.tierOf(i) >= 2) and not (wild and myLap == 0 and (R.WILD_CONVOY or R.WILD_START)) then
                 local aCar = ac.getCar(aheadIdx)
                 if aCar and math.abs(latOf(aCar.position) - latOf(me.position)) < CV.LAT then
                     local gm = gapA * trackLen
@@ -839,7 +841,7 @@ function R.evaluate(i, dt)
                         -- LOWER hint = earlier braking (x1.5 field-wide: 18/18 lap-1 contact, 101 repairs, 2026-09-16).
                         -- The cut scales with how fast I'm closing on a braking car and how close it already is.
                         local closing = clamp((spd - aheadSpd) / CV.BG_CLOSE, 0, 1)
-                        mul = mul * (1 - CV.BG_HINT * closing * clamp(1 - gm / reach, 0, 1) * (wild and (1 - R.WILD_OL) or 1))   -- (R.WILD_OL) he takes part of the cut
+                        mul = mul * (1 - CV.BG_HINT * closing * clamp(1 - gm / reach, 0, 1) * ((wild and myLap <= 1) and (1 - R.WILD_OL) or 1))   -- (R.WILD_OL) he takes part of the opening-lap cut
                         if roomB and myLap > 1 then R.roomAct = (R.roomAct or 0) + 1 end
                     end
                 end
@@ -1350,7 +1352,7 @@ function R.evaluate(i, dt)
         -- kerbs). A car with a real speed run is allowed a bit closer to the edge to finish an outside
         -- pass, but EDGE_HARD still keeps it on the road.
         local edgeSoft = K.EDGE_SOFT + wide * K.OUTSIDE_EDGE
-        if R.EDGE_CAP and edgeSoft > K.EDGE_HARD - 0.05 then edgeSoft = K.EDGE_HARD - 0.05 end   -- (R.EDGE_CAP) keep the kerb guard alive
+        if (R.EDGE_CAP or wild) and edgeSoft > K.EDGE_HARD - 0.05 then edgeSoft = K.EDGE_HARD - 0.05 end   -- (R.EDGE_CAP) keep the kerb guard alive (always for a wild car: his baseA widens `wide`)
         if (target > 0 and myLat > edgeSoft) or (target < 0 and myLat < -edgeSoft) then
             target = target * clamp((K.EDGE_HARD - math.abs(myLat)) / (K.EDGE_HARD - edgeSoft), 0, 1)
         end
@@ -1443,7 +1445,7 @@ function R.evaluate(i, dt)
         -- 6-13 km/h under their own pace behind yielding backmarkers (Zandvoort 72-lap GP, 2026-09-14).
         if lappedAhead then caut = caut - K.FREEPASS_CAUT; if state == 0 then state = 1 end end
         -- (R.WILD) the chaos driver keeps only part of the stacked back-off, then drops a flat slice of caution
-        if wild then
+        if wild and not yielding then   -- (not while yielding: the cut would cancel the blue-flag lift)
             if caut > 0 then caut = caut * R.WILD_SAFE end
             caut = caut - R.WILD_CAUT - (wm > 0 and R.WILD_TILT_CAUT or 0)
         end
