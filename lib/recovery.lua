@@ -712,7 +712,7 @@ function R.update(dt)
     if os.clock() < R.settleUntil then R.count = 0; return end   -- a new session's first frames are the old one's (R.SETTLE_S)
     local active = 0
     if not scaled then scaled = true; pcall(function() scaleToTrack(sim.trackLengthM) end) end   -- per-track distances (self-heals after a hot-reload)
-    if #drops > 0 or (R.dropsOff and R.DROP_REARM_S > 0) then pcall(judgeDrops, os.clock()) end   -- (R.DROP_REARM_S) the re-arm needs a tick with no drops left
+    if #drops > 0 or (R.dropsOff and R.DROP_REARM_S > 0 and R.DROP_RATE_V2) then pcall(judgeDrops, os.clock()) end   -- (R.DROP_REARM_S) the re-arm needs a tick with no drops left
     pcall(function() R.raceSession = (sim.raceSessionType == ac.SessionType.Race) end)
     if R.pointToPoint == nil then      -- once per session: a hill climb / touge has no lap to rejoin and its finish is a stop
         R.pointToPoint = false

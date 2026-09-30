@@ -55,8 +55,9 @@ local frameMs, frameN, luaErrors = 0, 0, 0     -- Verve's own cost per frame and
 local errSeen = { n = 0 }                       -- (0.15, code review) each distinct swallowed error is logged once per session
 local function noteErr(where, e)
     luaErrors = luaErrors + 1
+    if errSeen.n >= 25 then return end
     local k = where .. ': ' .. tostring(e)
-    if not errSeen[k] and errSeen.n < 25 then errSeen[k] = true; errSeen.n = errSeen.n + 1; ac.log('Verve error (' .. k .. ')') end
+    if not errSeen[k] then errSeen[k] = true; errSeen.n = errSeen.n + 1; pcall(ac.log, 'Verve error (' .. k .. ')') end
 end
 local function pc(where, f, ...)                -- pcall that counts AND logs (noteErr)
     local ok, e = pcall(f, ...)
@@ -398,12 +399,16 @@ function script.update(dt)
             local gripApplied = nil
             if G.controlGrip then
                 local grip = G.baseGrip + gOff
-                if Racecraft.TOP_GRIP > 0 then grip = grip + Racecraft.TOP_GRIP * Racecraft.gripW(Drivers.statsOf(i), Difficulty.levelFor(i)) end   -- (R.TOP_GRIP) top-tier pace
+                if Racecraft.TOP_GRIP > 0 then
+                    local prof, pct = Drivers.statsOf(i), nil
+                    if not prof and Racecraft.TOP_UNPROF > 0 then local l = Difficulty.levelFor(i); if l then pct = Difficulty.pctOf(i, l) end end
+                    grip = grip + Racecraft.TOP_GRIP * Racecraft.gripW(prof, pct)
+                end   -- (R.TOP_GRIP) top-tier pace
                 -- launch assist: a brief traction boost off a standing start (AC's AI bogs down off the
                 -- line), fading out as the car gets up to speed. Only at the very start of lap 1.
                 local sp = car.splinePosition or 1
                 if Racecraft.LAUNCH_WRAP then   -- (0.15, code review) a grid behind the line (spline 0.97-0.99 on lap 0) gets it too: once per car
-                    if launchDone[i] or (car.speedKmh or 0) >= 90 then launchDone[i] = true; sp = 1 elseif sp > 0.9 then sp = 0 end
+                    if launchDone[i] or (car.speedKmh or 0) >= 90 or (sp >= 0.012 and sp <= 0.9) then launchDone[i] = true; sp = 1 elseif sp > 0.9 then sp = 0 end
                 end
                 if (car.lapCount or 0) == 0 and sp < 0.012 then
                     local s = car.speedKmh or 0

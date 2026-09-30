@@ -195,11 +195,11 @@ end
 -- (0.15, code review) a per-session salt, so grid slot 7 isn't the same driver every race: personality, consistency and the
 -- bobble phase are re-drawn at each session start. H.SESSION_SALT = false = the fixed per-slot draw (harness A/B pinning).
 H.SESSION_SALT = true
-H.salt = 0
+H.salt = ((os.time() + math.floor(os.clock() * 1000)) % 9973)   -- drawn at load too: CSP never fires onSessionStart for the session running when Lua loads
 local pers, cons, phase = {}, {}, {}
 local function seed(i)
     if pers[i] ~= nil then return end
-    local k = i * 3 + H.salt * 61
+    local k = i * 3 + (H.SESSION_SALT and H.salt or 0) * 61   -- gated here: a harness SESSION_SALT=false (first frame) still pins it
     pers[i]  = (hash01(k + 1) * 2 - 1) * PERSONALITY_AMP
     cons[i]  = 0.6 + hash01(k + 2) * 0.8
     phase[i] = hash01(k + 3) * 6.2831853
@@ -635,7 +635,7 @@ end
 
 function H.reset()     -- session start: re-derive the per-track distances; the visible-mistake state starts over
     scaled = false; H.wu = {}
-    H.salt = H.SESSION_SALT and ((os.time() + math.floor(os.clock() * 1000)) % 9973) or 0
+    H.salt = ((os.time() + math.floor(os.clock() * 1000)) % 9973)
     for k in pairs(pers) do pers[k] = nil; cons[k] = nil; phase[k] = nil end   -- re-drawn with the new salt on first use
     for k in pairs(H.mv) do H.mv[k] = nil end          -- in place: racecraft holds this table (R.humanMv)
     H.mvSk, H.mvN, H.mvDrop, H.mvNear = {}, {}, {}, {}

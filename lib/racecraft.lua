@@ -644,12 +644,14 @@ end
 -- (H.MISTAKE_V2) Verve.lua skips R.evaluate for a pit-lane car, so a visible mistake's throttle cap or late-brake hint set on the
 -- way in would ride down the pit lane: release them. Only the mistake's own flags: at defaults they are never set (no-op)
 -- (0.15, owner 2026-09-29: 'yes they can get the extra grip') a car WITHOUT a profile gets TOP_UNPROF of the top-pace weight
--- tapered by its difficulty level: full at 100, none at TOP_UNPROF_FROM (0.90) and below, so the slider's lower steps keep their pace.
-R.TOP_UNPROF_FROM = 0.90
-function R.gripW(prof, lvl)
+-- tapered by how far its difficulty puts it off level-100 pace (Difficulty.pctOf, lap-time %): full at 0 %, none at TOP_UNPROF_PCT
+-- (5 % = slider 90 on every class curve), so the slider's lower steps keep their pace. No pct known (difficulty off) = no extra grip.
+R.TOP_UNPROF_PCT = 5.0
+function R.gripW(prof, pct)
     local w = R.topW(prof)
     if prof or w <= 0 then return w end
-    return w * clamp(((lvl or 1.0) - R.TOP_UNPROF_FROM) / math.max(0.01, 1.0 - R.TOP_UNPROF_FROM), 0, 1)
+    if type(pct) ~= 'number' then return 0 end
+    return w * clamp(1 - pct / math.max(0.01, R.TOP_UNPROF_PCT), 0, 1)
 end
 function R.topW(prof)   -- (R.TOP_*) 0..1: how much of the top-pace trim a car gets (its profile pace; unprofiled = TOP_UNPROF)
     if not prof then return R.TOP_UNPROF end
@@ -962,7 +964,7 @@ function R.evaluate(i, dt)
             baseA = baseA or me.aiAggression                     -- (switch off: the per-frame read-back, as before)
             if not baseA or baseA < 0 then baseA = K.AGGR_CRUISE end
             baseA = clamp(baseA, 0.2, 1.0)
-            baseA = clamp(baseA + (hash01(i * 11 + 5 + R.salt * 61) * 2 - 1) * K.AGGR_SPREAD * R.VARIABILITY, 0.15, 1.0)   -- (0.15) per-session salt
+            baseA = clamp(baseA + (hash01(i * 11 + 5 + (R.SESSION_SALT and R.salt or 0) * 61) * 2 - 1) * K.AGGR_SPREAD * R.VARIABILITY, 0.15, 1.0)   -- (0.15) per-session salt
         end
         local myLat = latOf(me.position)          -- current lateral on track (-1 left .. +1 right)
         local target, aggr, wide = 0, math.min(baseA, 1.0), 0    -- wide = 0..1 extra track width earned by an exit-speed run (baseA passes 1 only for a wild car)
@@ -1621,7 +1623,6 @@ function R.evaluate(i, dt)
         if R.TOP_CAUT > 0 and myLap >= 1 and not yielding then caut = caut - R.TOP_CAUT * R.topW(prof) end   -- (R.TOP_CAUT)
         -- cap the stacked back-off (see CAUT_MAX); the attack/defend NEGATIVE caution is left alone
         if caut > K.CAUT_MAX then caut = K.CAUT_MAX end
-        if R.CAUT_FLOOR > 0 and not wild and caut < -R.CAUT_FLOOR then caut = -R.CAUT_FLOOR end   -- (R.CAUT_FLOOR) boldness floor
         if passFinish and caut > R.PASS_CAUT then caut = R.PASS_CAUT end   -- finishing a pass: no hedging (see PASS_FINISH)
         -- TOW ATTACK (R.TOW_ATTACK): straight, fast, close, and clearly quicker -> stop keeping AC's following distance
         if R.TOW_ATTACK > 0 and state == 1 and aheadIdx >= 0 and myLap >= 2 and spd > R.TOW_MIN and gapA * trackLen < R.TOW_M then
@@ -1637,6 +1638,7 @@ function R.evaluate(i, dt)
             if clear and ap and prof.pace - ap.pace >= R.TOW_EDGE and caut > -R.TOW_ATTACK then caut = -R.TOW_ATTACK; R.towN = (R.towN or 0) + 1 end
             end
         end
+        if R.CAUT_FLOOR > 0 and not wild and caut < -R.CAUT_FLOOR then caut = -R.CAUT_FLOOR end   -- (R.CAUT_FLOOR) boldness floor, after tow + pass-finish
 
         -- slew the offset (anti-dart)
         local cur = curOffset[i] or 0
@@ -1833,9 +1835,9 @@ end
 R.CAUT_FLOOR = 0
 R.LAUNCH_WRAP = false   -- (0.15, code review) Verve.lua launch assist also for a grid behind the line (spline > 0.9 on lap 0), until the car first
                         -- reaches 90 km/h. false = today: only spline < 0.012, so back rows before the line get none until they cross.
-R.SESSION_SALT = true; R.salt = 0   -- (0.15, code review) re-drawn each session (R.reset): the aggression spread isn't pinned to the grid slot
+R.SESSION_SALT = true; R.salt = ((os.time() + math.floor(os.clock() * 1000)) % 9973)   -- (drawn at load too: no onSessionStart for the first session) (0.15, code review) re-drawn each session (R.reset): the aggression spread isn't pinned to the grid slot
 function R.reset()
-    R.salt = R.SESSION_SALT and ((os.time() + math.floor(os.clock() * 1000)) % 9973) or 0
+    R.salt = ((os.time() + math.floor(os.clock() * 1000)) % 9973)
     dmgSeen, dmgLap = {}, {}
     R.hurtSeen, R.hurtLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
