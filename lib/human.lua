@@ -63,6 +63,10 @@ H.NERVES_V2 = false        -- nerves x NERVES_K x (1 - cons); pressure only from
 H.NERVES_K = 2.0
 H.MV_RACE_ONLY = true
 H.MV_PACE = { 0.30, 0.60, 0.85, 0.95 }       -- anchors: Rookie, Midfielder, Veteran (drivers.lua archetypes), a top name
+-- (0.15) with Drivers.RATING_V2 (0.14.9 default) the Veteran is 0.93 and the Midfielder 0.65, so the V1 anchors put a Veteran at 13.5
+-- laps per mistake (owner's rate: 8-10). V2 anchors keep the owner's rates on the new ratings.
+H.MV_PACE_V2 = { 0.30, 0.65, 0.93, 1.00 }
+function H.mvPaceAnchors() return (Drivers.RATING_V2 and H.MV_PACE_V2) or H.MV_PACE end
 H.MV_LAPS = { 2, 4, 9, 15 }                  -- laps per visible mistake at each anchor (log-interpolated; ends held)
 H.MV_OFF_P = { 0.06, 0.025, 0.010, 0.005 }   -- P(a lock-up or a missed apex becomes an off)
 H.MV_SPIN_P = { 0.005, 0, 0, 0 }             -- P(a lift becomes a spin), robust classes only
@@ -428,7 +432,7 @@ end
 
 -- ---- VISIBLE MISTAKES (H.MISTAKE_V2) ----
 local function mvAnchor(ys, x, logy)          -- ys at pace x on the H.MV_PACE anchors (log-interpolated when logy; ends held)
-    local xs = H.MV_PACE
+    local xs = H.mvPaceAnchors()
     if x <= xs[1] then return ys[1] end
     for k = 1, #xs - 1 do
         if x <= xs[k + 1] then
@@ -479,8 +483,9 @@ function H.mvSkill(i, prof, now)
     if c.wild and Drivers.WILD_ON ~= false and H.WILD_ERR > 0 then laps = laps / H.WILD_ERR end   -- (H.WILD_ERR) the chaos driver, as in the bobble model
     c.pace, c.risk, c.cons, c.prof, c.laps = pace, risk, cons, prof ~= nil, laps
     c.pOff, c.pSpin = mvAnchor(H.MV_OFF_P, pace), mvAnchor(H.MV_SPIN_P, pace)
-    c.x = clamp((pace - H.MV_PACE[1]) / (H.MV_PACE[#H.MV_PACE] - H.MV_PACE[1]), 0, 1)
-    c.tier = (c.wild and 'wild') or (c.top and 'top') or (pace < 0.45 and 'rookie') or (pace < 0.725 and 'midfield') or (pace < 0.90 and 'veteran') or 'top'
+    local xa = H.mvPaceAnchors()
+    c.x = clamp((pace - xa[1]) / (xa[#xa] - xa[1]), 0, 1)
+    c.tier = (c.wild and 'wild') or (c.top and 'top') or (pace < 0.45 and 'rookie') or (pace < (Drivers.RATING_V2 and 0.79 or 0.725) and 'midfield') or (pace < (Drivers.RATING_V2 and 0.965 or 0.90) and 'veteran') or 'top'
     c.cls = Classes.keyOf(i)
     c.race = true
     if H.MV_RACE_ONLY then pcall(function() c.race = ac.getSim().raceSessionType == ac.SessionType.Race end) end
