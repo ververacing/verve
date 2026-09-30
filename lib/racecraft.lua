@@ -1621,6 +1621,7 @@ function R.evaluate(i, dt)
         if R.TOP_CAUT > 0 and myLap >= 1 and not yielding then caut = caut - R.TOP_CAUT * R.topW(prof) end   -- (R.TOP_CAUT)
         -- cap the stacked back-off (see CAUT_MAX); the attack/defend NEGATIVE caution is left alone
         if caut > K.CAUT_MAX then caut = K.CAUT_MAX end
+        if R.CAUT_FLOOR > 0 and not wild and caut < -R.CAUT_FLOOR then caut = -R.CAUT_FLOOR end   -- (R.CAUT_FLOOR) boldness floor
         if passFinish and caut > R.PASS_CAUT then caut = R.PASS_CAUT end   -- finishing a pass: no hedging (see PASS_FINISH)
         -- TOW ATTACK (R.TOW_ATTACK): straight, fast, close, and clearly quicker -> stop keeping AC's following distance
         if R.TOW_ATTACK > 0 and state == 1 and aheadIdx >= 0 and myLap >= 2 and spd > R.TOW_MIN and gapA * trackLen < R.TOW_M then
@@ -1827,6 +1828,9 @@ function R.beginFrame()
     cv2.roomFollow = cv2.roomEn and (R.ROOM_FOLLOW == true or (type(R.ROOM_FOLLOW) == 'number' and R.ROOM_FOLLOW > 0)) or false   -- (true or 1 from the harness)
     cv2.roomLine = cv2.roomEn and (R.ROOM_LINE == true or (type(R.ROOM_LINE) == 'number' and R.ROOM_LINE > 0)) or false
 end
+-- (0.15, code review R6) attack + lunge + TOP_CAUT stack with no floor, so applied caution can reach 0 (kamikaze). >0: the summed
+-- negative caution is floored at -CAUT_FLOOR before intensity (the chaos driver is exempt). 0 = no floor (today). A/B 0.8.
+R.CAUT_FLOOR = 0
 R.SESSION_SALT = true; R.salt = 0   -- (0.15, code review) re-drawn each session (R.reset): the aggression spread isn't pinned to the grid slot
 function R.reset()
     R.salt = R.SESSION_SALT and ((os.time() + math.floor(os.clock() * 1000)) % 9973) or 0
