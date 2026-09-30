@@ -508,6 +508,7 @@ local function parkInPits(i, why)
     -- (a wreck sat in view for six laps; a "frozen" car at the pit exit for seven minutes). Its box is where
     -- AC's own retirement puts it anyway; AC's bookkeeping catches up when its timer fires.
     pcall(function() physics.teleportCarTo(i, ac.SpawnSet.Pits) end)
+    rejoinUntil[i] = nil   -- (0.15) a car parked right after a drop: the rejoin ramp re-opened its throttle every frame and it drove out
     pcall(function() physics.setAIStopCounter(i, 36000) end)      -- stay put (AC's own "brake and wait")
     pcall(function() physics.setAIThrottleLimit(i, 0) end)        -- and no throttle, so it can't creep off
     if not retiredMark[i] then retiredMark[i] = true; R.retiredCount = (R.retiredCount or 0) + 1 end
@@ -806,7 +807,7 @@ function R.update(dt)
                     if pt.fuel and math.abs((car.fuel or 0) - pt.fuel) > 0.5 then pcall(physics.setCarFuel, i, pt.fuel) end   -- a late reload, up or down
                 else pendingTemps[i] = nil end
             end
-            if rejoinUntil[i] then
+            if rejoinUntil[i] and not parked[i] then   -- (0.15) never over a parked car's hold
                 local lim = rampLimit(i)                      -- (returns 1 and clears itself when the ramp ends)
                 pcall(function() physics.setAIThrottleLimit(i, lim); physics.setAIStopCounter(i, 0) end)   -- (and keep it un-parked while it rejoins)
             end
