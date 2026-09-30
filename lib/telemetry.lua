@@ -220,6 +220,7 @@ function T.buildReport(sim, ctx, completed, abortReason)
         '"fps_avg":' .. jnum(st.fpsN > 0 and st.fps / st.fpsN or nil),
         '"damage_setting":' .. jnum(assist('damageRate')),
         '"fuel_setting":' .. jnum(assist('fuelRate')),
+        '"tyre_wear_setting":' .. jnum(assist('tyresWear')),   -- (0.15) the column existed, the Lua never sent it (null in all 1005 reports)
         '"contacts_seen":' .. jint(Contacts.count),
         '"verve_ms_avg":' .. jnum(ctx.verveMs), '"lua_errors":' .. jint(ctx.luaErrors),
         '"session_key":' .. jstr(S.installId .. '-' .. tostring(st.t0) .. '-' .. tostring(ctx.track or '')),   -- for server-side de-duplication
