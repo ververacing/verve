@@ -55,12 +55,17 @@ F.LPKM_MARGIN  = 1.15
 F.loadN, F.boxFixN, F.boxReN = 0, 0, 0   -- session tallies for the diagnostics (fuelLoadN: green-load writes; fuelBoxN:
                                          -- pit visits fixed; fuelReN: AC emptied a tank again after a top-up, same visit)
 F.active = false          -- this session is one the switch acts in
+-- (0.15, player-settings check 2026-09-29) FUEL RATE: AC fuels its AI - and refills it at a stop - with its own litres per lap, which
+-- ignore the launcher's fuel-rate multiplier. At rate 3 an 8-lap Monza race started on 37.6 L burning 8.5 L a lap: every car made
+-- 3-4 stops. F.RATE_LAPPED: in a LAPPED race with fuel rate > 1, the same green load and box guard as a timed race, with the laps
+-- from the session. In both kinds the litres per lap are x the fuel rate (1 = no change).
+F.RATE_LAPPED = true
 
 local st = {}             -- per-session state (F.reset)
 
 function F.reset()
     st = { now = 0, tick = 0, sawPre = false, greenT = nil, doneA = false, fpl = {}, prevBest = nil, visit = {},
-           fuelOnT = -1e9, fuelOn = true, lo = nil, hi = nil, laps = 0 }
+           fuelOnT = -1e9, fuelOn = true, lo = nil, hi = nil, laps = 0, rate = 1, mode = nil }
     F.loadN, F.boxFixN, F.boxReN, F.active = 0, 0, 0, false
 end
 F.reset()
@@ -83,17 +88,29 @@ function F.timedSession(sim)
     return ss
 end
 
+local function lappedSession(sim)                 -- (F.RATE_LAPPED) the current session if it is a LAPPED race
+    local ss = nil
+    pcall(function()
+        if sim.raceSessionType ~= ac.SessionType.Race then return end
+        local s = ac.getSession(sim.currentSessionIndex or 0)
+        if s and (s.laps or 0) > 0 and s.isTimedRace ~= true then ss = s end
+    end)
+    return ss
+end
+
 local function gate(sim)
     if sim.isOnlineRace or sim.isReplayOnlyMode then return nil end
-    local ss = F.timedSession(sim)
-    if not ss then return nil end
     if st.now - st.fuelOnT > 10 then              -- fuel consumption off: nothing burns (re-read now and then: menu-editable)
         st.fuelOnT = st.now
-        local on = true
-        pcall(function() local a = ac.getAssists(); if a and type(a.fuelRate) == 'number' then on = a.fuelRate > 0 end end)
-        st.fuelOn = on
+        local on, rate = true, 1
+        pcall(function() local a = ac.getAssists(); if a and type(a.fuelRate) == 'number' then on = a.fuelRate > 0; rate = a.fuelRate end end)
+        st.fuelOn, st.rate = on, math.max(1, rate)
     end
-    return st.fuelOn and ss or nil
+    if not st.fuelOn then return nil end
+    local ss = F.timedSession(sim)
+    if ss then st.mode = 'timed'; return ss end
+    if F.RATE_LAPPED and st.rate > 1 then ss = lappedSession(sim); if ss then st.mode = 'lapped'; return ss end end
+    return nil
 end
 
 local function eligible(car) return car ~= nil and car.isAIControlled == true and not car.isRemote end
@@ -127,7 +144,11 @@ local function lapEst(i, car, trackM)                -- seconds, deliberately fa
     return math.max(est, F.MIN_LAP_S)
 end
 
-local function fplOf(i, car, trackM)                 -- litres per lap
+local fplBase
+local function fplOf(i, car, trackM)                 -- litres per lap, at the launcher's fuel rate (AC's own figures ignore it)
+    return fplBase(i, car, trackM) * (st.rate or 1)
+end
+fplBase = function(i, car, trackM)
     local f = field(car, 'fuelPerLap')
     if f and f > 0 then st.fpl[i] = f; return f end
     if st.fpl[i] then return st.fpl[i] end           -- first reading kept: our own top-ups must not feed back into it
@@ -157,7 +178,7 @@ local function greenLoad(sim, ss, trackM)
         local car = ac.getCar(i)
         if eligible(car) then
             local fpl = fplOf(i, car, trackM)
-            local laps = math.ceil(dur / lapEst(i, car, trackM)) + extra
+            local laps = (st.mode == 'lapped') and ((ss.laps or 0) + extra) or (math.ceil(dur / lapEst(i, car, trackM)) + extra)
             local target = tankFor(car, laps, fpl)
             local fuel = car.fuel or 0
             if fuel + F.SLACK_L < target and pcall(physics.setCarFuel, i, target) then
@@ -191,7 +212,8 @@ local function boxGuard(sim, ss, trackM)
                     if v.fixed then F.boxReN = F.boxReN + 1 end       -- (again, after a top-up: the loop)
                 end
                 local fpl = fplOf(i, car, trackM)
-                local laps = math.ceil(left / lapEst(i, car, trackM)) + extra
+                local laps = (st.mode == 'lapped') and (math.max(0, (ss.laps or 0) - (car.lapCount or 0)) + extra)
+                    or (math.ceil(left / lapEst(i, car, trackM)) + extra)
                 local target = tankFor(car, laps, fpl)
                 if fuel + F.SLACK_L < target and st.now - v.t0 < F.BOX_HOLD_S and st.now - v.last >= F.BOX_GAP_S then
                     local rs = Recovery.stateOf(i)
@@ -233,8 +255,8 @@ function F.update(sim, dt)
     elseif sim.isSessionStarted then
         if st.sawPre and not st.doneA then
             st.doneA = true
-            pcall(function() ac.log(string.format('Verve fuel: timed race of %.0f min: %d green loads written (%.1f-%.1f L, up to %d laps)',
-                ss.durationMinutes or 0, F.loadN, st.lo or 0, st.hi or 0, st.laps)) end)
+            pcall(function() ac.log(string.format('Verve fuel: %s race (%.0f min / %d laps, fuel rate %.1f): %d green loads written (%.1f-%.1f L, up to %d laps)',
+                st.mode or '?', ss.durationMinutes or 0, ss.laps or 0, st.rate or 1, F.loadN, st.lo or 0, st.hi or 0, st.laps)) end)
         end
         boxGuard(sim, ss, trackM)
     end
