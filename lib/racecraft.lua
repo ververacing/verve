@@ -643,6 +643,14 @@ function R.hurtOf(i, me, myLap)
 end
 -- (H.MISTAKE_V2) Verve.lua skips R.evaluate for a pit-lane car, so a visible mistake's throttle cap or late-brake hint set on the
 -- way in would ride down the pit lane: release them. Only the mistake's own flags: at defaults they are never set (no-op)
+-- (0.15, owner 2026-09-29: 'yes they can get the extra grip') a car WITHOUT a profile gets TOP_UNPROF of the top-pace weight
+-- tapered by its difficulty level: full at 100, none at TOP_UNPROF_FROM (0.90) and below, so the slider's lower steps keep their pace.
+R.TOP_UNPROF_FROM = 0.90
+function R.gripW(prof, lvl)
+    local w = R.topW(prof)
+    if prof or w <= 0 then return w end
+    return w * clamp(((lvl or 1.0) - R.TOP_UNPROF_FROM) / math.max(0.01, 1.0 - R.TOP_UNPROF_FROM), 0, 1)
+end
 function R.topW(prof)   -- (R.TOP_*) 0..1: how much of the top-pace trim a car gets (its profile pace; unprofiled = TOP_UNPROF)
     if not prof then return R.TOP_UNPROF end
     return clamp(((prof.pace or 0) - R.TOP_FROM) / math.max(0.01, R.TOP_FULL - R.TOP_FROM), 0, 1)
