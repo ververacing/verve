@@ -212,7 +212,10 @@ function F.update(dt, stats)
                 if p.lap >= 1 and lt > 20 then
                     local best = lt < (bestLap[i] or 1e9)
                     if best then bestLap[i] = lt end
-                    event(t, 'lap', string.format('"car":%d,"lap":%d,"time_s":%.1f,"best":%s', i, p.lap + 1, lt, tostring(best)))
+                    local ms = 0   -- (0.15) AC's own lap time: time_s is the 1 Hz tick difference (x.1 s resolution)
+                    pcall(function() local ac_c = ac.getCar(i); ms = (ac_c and ac_c.previousLapTimeMs) or 0 end)
+                    event(t, 'lap', string.format('"car":%d,"lap":%d,"time_s":%.1f,"best":%s%s', i, p.lap + 1, lt, tostring(best),
+                        (type(ms) == 'number' and ms > 0) and string.format(',"lap_ms":%d', ms) or ''))
                     if not overallBest or lt < overallBest then
                         overallBest = lt
                         if p.lap >= 2 then event(t, 'fastest_lap', string.format('"car":%d,"lap":%d,"time_s":%.1f', i, p.lap + 1, lt)) end

@@ -110,7 +110,15 @@ H.MV_SNAP_RAMP = 0.15      -- s the lift's grip dip takes to build (0.08 = the d
 H.MV_LIFT_CAP_FIRST = false   -- the lift's throttle cap from 0 s and its dip from 0.1 s (the fallback if lifts spin cars)
 H.MV_LIFT_THR = 0.40
 H.MV_LIFT_THR_SEV = 0.25
-H.MV_LIFT_S = 0.35
+H.MV_LIFT_S = 0.6         -- (0.15) was 0.35: the cap ended before the real exit drive
+-- (0.15, probe analysis 2026-09-30) LOCK_V2: the old lock-up raised the brake hint BEFORE the braking point (a later brake = a time
+-- GAIN, -0.08..-0.13 s per event). V2: no later brake; the cost is a caution window from 0.2 s and a longer run-wide.
+-- LIFT_EXIT: a lift fires only while the cornering read is falling (a real exit), not on a throttle blip mid-chicane.
+H.MV_LOCK_V2 = true
+H.MV_LOCK_CAUT = 0.15
+H.MV_LOCK_CAUT_SEV = 0.25
+H.MV_LOCK_WIDE_S = 2.0
+H.MV_LIFT_EXIT = true
 H.MV_LIFT_S_SEV = 0.45
 H.MV_BIG_BH = 0.12
 H.MV_BIG_GRIP = 0.06
@@ -574,13 +582,14 @@ function H.mistakeV2(i, car, prof, cm, now)
         if waited > H.MV_ARM_S then mvDrop(i, st, 'no_moment', now); return 0, 0 end
         H.pressureV2(i, car, now)
         local nr = H.mvNear[i]
-        if st.k == 'lockup' and nr.aheadM >= 2 * H.MV_AHEAD_M and br < H.MV_BRAKE_IN and spd > H.MV_LOCK_KMH then
+        if st.k == 'lockup' and not H.MV_LOCK_V2 and nr.aheadM >= 2 * H.MV_AHEAD_M and br < H.MV_BRAKE_IN and spd > H.MV_LOCK_KMH then
             st.bh = 1 + H.MV_LOCK_BH + H.MV_LOCK_BH_SEV * st.sev + (st.big and H.MV_BIG_BH or 0); st.lv = now + 0.1   -- the late brake, held until the pedal is in
         end
         local ph
         if br > H.MV_BRAKE_IN and spd > H.MV_LOCK_KMH and corner < 0.35 then ph = 'lockup'
         elseif corner >= 0.5 and br < 0.2 and gas < 0.7 and spd > H.MV_APEX_KMH then ph = 'apex'
-        elseif gas >= 0.7 and corner >= 0.3 and spd > H.MV_LIFT_KMH then ph = 'lift' end
+        elseif gas >= 0.7 and corner >= 0.3 and spd > H.MV_LIFT_KMH and (not H.MV_LIFT_EXIT or (st.pc and corner < st.pc - 0.01)) then ph = 'lift' end
+        st.pc = st.pc and (0.8 * st.pc + 0.2 * corner) or corner   -- (H.MV_LIFT_EXIT) smoothed cornering read: an exit is a falling one
         if ph and ph ~= st.k and (H.MV_FORCE_KIND or waited < 0.5 * H.MV_ARM_S) then ph = nil end
         if ph == 'lockup' and nr.aheadM < H.MV_AHEAD_M then ph = nil end
         if ph and ph ~= 'lift' and mvOverlap(car, nr) then ph = nil end
@@ -590,9 +599,10 @@ function H.mistakeV2(i, car, prof, cm, now)
         st.k, st.t0, st.big, st.side, st.scanT = ph, now, big, nil, nil
         if ph == 'lift' and st.spin then st.k = 'spin' end
         if ph == 'lockup' then
-            st.bhv = 1 + H.MV_LOCK_BH + H.MV_LOCK_BH_SEV * sev + (big and H.MV_BIG_BH or 0)
+            st.bhv = H.MV_LOCK_V2 and (1 + (big and H.MV_BIG_BH or 0)) or (1 + H.MV_LOCK_BH + H.MV_LOCK_BH_SEV * sev + (big and H.MV_BIG_BH or 0))
+            st.lc = H.MV_LOCK_CAUT + H.MV_LOCK_CAUT_SEV * sev   -- (H.MV_LOCK_V2) the cost: caution through the whole window
             st.gv = (H.MV_LOCK_GRIP + H.MV_LOCK_GRIP_SEV * sev) * (0.5 + 0.5 * frag) + (big and H.MV_BIG_GRIP or 0)
-            st.wv, st.dur = big and 1.0 or (H.MV_WIDE + H.MV_WIDE_SEV * sev), 0.2 + (big and 2.0 or H.MV_WIDE_S)
+            st.wv, st.dur = big and 1.0 or (H.MV_WIDE + H.MV_WIDE_SEV * sev), 0.2 + (big and 2.0 or (H.MV_LOCK_V2 and H.MV_LOCK_WIDE_S or H.MV_WIDE_S))
         elseif ph == 'apex' then
             st.wv, st.cv = big and 1.0 or (H.MV_WIDE + H.MV_WIDE_SEV * sev), H.MV_APEX_CAUT + H.MV_APEX_CAUT_SEV * sev
             st.gv, st.dur = H.MV_APEX_GRIP + (big and H.MV_BIG_GRIP or 0), big and 2.2 or (H.MV_APEX_S + H.MV_APEX_S_SEV * sev)
@@ -617,7 +627,8 @@ function H.mistakeV2(i, car, prof, cm, now)
             if e < H.MV_LOCK_HOLD then st.bh = st.bhv end
             g = st.gv * mvEnv(e, 0.08, H.MV_LOCK_HOLD, 0.3)
             if e > 0.2 then st.wide, st.lookM = st.wv, H.MV_LOCK_LOOK_M end
-            if e > st.dur - 0.5 then c = H.MV_GATHER end
+            if H.MV_LOCK_V2 then if e > 0.2 then c = st.lc or H.MV_GATHER end
+            elseif e > st.dur - 0.5 then c = H.MV_GATHER end
         elseif st.k == 'apex' then
             st.wide, st.lookM, c = st.wv, 0, st.cv
             g = st.gv * mvEnv(e, 0.2, st.dur - 0.5, 0.3)
