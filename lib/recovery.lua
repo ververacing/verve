@@ -344,6 +344,9 @@ function R.lapsOf(i)
     return math.max(ownLaps[i] or 0, car.lapCount or 0)
 end
 R.dropsOff = false         -- repositioning switched off for this session (rate too poor)
+-- (0.15, code review R10) >0: DROP_REARM_S seconds after the switch-off, repositioning comes back with a fresh tally (it must fail
+-- DROP_TRIAL judged drops again to go off again), so one bad corner early doesn't end repositioning for a whole race. V2 tally only.
+R.DROP_REARM_S = 0
 R.wildCar = {}             -- [i] = true (Verve.lua, Racecraft.WILD_NOLEARN): a chaos driver's drops don't count toward that switch-off rate
 
 -- may this car be repositioned automatically right now?
@@ -382,8 +385,13 @@ local function judgeDrops(now)
     judged = math.max(judged, R.dropN - #drops)   -- (older ones dropped from the list were judged too)
     local poor = R.dropN >= DROP_TRIAL and judged >= DROP_TRIAL and (R.dropOK / R.dropN) < DROP_MIN_RATE
     if R.DROP_RATE_V2 then poor = R.rateN >= DROP_TRIAL and (R.rateOK / R.rateN) < DROP_MIN_RATE end
+    if R.dropsOff and R.DROP_RATE_V2 and R.DROP_REARM_S > 0 and os.clock() - (R.dropsOffT or 0) > R.DROP_REARM_S then
+        R.dropsOff = false; R.rateOK, R.rateN = 0, 0   -- (R.DROP_REARM_S) a fresh trial
+        pcall(function() ac.log('Verve: repositioning back on (re-armed after ' .. R.DROP_REARM_S .. ' s)') end)
+        return
+    end
     if not R.dropsOff and poor then
-        R.dropsOff = true
+        R.dropsOff = true; R.dropsOffT = os.clock()
         pcall(function() ac.log(string.format('Verve: repositioning off for this session (%d of %d rejoined)', R.DROP_RATE_V2 and R.rateOK or R.dropOK, R.DROP_RATE_V2 and R.rateN or R.dropN)) end)
     end
 end
@@ -704,7 +712,7 @@ function R.update(dt)
     if os.clock() < R.settleUntil then R.count = 0; return end   -- a new session's first frames are the old one's (R.SETTLE_S)
     local active = 0
     if not scaled then scaled = true; pcall(function() scaleToTrack(sim.trackLengthM) end) end   -- per-track distances (self-heals after a hot-reload)
-    if #drops > 0 then pcall(judgeDrops, os.clock()) end
+    if #drops > 0 or (R.dropsOff and R.DROP_REARM_S > 0) then pcall(judgeDrops, os.clock()) end   -- (R.DROP_REARM_S) the re-arm needs a tick with no drops left
     pcall(function() R.raceSession = (sim.raceSessionType == ac.SessionType.Race) end)
     if R.pointToPoint == nil then      -- once per session: a hill climb / touge has no lap to rejoin and its finish is a stop
         R.pointToPoint = false
