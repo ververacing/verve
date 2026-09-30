@@ -85,6 +85,7 @@ local DEFAULTS = {
     timedFuel = true,    -- DEFAULT 0.14.6 (lib/fuel.lua): fuel a TIMED race's AI for the clock, stop AC's empty-tank pit loop
     paceAbs = true,      -- DEFAULT 0.14.8 (lib/drivers.lua D.PACE_ABS): a driver profile sets the car's pace outright
     ratingV2 = true,     -- DEFAULT 0.14.9; harness switch (lib/drivers.lua D.RATING_V2): real drivers rated as pros around a Veteran (owner 2026-09-29)
+    classV2 = false,     -- harness switch (lib/classes.lua M.DETECT_V2): the v2 car-class detector (2026-09-30 inventory: 97 % vs 53 %)
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
 
@@ -99,6 +100,7 @@ local S = ac.storage({
     timedFuel = true,
     paceAbs = true,
     ratingV2 = true,
+    classV2 = false,
     autosave = true, schema = 1,
 })
 -- settings migration: 0.12 made crash repair + trouble spots core (they were opt-in experiments; a day-long
@@ -360,6 +362,7 @@ function script.update(dt)
     Drivers.LOCKED = Career.active            -- career: the difficulty curve sets the field; profiles are off
     Drivers.PACE_ABS = G.paceAbs == true      -- (lib/drivers.lua) profile pace against a fixed reference
     Drivers.RATING_V2 = G.ratingV2 == true    -- (lib/drivers.lua) real drivers rated as pros around a Veteran
+    if Classes.DETECT_V2 ~= (G.classV2 == true) then Classes.DETECT_V2 = G.classV2 == true; pcall(Classes.reset) end   -- (lib/classes.lua) re-detect on a flip
     Drivers.autoMatch()                       -- once per session: AC driver names that match the roster get their profile
     Human.ENABLED       = true
     Human.HUMAN_VAR     = G.humanVar
