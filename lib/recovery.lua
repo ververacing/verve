@@ -477,10 +477,11 @@ end
 -- (AC only retires a car after a long stop, and never one that's upright and "fine"), and every second
 -- a hulk sits at a corner it collects the next car through. A real wreck is craned off; this is that.
 -- Implementation: hold the car still and STOP protecting it -- AC retires a stationary, unprotected AI in
--- ~20 s through its own retirement (its own bookkeeping, its own pit box). We briefly teleported hopeless
--- cars to the pits ourselves; AC didn't know those boxes were occupied, and a car it sent in for repairs
--- then spent eight minutes crashing into two "retired" cars at pit exit. Native retirement it is; the
--- yellow flag + go-around cover the ~20 s the wreck sits there.
+-- ~20 s through its own retirement (its own bookkeeping, its own pit box). HISTORY: an early version teleported
+-- hopeless cars to the pits; AC didn't know those boxes were occupied and a car it sent in for repairs spent eight
+-- minutes crashing into two "retired" cars at pit exit, so it went native. The teleport below came BACK later
+-- (to the car's OWN box, then held): AC's own retirement left wrecks in view for 160-540 s. Open risk (code review
+-- 2026-09-29): a grid larger than the track's pit boxes shares boxes - test that case before trusting it there.
 local function parkInPits(i, why)
     if parked[i] or not R.raceSession or i == 0 then return end   -- never the player's car: a human may take the wheel back
     parked[i] = true
