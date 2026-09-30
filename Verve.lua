@@ -52,6 +52,17 @@ pcall(function()
 end)
 local harnessApplied, autopilotArmed, harnessT = false, false, 0
 local frameMs, frameN, luaErrors = 0, 0, 0     -- Verve's own cost per frame and errors swallowed by pcall (telemetry)
+local errSeen = { n = 0 }                       -- (0.15, code review) each distinct swallowed error is logged once per session
+local function noteErr(where, e)
+    luaErrors = luaErrors + 1
+    local k = where .. ': ' .. tostring(e)
+    if not errSeen[k] and errSeen.n < 25 then errSeen[k] = true; errSeen.n = errSeen.n + 1; ac.log('Verve error (' .. k .. ')') end
+end
+local function pc(where, f, ...)                -- pcall that counts AND logs (noteErr)
+    local ok, e = pcall(f, ...)
+    if not ok then noteErr(where, e) end
+    return ok
+end
 local shiftSet = {}                              -- per car: shift thresholds applied (see Racecraft.SHIFT_UP)
 local harnessStartT, harnessStarted = 0, false   -- "press Drive" on AC's pre-session screen (ac.tryToStart)
 local harnessEndT = 0                            -- seconds a timed session (practice/quali) has been over
@@ -137,7 +148,7 @@ local function sessionReset(restart)
     pcall(function() local okS, simR = pcall(ac.getSim); if okS and simR then Telemetry.abort(restart and 'restart' or 'session change', simR, telemetryCtx()) end end)
     pcall(Career.reset)
     pcall(Difficulty.reset)
-    frameMs, frameN, luaErrors = 0, 0, 0
+    frameMs, frameN, luaErrors = 0, 0, 0; errSeen = { n = 0 }
     harnessStarted, harnessStartT, autopilotArmed, harnessT, harnessEndT = false, 0, false, 0, 0
     pcall(Classes.reset)
     pcall(Human.reset)            -- per-track distances
@@ -368,7 +379,7 @@ function script.update(dt)
     -- start at 0 so the player's own car is managed WHEN (and only when) it's under AI control
     -- (Ctrl+C takeover): the isAIControlled gate below means we never touch it while you drive.
     for i = 0, sim.carsCount - 1 do
-        local okCar = pcall(function()
+        local okCar, eCar = pcall(function()
             local car = ac.getCar(i)
             if not car or not car.isAIControlled then return end
             if car.isInPitlane then Racecraft.pitRelease(i); return end   -- never touch a car doing a pit stop (player or AI); (H.MISTAKE_V2) drop a mistake's cap
@@ -417,7 +428,7 @@ function script.update(dt)
             end
             if G.controlGrip or behaviourOn then n = n + 1 end
         end)
-        if not okCar then luaErrors = luaErrors + 1 end
+        if not okCar then noteErr('car loop', eCar) end   -- one key for every car: the same fault in 18 cars logs once
     end
     managed = n
 
@@ -425,7 +436,7 @@ function script.update(dt)
     Recovery.CRASH_REPAIR = G.crashRepair
     Recovery.REPAIR_BODY  = G.repairOnTrack ~= false
     if G.recovery then Recovery.update(dt) end
-    if G.timedFuel and not pcall(Fuel.update, sim, dt) then luaErrors = luaErrors + 1 end   -- timed races: green fuel load + pit-box guard (lib/fuel.lua)
+    if G.timedFuel then pc('fuel', Fuel.update, sim, dt) end   -- timed races: green fuel load + pit-box guard (lib/fuel.lua)
     Troublespots.ENABLED = G.troubleSpots
     Troublespots.update(dt)
 
@@ -449,10 +460,10 @@ function script.update(dt)
     end) end
     Feed.ENABLED = G.raceFeed
     -- every module error counts toward luaErrors (the reports' error column), not only the per-car loop's (review 2026-09-28)
-    if G.raceFeed and not pcall(Feed.update, dt, { rc = Racecraft.last, recState = Recovery.stateOf, recentDrops = Recovery.recentDrops }) then luaErrors = luaErrors + 1 end
-    if not pcall(Contacts.update, dt) then luaErrors = luaErrors + 1 end
-    if not pcall(Fault.update, dt) then luaErrors = luaErrors + 1 end
-    if not pcall(Watch.update, dt) then luaErrors = luaErrors + 1 end
+    if G.raceFeed then pc('feed', Feed.update, dt, { rc = Racecraft.last, recState = Recovery.stateOf, recentDrops = Recovery.recentDrops }) end
+    pc('contacts', Contacts.update, dt)
+    pc('fault', Fault.update, dt)
+    pc('watch', Watch.update, dt)
     Telemetry.ENABLED = G.shareData == true
     Telemetry.VERSION = Update.LOCAL_VERSION or '0.0.0'
     Telemetry.UNATTENDED = Harness ~= nil and Harness.autopilot == true
@@ -464,7 +475,7 @@ function script.update(dt)
         harnessCamT = os.clock()
         pcall(function() ac.setCurrentCamera(ac.CameraMode.Drivable); ac.setCurrentDrivableCamera(ac.DrivableCamera.Chase) end)
     end
-    if Telemetry.ENABLED and not pcall(Telemetry.update, dt, telemetryCtx) then luaErrors = luaErrors + 1 end   -- the builder, not a table: built inside the pcall, once a second
+    if Telemetry.ENABLED then pc('telemetry', Telemetry.update, dt, telemetryCtx) end   -- the builder, not a table: built inside the pcall, once a second
     local tFrame1 = os.preciseClock and os.preciseClock() or os.clock()
     frameMs = frameMs + (tFrame1 - tFrame0) * 1000; frameN = frameN + 1
 end
