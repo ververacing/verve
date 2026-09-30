@@ -133,7 +133,7 @@ local CV = { END = 0.45, GAP = 0.006, LAT = 0.35, MARGIN = 6.0,          -- v1: 
              REACT_MIN = 0.15, REACT_THR = 0.05, PROX_NEAR = 15.0, PROX_FAR = 60.0, PRIO_OUT = 0.5,     -- reaction floor (s), caution-by-gap band (m), corner-priority outside line  -- side yield: their nose ahead of mine by less than this (m), lateral band that counts as alongside, throttle while tucking in
              RS_EDGE = 0.80, RS_MARGIN_M = 0.8, RS_CARW_M = 1.9, RS_BACK_M = 12.0, RS_FWD_M = 10.0, RS_REAREND = 0.35, RS_ADV = 0.5,
              ISO_REACH_M = 300.0, LONE_M = 50.0,
-             LANE_OFF = 0.45, LANE_APEX_M = 40.0, LANE_SCAN_M = 20.0, LANE_MAX_M = 900.0 }   -- turn-1 lanes: offset, hold this far past the apex, corner-scan step, give up looking this far out   -- alone-on-track: a car ahead within this is 'catchable' for a top-tier driver; nobody within this either way = lone   -- road space: usable edge (track units), margin + fallback car width (m), scan window behind me / past the car ahead (m), rear-end ease left while pulling out, run needed (x the aggression-scaled minimum)
+             LANE_OFF = 0.45, LANE_APEX_M = 40.0, LANE_SCAN_M = 20.0, LANE_MAX_M = 900.0, LANE_LOCAL_M = 12.0, LANE_COL_GAP_M = 1.5 }   -- turn-1 lanes: offset, hold this far past the apex, corner-scan step, give up looking this far out   -- alone-on-track: a car ahead within this is 'catchable' for a top-tier driver; nobody within this either way = lone   -- road space: usable edge (track units), margin + fallback car width (m), scan window behind me / past the car ahead (m), rear-end ease left while pulling out, run needed (x the aggression-scaled minimum)
 local cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, crossed = {}, mvThr = {}, mvBg = {} }      -- v2 state: lights-out clock, distance behind the front car, cars we throttled, guard applied, base brake hints
 R.cv2 = cv2                                                               -- (read by diag's contact trace)
 -- CONVOY v2 (harness A/B: R.CONVOY2_ON): throttle, never a speed cap. A follower closing on the car ahead on the
@@ -263,6 +263,12 @@ R.LANE_MIN_HALF = 0           -- m: no turn-1 lanes when the half-width at the f
                               -- Amalfi review 2026-09-24: a 0.45 lane on a 3 m road is the wall.
 R.GRID_HOLD_MAXLAT = 0        -- track units: a car whose grid lateral is beyond this is not held at it (0 = today; 0.6 = the road-space
                               -- edge). A plaza start puts the grid box off the road; holding the car there is the crash.
+-- (0.15, grid survey 2026-09-29) OL_LANES_LOCAL: judge each car's column against the slots within LANE_LOCAL_M of it (the AI line
+-- crosses some grids diagonally: the whole-grid median mislabelled 6 of 24 at the Nurburgring, Las Vegas, Highlands, Mosport), and
+-- give NO lane where the grid there is not two columns (single file: Targa, hill climbs; 3-wide / 3-2-3 / 4-2-4: Silverstone 1967,
+-- Monza 1966, Donington 1938, Deutschlandring). LANE_MIN_HALF then reads the road only up to the lane's end (turn 1), not 900 m
+-- (Spa and Monza narrow below 5 m after 350-570 m). false = today.
+R.OL_LANES_LOCAL = false
 R.OL_LANES = true             -- DEFAULT 2026-09-18 (owner): regression suite passed (Spa 8.7 vs 9.7, Barcelona 8.3 vs 8.7, Monza 12 laps not worse); stars at meter >= RS_OL_METER exempt
 R.CONCEDE = 0                 -- >0: a defender concedes the line to a tier-2 driver behind whose pace rating beats his by this much (A/B)
 R.ACX_LAP = 0                 -- ATTACK_CAUT_X applies from this lap on (0 = always; 2 = keep the opening laps as they are) (A/B)
@@ -1536,7 +1542,7 @@ function R.evaluate(i, dt)
         -- converging at once. Overrides the racecraft offset here (after the deadzone) so the fade
         -- stays smooth. Gated to a packed field (crowd) so it never fires on a lone practice lap.
         local laneHeld = false
-        if R.OL_LANES and myLap == 0 and crowd >= 1 and cv2.lane and cv2.back[i] and olS < cv2.lane.endS
+        if R.OL_LANES and myLap == 0 and crowd >= 1 and cv2.lane and cv2.back[i] and olS < cv2.lane.endS and not (cv2.lane.skip and cv2.lane.skip[i])
            and not (R.RS_OL_METER > 0 and Strategy.tierOf(i) >= 2 and Strategy.meterOK(R.RS_OL_METER)) and not (wild and R.WILD_START) then   -- stars shoot the gaps (owner)
             -- hold the side you STARTED on (your grid column), at a full lane's offset, until past the first apex. By column, not
             -- by row: assigning a row's two cars the same side sent them into each other off the line (Barcelona 2026-09-17,
@@ -1695,14 +1701,33 @@ function R.beginFrame()
                     local n = #lats
                     local mid = 0
                     if n > 0 then mid = (n % 2 == 0) and (lats[n / 2] + lats[n / 2 + 1]) / 2 or lats[(n + 1) / 2] end   -- true midpoint of a two-column grid
-                    local side = {}
-                    for j in pairs(sp) do side[j] = sgn((latNow[j] or 0) - mid) end
+                    local side, skip = {}, nil
+                    if R.OL_LANES_LOCAL then   -- (R.OL_LANES_LOCAL) local columns: split at the biggest lateral gap among the nearby slots
+                        skip = {}
+                        local win = CV.LANE_LOCAL_M / trackLen
+                        for j, xj in pairs(sp) do
+                            local ls = {}
+                            for k, xk in pairs(sp) do if math.abs(xk - xj) <= win then ls[#ls + 1] = latNow[k] or 0 end end
+                            table.sort(ls)
+                            local hw = 6.0
+                            pcall(function() local sd = ac.getTrackAISplineSides(xj % 1); if sd then hw = math.max(3.0, (sd.x + sd.y) * 0.5) end end)
+                            local cols, gap, split = 1, -1, 0
+                            for q = 2, #ls do
+                                local g = ls[q] - ls[q - 1]
+                                if g * hw > CV.LANE_COL_GAP_M then cols = cols + 1 end
+                                if g > gap then gap = g; split = (ls[q] + ls[q - 1]) / 2 end
+                            end
+                            if cols == 2 then side[j] = sgn((latNow[j] or 0) - split) else side[j] = 0; skip[j] = true end
+                        end
+                    else
+                        for j in pairs(sp) do side[j] = sgn((latNow[j] or 0) - mid) end
+                    end
                     local x = front
                     -- LANE_MIN_HALF: the road AHEAD decides. Sample the half-width along the window the lane scan walks and keep
                     -- the minimum (cv2.halfMin, read by the grid hold too): a grid on a wide plaza before a 3 m road (Amalfi) has
                     -- no lanes and no columns to hold. v1 read the front row only and passed there (2026-09-25).
                     cv2.halfMin = 6.0
-                    if R.LANE_MIN_HALF > 0 then
+                    if R.LANE_MIN_HALF > 0 and not R.OL_LANES_LOCAL then
                         pcall(function()
                             local xs, hm = front, 99
                             while xs < front + CV.LANE_MAX_M / trackLen do
@@ -1716,8 +1741,21 @@ function R.beginFrame()
                     end
                     while x < front + CV.LANE_MAX_M / trackLen do
                         local isC, ins = cornerAhead(x % 1)
-                        if isC and ins ~= 0 then cv2.lane = { inside = ins, mid = mid, side = side, endS = x + 2 * K.SAMPLE_D + LANE_APEX_M_frac(trackLen) }; break end
+                        if isC and ins ~= 0 then cv2.lane = { inside = ins, mid = mid, side = side, skip = skip, endS = x + 2 * K.SAMPLE_D + LANE_APEX_M_frac(trackLen) }; break end
                         x = x + CV.LANE_SCAN_M / trackLen
+                    end
+                    if R.OL_LANES_LOCAL and cv2.lane and R.LANE_MIN_HALF > 0 then   -- (R.OL_LANES_LOCAL) the road up to turn 1 only
+                        local hm = 99
+                        pcall(function()
+                            local xs = front
+                            while xs < cv2.lane.endS do
+                                local sd = ac.getTrackAISplineSides(xs % 1)
+                                if sd then local h = math.max(3.0, (sd.x + sd.y) * 0.5); if h < hm then hm = h end end
+                                xs = xs + CV.LANE_SCAN_M / trackLen
+                            end
+                        end)
+                        if hm < 99 then cv2.halfMin = hm end
+                        if cv2.halfMin < R.LANE_MIN_HALF then cv2.lane = nil end
                     end
                 end
                 for j, x in pairs(sp) do
