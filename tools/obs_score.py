@@ -23,6 +23,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERVE = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import race_metrics  # noqa: E402
+try:
+    import obs_matrix  # noqa: E402
+    KNOWN = sorted(obs_matrix.FIELDS, key=len, reverse=True)
+except Exception:
+    KNOWN = []
 
 FEEDS = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa", "verve_feed")
 LOGS = os.path.join(HERE, "harness_results", "csp_logs")
@@ -68,8 +73,11 @@ def main():
         stamp = name[10:25]
         k = name.find("_obs_")
         label = name[k + 1:-6] if k >= 0 else name[26:-6]   # obs_* labels; else everything after the stamp (track_label)
-        fm = re.match(r"obs_(pc\d)_\d{3}_(.+?)_(?=[a-z])", label)
-        pc, field = (fm.group(1), fm.group(2)) if fm else ("", label)
+        fm = re.match(r"obs_(pc\d)_\d{3}_(.+)$", label)
+        pc, field = ("", label)
+        if fm:
+            pc, rest = fm.group(1), fm.group(2)
+            field = next((f for f in KNOWN if rest.startswith(f + "_")), rest.split("_")[0])   # the longest known field name
         met = race_metrics.metrics(p)
         r = {"label": label, "pc": pc, "field": field, "stamp": stamp}
         if met.get("error"):
