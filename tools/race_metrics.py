@@ -16,11 +16,12 @@ def load(path):
     rows = [r for r in raw if "hdr" not in r and "ev" not in r]
     drops = [r for r in raw if r.get("ev") == "drop"]
     contacts = [r for r in raw if r.get("ev") == "contact"]     # diag's contact ring (damage jump OR collision event, dmg = severity)
-    return hdr, rows, drops, contacts
+    mvs = [r for r in raw if r.get("ev") == "mv"]               # judged manoeuvres (lib/strategy.lua S.episodes)
+    return hdr, rows, drops, contacts, mvs
 
 
 def metrics(path):
-    hdr, rows, drops, contacts = load(path)
+    hdr, rows, drops, contacts, mvs = load(path)
     if len(rows) < 3:
         return {"file": path, "error": "too few frames"}
     t0 = rows[0]["t"]
@@ -138,8 +139,16 @@ def metrics(path):
     # planned manoeuvres (diag >= 2026-09-14 "mvN"/"mvOK" session tallies from lib/strategy.lua)
     out["gate_moves"] = last.get("gateN", 0)
     out["mv_attempts"] = last.get("mvN", 0)
-    out["mv_ok"] = last.get("mvOK", 0)
+    out["mv_ok"] = last.get("mvOK", 0)          # follows S.VERDICT_V2 from dev0152 (a win = past the same-lap target on the road)
     out["mv_types"] = last.get("mvT", "")
+    # the diag 'mv' rows (dev0152 diag adds "how" and "lw"): verdicts by how the plan ended, strict and legacy wins.
+    # An unpatched diag writes neither: on dev0152 its rows mix cleared plans in with the rest and its "won" is the strict
+    # verdict, so the split and the legacy count are left blank rather than guessed (they would look valid and are not)
+    out["mv_verdicts"] = len(mvs)
+    tagged = any("how" in e for e in mvs)
+    for how in ("run", "left", "abort"):
+        out["mv_won_" + how] = sum(1 for e in mvs if e.get("how") == how and e.get("won")) if tagged else ""
+    out["mv_legacy_ok"] = sum(1 for e in mvs if e.get("lw")) if any("lw" in e for e in mvs) else ""
     out.update(tyre_views(rows, n))
     out.update(lapping_views(rows, n))
     out.update(reality_score(out, hdr))

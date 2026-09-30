@@ -2,7 +2,7 @@
 its own comment says, plus a STATUS column from the desk (verve_desk/docs/switch_status.json: name -> "status | why | when").
 Generated, so it never drifts from the code: re-run after any change and before a release.
 
-Covers R.* (racecraft / recovery / troublespots...), H.* (human), D.* (drivers, difficulty), T.*, F.* upper-case fields
+Covers R.* (racecraft / recovery / troublespots...), H.* (human), D.* (drivers, difficulty), S.* (strategy), T.*, F.* upper-case fields
 and the user settings in Verve.lua's DEFAULTS. K.* / CV.* tuning constants are counted, not listed (see the code).
 
     python tools/switch_registry.py                 # writes verve_desk/docs/SWITCHES.md
@@ -17,7 +17,7 @@ import re
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DESK = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa", "verve_desk", "docs")
-FIELD = re.compile(r"^(R|H|D|T|F)\.([A-Z][A-Z0-9_]*)\s*=\s*(.*?)\s*(?:--\s?(.*))?$")
+FIELD = re.compile(r"^(R|H|D|T|F|S)\.([A-Z][A-Z0-9_]*)\s*=\s*(.*?)\s*(?:--\s?(.*))?$")
 CONT = re.compile(r"^\s+--\s?(.*)$")
 
 

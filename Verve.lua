@@ -20,6 +20,25 @@ local Strategy  = require('lib.strategy')     -- planned manoeuvres (racecraft d
 local Fuel      = require('lib.fuel')         -- timed races: AC's 1.2-lap AI fuel load and its empty-tank pit loop (G.timedFuel)
 Racecraft.penCap = Fault.penCap            -- penalty throttle caps, read by racecraft's throttle setter (shared table)
 Fault.attach(Recovery.recentDrops, Feed.event)
+Racecraft.humanMv = Human.mv               -- (lib/human.lua H.MISTAKE_V2) a visible mistake's levers, applied by racecraft (shared table)
+Human.feedEvent = Feed.event               -- ...its feed events ('mistake', 'mistake_model', 'mistake_drop')
+Human.busy = function(i)                   -- ...never drawn or fired for a car recovery is driving or ramping back up
+    local ok, b = pcall(function() return Recovery.rampCap(i) < 1e9 or (Recovery.stateOf(i) or {}).rec == true end)
+    return ok and b == true
+end
+do  -- ...and an off it started heats the learned trouble-spot map at Human.MV_TS_W (the saved maps on players' machines)
+    local tsIncident = Troublespots.incident
+    Troublespots.incident = function(spline, cls, i, wt)   -- (i: the car; lib/troublespots.lua mutes a chaos driver's own)
+        if Human.MISTAKE_V2 and type(spline) == 'number' then
+            local now = os.clock()
+            for _, st in pairs(Human.mv) do
+                if st.sp and (st.t0 or now - (st.endT or -1e9) < Human.MV_TS_WIN)
+                   and math.abs((st.sp - spline + 0.5) % 1 - 0.5) < 0.02 then wt = (wt or 1) * Human.MV_TS_W; break end
+            end
+        end
+        return tsIncident(spline, cls, i, wt)
+    end
+end
 local Diag = nil; pcall(function() Diag = require('diag') end)   -- LOCAL dev diagnostics; absent in the shipped build
 -- LOCAL test harness (tools/harness.py writes harness.lua right before launching a run, and it self-expires):
 -- can put the player's car on autopilot, override settings for the run, and label the diagnostics file.
@@ -52,6 +71,7 @@ local DEFAULTS = {
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     timedFuel = true,    -- DEFAULT 0.14.6 (lib/fuel.lua): fuel a TIMED race's AI for the clock, stop AC's empty-tank pit loop
     paceAbs = true,      -- DEFAULT 0.14.8 (lib/drivers.lua D.PACE_ABS): a driver profile sets the car's pace outright
+    ratingV2 = false,    -- harness switch (lib/drivers.lua D.RATING_V2): real drivers rated as pros around a Veteran (owner 2026-09-29)
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
 
@@ -65,6 +85,7 @@ local S = ac.storage({
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     timedFuel = true,
     paceAbs = true,
+    ratingV2 = false,
     autosave = true, schema = 1,
 })
 -- settings migration: 0.12 made crash repair + trouble spots core (they were opt-in experiments; a day-long
@@ -178,6 +199,7 @@ function script.update(dt)
             if type(Harness.racecraft) == 'table' then for k, v in pairs(Harness.racecraft) do Racecraft[k] = v end end
             if type(Harness.fault) == 'table' then for k, v in pairs(Harness.fault) do Fault[k] = v end end
             if type(Harness.human) == 'table' then for k, v in pairs(Harness.human) do Human[k] = v end end
+            if type(Harness.strategy) == 'table' then for k, v in pairs(Harness.strategy) do Strategy[k] = v end end
             if Diag and Harness.label then Diag.label = tostring(Harness.label) end
         end
         -- AC loads to a pre-session screen and waits for the Drive button; nothing (not even the AI grid)
@@ -324,6 +346,7 @@ function script.update(dt)
     Difficulty.SLIDER_CURVE = G.sliderCurve ~= false
     Drivers.LOCKED = Career.active            -- career: the difficulty curve sets the field; profiles are off
     Drivers.PACE_ABS = G.paceAbs == true      -- (lib/drivers.lua) profile pace against a fixed reference
+    Drivers.RATING_V2 = G.ratingV2 == true    -- (lib/drivers.lua) real drivers rated as pros around a Veteran
     Drivers.autoMatch()                       -- once per session: AC driver names that match the roster get their profile
     Human.ENABLED       = true
     Human.HUMAN_VAR     = G.humanVar
@@ -337,6 +360,7 @@ function script.update(dt)
     Racecraft.VARIABILITY = G.intensity     -- spreads per-driver aggression across the field
     Overrides.autosave    = S.autosave
     Racecraft.beginFrame()
+    Drivers.WILD_ON = Racecraft.WILD ~= false   -- one master switch (Racecraft.WILD) for the chaos driver in every module
 
     local behaviourOn = G.humanVar or G.classPhys or G.racecraft
     local n = 0
@@ -347,7 +371,7 @@ function script.update(dt)
         local okCar = pcall(function()
             local car = ac.getCar(i)
             if not car or not car.isAIControlled then return end
-            if car.isInPitlane then return end          -- never touch a car doing a pit stop (player or AI)
+            if car.isInPitlane then Racecraft.pitRelease(i); return end   -- never touch a car doing a pit stop (player or AI); (H.MISTAKE_V2) drop a mistake's cap
             Drivers.applyPace(i, Difficulty.levelFor(i)) -- configured/career difficulty, then the driver profile's pace on top
             -- shift-point study (harness A/B): R.SHIFT_UP > 0 sets the AI's shift thresholds once per car (stops CSP's own dynamic logic)
             if Racecraft.SHIFT_UP > 0 and not shiftSet[i] and (car.rpmLimiter or 0) > 0 then
@@ -362,6 +386,7 @@ function script.update(dt)
             local gripApplied = nil
             if G.controlGrip then
                 local grip = G.baseGrip + gOff
+                if Racecraft.TOP_GRIP > 0 then grip = grip + Racecraft.TOP_GRIP * Racecraft.topW(Drivers.statsOf(i)) end   -- (R.TOP_GRIP) top-tier pace
                 -- launch assist: a brief traction boost off a standing start (AC's AI bogs down off the
                 -- line), fading out as the car gets up to speed. Only at the very start of lap 1.
                 if (car.lapCount or 0) == 0 and (car.splinePosition or 1) < 0.012 then
@@ -372,6 +397,8 @@ function script.update(dt)
                 physics.setExtraAIGrip(i, gripApplied)
             end
             local rcCaut = Racecraft.evaluate(i, dt)
+            local wd = (Racecraft.WILD ~= false and Racecraft.WILD_NOLEARN and Drivers.isWild(i)) or nil
+            Troublespots.mute[i] = wd; Recovery.wildCar[i] = wd   -- (R.WILD_NOLEARN) a chaos driver's own crashes don't teach the field
             local cautApplied = clamp(1.0 + cOff + rcCaut, 0.0, 16.0)
             if behaviourOn then
                 physics.setAICaution(i, cautApplied)
@@ -448,8 +475,9 @@ telemetryCtx = function()
     for _, k in ipairs({ 'humanErrors', 'drsDiscipline', 'controlGrip', 'careerCurve', 'intensity', 'rcIntensity', 'baseGrip', 'raceStart', 'sliderCurve', 'repairOnTrack', 'paceAbs' }) do
         local v = G[k]; settings[#settings + 1] = string.format('"%s":%s', k, type(v) == 'number' and string.format('%.2f', v) or (type(v) == 'string' and ('"' .. v .. '"') or tostring(v == true)))
     end
-    local pu, au = 0, 0
-    pcall(function() pu, au = Drivers.counts() end)
+    local pu, au, wu = 0, 0, 0
+    pcall(function() pu, au, wu = Drivers.counts() end)
+    if (wu or 0) > 0 then settings[#settings + 1] = string.format('"wildDrivers":%d', wu) end   -- chaos drivers: in the settings JSON (no schema change), only when one races
     local playerModel = ''; pcall(function() playerModel = ac.getCarID(0) or '' end)
     local cspBuild = nil; pcall(function() cspBuild = ac.getPatchVersionCode() end)
     return {
@@ -466,7 +494,7 @@ telemetryCtx = function()
         settingsJson = '{' .. table.concat(settings, ',') .. '}',
     }
 end
-ac.onRelease(function() pcall(function() local okS, simR = pcall(ac.getSim); if okS and simR then Telemetry.abort('quit', simR, telemetryCtx()) end end) end)
+ac.onRelease(function() pcall(function() local okS, simR = pcall(ac.getSim); if okS and simR then Telemetry.abort('quit', simR, telemetryCtx()) end end); pcall(Feed.finish) end)   -- (Feed.finish: race_end + the last lines; it was never called)
 
 ac.onSessionStart(function()
     -- harness: every session of a weekend needs its own Drive press + autopilot arming
@@ -506,6 +534,7 @@ local function driverComboFor(idx)
         for _, d in ipairs(Drivers.rosterFor(cls)) do
             if fl == '' or d.name:lower():find(fl, 1, true) then
                 if ui.selectable(d.name, d.key == curKey) then Drivers.setProfile(idx, d.key) end
+                if d.wild and ui.itemHovered() then ui.setTooltip('Chaos driver: top pace, elbows out, almost no margin. He dives from too far back, squeezes and rarely backs out. Expect contact. Never picked by Randomize.') end
             end
         end
     end)
@@ -528,6 +557,7 @@ local function driverGridList()
         -- (sameLine only when a label follows -- a dangling sameLine pulled the NEXT row up onto this one)
         if i == 0 then ui.sameLine(); ui.textColored(drv .. '  (you)', rgbm(0.6, 0.6, 0.6, 1))
         elseif not Drivers.profileOf(i) then ui.sameLine(); ui.textColored(drv, rgbm(0.5, 0.5, 0.5, 1)) end
+        if Drivers.isWild(i) then ui.sameLine(); ui.textColored('chaos', rgbm(0.95, 0.45, 0.3, 1)) end   -- the Wrecking Crew (a label follows this sameLine)
     end
 end
 
@@ -724,7 +754,7 @@ function script.windowMain()
         if G.racecraft then
             ui.text(string.format('Attacking: %d   Defending: %d', Racecraft.attacking or 0, Racecraft.defending or 0))
             ui.text('Track read as: ' .. (Racecraft.isOval and 'Oval / speedway' or 'Road course'))
-            if G.strategy ~= false then ui.text(string.format('Planned manoeuvres: %d (%d gained a place)', Strategy.attempts or 0, Strategy.ok or 0)) end
+            if G.strategy ~= false then ui.text(string.format('Planned manoeuvres: %d (%d got past)', Strategy.attempts or 0, Strategy.ok or 0)) end
         end
         if G.troubleSpots then
             ui.text(string.format('Trouble spots learned on this track: %d', Troublespots.hotCount()))

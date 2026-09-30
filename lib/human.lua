@@ -20,6 +20,7 @@ H.INTENSITY     = 0.5      -- variability scale (0 = none, 1 = subtle, 1.5 = str
 H.HUMAN_VAR     = true     -- personality / drift / fade / pressure / slipstream
 H.HUMAN_ERRORS  = true     -- occasional gentle bobbles
 H.CLASS_PHYSICS = true     -- cold-tyre warm-up / wet / dirty air
+H.WILD_ERR      = 1.5      -- mistake-rate multiplier for a wild profile (the Wrecking Crew; off with Racecraft.WILD=false); lockups allowed; 1 = off
 -- RainFX (CSP preview builds) models wet grip physically and puts cars on rain tyres: Verve's own wet rule, written for
 -- installs without rain physics, then stacks on top (Spa GT3 in the wet ran +35 % on lap time, real is +10-15 %; 2026-09-18).
 -- When the module is enabled these scale the grip cut and the extra caution; both are harness switches until the A/B is in.
@@ -47,6 +48,86 @@ H.STEER_CORNER  = 0.13     -- x lock = full cornering (STEER_FRAC only; not a po
                            -- about dev0146's corner dose. A/B arm 0.35 (the -1..1 reading the code was written for) also cuts
                            -- corner dirty air 50-80 %, most in the fast corners where following is hardest. Longer term,
                            -- lateral g (car.acceleration.x) would track aero load better than the steering angle.
+H.DIRTY_LAT = 0            -- >0 (from lap 1): dirty air fades out as the car ahead moves off my line - full within DIRTY_LAT/2 of it, none
+                           -- beyond DIRTY_LAT (track half-widths; 0.35 = about one car width on a 12 m road); pit-lane and parked cars
+                           -- (under 30 km/h) make no wake. 0 = today (spline gap only, every car)
+
+-- VISIBLE MISTAKES (H.MISTAKE_V2; owner 2026-09-28). Off = the bobble model below (MISTAKES / pickMistake), unchanged. On: ONE event of
+-- ~0.3-1.0 s (late brake + lock + run wide / missed apex / snap-and-lift) at a rate per LAP set by the driver's pace (Rookie 1 in 2 laps,
+-- Midfielder 4, Veteran 9, the top of a roster 15; consistency and risk against the archetype line move it up to +-25 %; an unprofiled car
+-- reads its applied level as pace, so a car at 100 is a Veteran); rare offs, very rare spins. Levers: a grip dip returned outside the grip
+-- slew, caution, and racecraft's brake hint / throttle limit / spline offset through H.mv. Race sessions only, never lap 0, never slot 0.
+-- A wild profile (the Wrecking Crew) is never a roster's top, reports tier 'wild' and keeps H.WILD_ERR on this rate too.
+H.MISTAKE_V2 = false
+H.NERVES_V2 = false        -- nerves x NERVES_K x (1 - cons); pressure only from a rival on the road (not pit lane, parked or lapped)
+H.NERVES_K = 2.0
+H.MV_RACE_ONLY = true
+H.MV_PACE = { 0.30, 0.60, 0.85, 0.95 }       -- anchors: Rookie, Midfielder, Veteran (drivers.lua archetypes), a top name
+H.MV_LAPS = { 2, 4, 9, 15 }                  -- laps per visible mistake at each anchor (log-interpolated; ends held)
+H.MV_OFF_P = { 0.06, 0.025, 0.010, 0.005 }   -- P(a lock-up or a missed apex becomes an off)
+H.MV_SPIN_P = { 0.005, 0, 0, 0 }             -- P(a lift becomes a spin), robust classes only
+H.MV_CR = 0.25             -- consistency and risk against the archetype line at the same pace move the rate by up to this fraction
+H.MV_TOP_FRAC = 0.10       -- the top this fraction of a roster bucket by pace gets the last anchor (15 laps)
+H.MV_ARCH = { { 0.30, 0.60, 0.50 }, { 0.60, 0.35, 0.80 }, { 0.85, 0.20, 0.95 } }   -- pace, risk, cons of the archetypes (the line)
+H.MV_RATE_X = 1.0
+H.MV_PRESS = 1.0           -- a rival right behind: rate x (1 + this x pressure x (1 - cons))
+H.MV_CLASS_RATE = { drift = 0 }
+H.MV_BIG_CLASS = { formula = 0.5, prototype = 0.5, hypercar = 0.5, nascar = 0, drift = 0 }   -- x the off and spin odds
+H.MV_MIN_LAP = 1
+H.MV_GAP_S = 8             -- s between two mistakes by one car
+H.MV_ARM_S = 10            -- s a drawn mistake waits for a moment (its own kind for the first half; a forced kind all of it)
+H.MV_LAP_S = 110           -- s per lap, only for a car with no spline
+H.MV_W_LOCK = 40
+H.MV_W_APEX = 35
+H.MV_W_LIFT = 25
+H.MV_SEV_SKILL = 1.5
+H.MV_AHEAD_M = 20          -- no lock-up with a car this close ahead (twice this for the late-brake set-up)
+H.MV_SIDE_M = 6
+H.MV_SIDE_LAT = 0.5
+H.MV_BRAKE_IN = 0.5
+H.MV_LOCK_KMH = 110
+H.MV_APEX_KMH = 60
+H.MV_LIFT_KMH = 50
+H.MV_LOCK_BH = 0.06        -- brake hint x (1 + this + LOCK_BH_SEV x severity): a HIGHER hint brakes later (racecraft.lua brake guard)
+H.MV_LOCK_BH_SEV = 0.08
+H.MV_LOCK_GRIP = 0.04
+H.MV_LOCK_GRIP_SEV = 0.05
+H.MV_LOCK_HOLD = 0.5
+H.MV_LOCK_LOOK_M = 60
+H.MV_WIDE = 0.25
+H.MV_WIDE_SEV = 0.35
+H.MV_WIDE_S = 1.3
+H.MV_GATHER = 0.12
+H.MV_APEX_S = 1.0
+H.MV_APEX_S_SEV = 0.6
+H.MV_APEX_CAUT = 0.15
+H.MV_APEX_CAUT_SEV = 0.25
+H.MV_APEX_GRIP = 0.015
+H.MV_SNAP = 0.03
+H.MV_SNAP_SEV = 0.03
+H.MV_SNAP_S = 0.25
+H.MV_SNAP_RAMP = 0.15      -- s the lift's grip dip takes to build (0.08 = the design's snap; see the probe gate)
+H.MV_LIFT_CAP_FIRST = false   -- the lift's throttle cap from 0 s and its dip from 0.1 s (the fallback if lifts spin cars)
+H.MV_LIFT_THR = 0.40
+H.MV_LIFT_THR_SEV = 0.25
+H.MV_LIFT_S = 0.35
+H.MV_LIFT_S_SEV = 0.45
+H.MV_BIG_BH = 0.12
+H.MV_BIG_GRIP = 0.06
+H.MV_SPIN_GRIP = 0.12
+H.MV_SPIN_S = 0.6
+H.MV_GRIP_FLOOR = -0.24
+H.MV_TS_W = 0.5            -- trouble-spot heat weight of an off a visible mistake started (Verve.lua wraps Troublespots.incident)
+H.MV_TS_WIN = 15           -- s after a mistake ends that an incident near it still counts as its off
+H.MV_FORCE_KIND = nil      -- probe only: 'lockup' / 'apex' / 'lift' (no other kind fires)
+H.mv = {}                  -- per car: this frame's levers for racecraft (R.humanMv); cleared in place, never reassigned
+H.mvSk = {}
+H.mvN = {}
+H.mvDrop = {}
+H.mvNear = {}
+H.mvTop = {}
+H.feedEvent = nil          -- Feed.event (set by Verve.lua)
+H.busy = nil               -- (set by Verve.lua) true while recovery drives a car or ramps it back up
 
 -- amplitudes
 local PERSONALITY_AMP = 0.020
@@ -288,19 +369,31 @@ local function dirtyair01(i, myCar)
         if corner <= 0 then return end
         local mySpline = myCar.splinePosition
         if mySpline == nil then return end
+        local lat = H.DIRTY_LAT > 0 and (myCar.lapCount or 0) >= 1   -- (H.DIRTY_LAT) the wake is behind a car, not beside it; lap 0 as before
+        local a = lat and ac.worldCoordinateToTrack(myCar.position) or nil
         local sim = ac.getSim()
         local best = 1e9
         for j = 0, sim.carsCount - 1 do
             if j ~= i then
                 local oc = ac.getCar(j)
-                if oc and oc.splinePosition then
+                if oc and oc.splinePosition and not (lat and (oc.isInPitlane or (oc.speedKmh or 0) < 30)) then
                     local gap = oc.splinePosition - mySpline
                     if gap < 0 then gap = gap + 1 end
-                    if gap > 0 and gap < best then best = gap end
+                    if a then
+                        -- (H.DIRTY_LAT) every car within DIRTY_GAP, each faded by its own offset from my line: the strongest wake wins
+                        -- (the nearest car, alongside, must not hide the one right in front a few metres further on)
+                        if gap > 0 and gap < DIRTY_GAP then
+                            local b = ac.worldCoordinateToTrack(oc.position)
+                            local w = 1 - gap / DIRTY_GAP
+                            if b then w = w * clamp(1 - (math.abs(a.x - b.x) - 0.5 * H.DIRTY_LAT) / (0.5 * H.DIRTY_LAT), 0, 1) end
+                            if w > d then d = w end
+                        end
+                    elseif gap > 0 and gap < best then best = gap end
                 end
             end
         end
-        if best < DIRTY_GAP then d = (1 - best / DIRTY_GAP) * corner end
+        if a then d = d * corner
+        elseif best < DIRTY_GAP then d = (1 - best / DIRTY_GAP) * corner end
     end)
     return d
 end
@@ -308,8 +401,8 @@ end
 -- How hard a car is cornering by its steering: 0 (straight) .. 1 (full cornering); st = car.steer, already a number.
 -- Default: the dev0146 reading (the degrees / 0.35). H.STEER_FRAC: the wheel angle as a fraction of lock, full at STEER_CORNER.
 local function lockOf(car) return car.steerLock end       -- read under pcall: an older CSP's car state may not have the field
-function H.cornering01(car, st)
-    if H.STEER_FRAC then
+function H.cornering01(car, st, frac)   -- frac: the unit-correct read (fraction of lock) whatever STEER_FRAC says (H.MISTAKE_V2's moments)
+    if H.STEER_FRAC or frac then
         local ok, lock = pcall(lockOf, car)
         if ok and type(lock) == "number" and lock > 0 then
             local full = H.STEER_CORNER
@@ -320,7 +413,226 @@ function H.cornering01(car, st)
     return clamp(math.abs(st) / 0.35, 0, 1)
 end
 
-function H.reset() scaled = false; H.wu = {} end     -- session start: re-derive the per-track distances
+-- ---- VISIBLE MISTAKES (H.MISTAKE_V2) ----
+local function mvAnchor(ys, x, logy)          -- ys at pace x on the H.MV_PACE anchors (log-interpolated when logy; ends held)
+    local xs = H.MV_PACE
+    if x <= xs[1] then return ys[1] end
+    for k = 1, #xs - 1 do
+        if x <= xs[k + 1] then
+            local f, a, b = (x - xs[k]) / (xs[k + 1] - xs[k]), ys[k], ys[k + 1]
+            if logy and a > 0 and b > 0 then return a * (b / a) ^ f end
+            return a + (b - a) * f
+        end
+    end
+    return ys[#xs]
+end
+function H.mvTopOf(prof)                      -- a named driver in the top MV_TOP_FRAC of his roster bucket by pace (never an archetype or a wild row)
+    if not prof or not prof.bucket or prof.bucket == 'archetype' or prof.wild or type(prof.pace) ~= 'number' then return false end
+    local th = H.mvTop[prof.bucket]
+    if th == nil then
+        local ps = {}
+        for _, d in ipairs(Drivers.DRIVERS or {}) do if d.bucket == prof.bucket and type(d.pace) == 'number' then ps[#ps + 1] = d.pace end end
+        table.sort(ps, function(a, b) return a > b end)
+        th = ps[math.max(1, math.ceil(H.MV_TOP_FRAC * #ps))] or 9
+        H.mvTop[prof.bucket] = th
+    end
+    return prof.pace >= th
+end
+-- one car's mistake profile, re-read every 5 s (a profile or a level can change mid-session)
+function H.mvSkill(i, prof, now)
+    local c = H.mvSk[i]
+    if c and now < c.t then return c end
+    c = c or {}
+    local ar = H.MV_ARCH
+    local pace = prof and prof.pace or clamp(Drivers.paceOf(i), ar[1][1], ar[#ar][1])   -- no profile: the applied level read as pace; 100 = a Veteran
+    local ra, ca = ar[1][2], ar[1][3]                                                     -- the archetype line (risk, cons) at this pace
+    if pace > ar[1][1] then
+        ra, ca = ar[#ar][2], ar[#ar][3]
+        for k = 1, #ar - 1 do
+            if pace <= ar[k + 1][1] then
+                local f = (pace - ar[k][1]) / (ar[k + 1][1] - ar[k][1])
+                ra = ar[k][2] + (ar[k + 1][2] - ar[k][2]) * f; ca = ar[k][3] + (ar[k + 1][3] - ar[k][3]) * f
+                break
+            end
+        end
+    end
+    local risk, cons = ra, ca
+    if prof then risk, cons = prof.risk or ra, prof.cons or ca end
+    local dev = clamp((cons - ca) - (risk - ra), -1, 1)                                  -- steadier and safer than the line at his pace: fewer
+    local laps = mvAnchor(H.MV_LAPS, pace, true) * clamp(1 + 2 * H.MV_CR * dev, 1 - H.MV_CR, 1 + H.MV_CR)
+    c.top = H.mvTopOf(prof)
+    if c.top then laps = math.max(laps, H.MV_LAPS[#H.MV_LAPS]) end
+    c.wild = prof ~= nil and prof.wild == true
+    if c.wild and Drivers.WILD_ON ~= false and H.WILD_ERR > 0 then laps = laps / H.WILD_ERR end   -- (H.WILD_ERR) the chaos driver, as in the bobble model
+    c.pace, c.risk, c.cons, c.prof, c.laps = pace, risk, cons, prof ~= nil, laps
+    c.pOff, c.pSpin = mvAnchor(H.MV_OFF_P, pace), mvAnchor(H.MV_SPIN_P, pace)
+    c.x = clamp((pace - H.MV_PACE[1]) / (H.MV_PACE[#H.MV_PACE] - H.MV_PACE[1]), 0, 1)
+    c.tier = (c.wild and 'wild') or (c.top and 'top') or (pace < 0.45 and 'rookie') or (pace < 0.725 and 'midfield') or (pace < 0.90 and 'veteran') or 'top'
+    c.cls = Classes.keyOf(i)
+    c.race = true
+    if H.MV_RACE_ONLY then pcall(function() c.race = ac.getSim().raceSessionType == ac.SessionType.Race end) end
+    c.t = now + 5
+    H.mvSk[i] = c
+    return c
+end
+function H.nervesX(i, prof, now) return H.NERVES_K * (1 - H.mvSkill(i, prof, now).cons) end
+-- pressure from a RIVAL behind (0..1 over PRESSURE_GAP), cached 0.3 s like pressure01; also notes the nearest car ahead (m), the nearest
+-- rival behind and the cars within MV_SIDE_M either way. Pit-lane cars, cars under 30 km/h and cars I have lapped never count.
+function H.pressureV2(i, myCar, now)
+    local nr = H.mvNear[i]
+    if nr and now - nr.t < 0.3 then return nr.p end
+    if not nr then nr = { side = {} }; H.mvNear[i] = nr end
+    nr.t, nr.p, nr.aheadM, nr.behind, nr.behindM = now, 0, 1e9, -1, 1e9
+    local ns = 0
+    pcall(function()
+        local my = myCar.splinePosition
+        if my == nil then return end
+        local sim = ac.getSim()
+        local len = (sim.trackLengthM or 0) > 200 and sim.trackLengthM or REF_LEN
+        local myRD = (myCar.lapCount or 0) + my
+        for j = 0, sim.carsCount - 1 do
+            local oc = j ~= i and ac.getCar(j)
+            if oc and oc.splinePosition and not oc.isInPitlane and (oc.speedKmh or 0) > 30 then
+                local b = my - oc.splinePosition; if b < 0 then b = b + 1 end
+                local d = 1 - b
+                if math.min(b, d) * len < H.MV_SIDE_M then ns = ns + 1; nr.side[ns] = j end
+                if d < b then
+                    if d * len < nr.aheadM then nr.aheadM = d * len end
+                elseif b * len < nr.behindM and myRD - ((oc.lapCount or 0) + oc.splinePosition) < 0.5 then
+                    nr.behindM, nr.behind = b * len, j                       -- a rival, not a car I have lapped
+                end
+            end
+        end
+        if nr.behindM / len < PRESSURE_GAP then nr.p = 1 - (nr.behindM / len) / PRESSURE_GAP end
+    end)
+    for k = #nr.side, ns + 1, -1 do nr.side[k] = nil end
+    return nr.p
+end
+local function mvEnv(e, a, h, r)               -- attack a s, hold h s, release r s
+    if e < a then return e / a elseif e < a + h then return 1 elseif e < a + h + r then return 1 - (e - a - h) / r end
+    return 0
+end
+local function mvOverlap(car, nr)              -- a car within MV_SIDE_M either way and MV_SIDE_LAT across (read only when a mistake fires)
+    if #nr.side == 0 then return false end
+    local busy = false
+    pcall(function()
+        local my = ac.worldCoordinateToTrack(car.position).x
+        for _, j in ipairs(nr.side) do
+            local oc = ac.getCar(j)
+            if oc and math.abs(ac.worldCoordinateToTrack(oc.position).x - my) < H.MV_SIDE_LAT then busy = true; break end
+        end
+    end)
+    return busy
+end
+local function mvDrop(i, st, why, now)         -- a drawn mistake that never happened: counted, so a rate miss can be told from a moment miss
+    H.mvDrop[i] = (H.mvDrop[i] or 0) + 1
+    if H.feedEvent then pcall(H.feedEvent, 'mistake_drop', string.format('"car":%d,"kind":"%s","why":"%s","wait_s":%.1f', i, tostring(st.k), why, now - (st.armT or now))) end
+    st.k = nil; st.next = now + 2
+end
+-- One car, one frame. Returns (grip dip >= 0, caution >= 0) and leaves this frame's racecraft levers in H.mv[i]:
+-- thr, bh, wide (+ lookM, big; racecraft fills side), lv = valid-until (os.clock)
+function H.mistakeV2(i, car, prof, cm, now)
+    local st = H.mv[i]
+    if not st then st = {}; H.mv[i] = st end
+    local sp, ds = car.splinePosition, 0
+    if sp and st.sp then ds = sp - st.sp; if ds < -0.5 then ds = ds + 1 end; if ds < 0 or ds > 0.05 then ds = 0 end
+    elseif not sp and st.lt and now - st.lt > 0 and now - st.lt <= 0.5 then ds = (now - st.lt) / H.MV_LAP_S end
+    st.sp, st.lt = sp, now
+    st.thr, st.bh, st.wide = nil, nil, nil
+    if i == 0 then return 0, 0 end                                     -- slot 0 (the harness autopilot; a player's own slot): never
+    local sk = H.mvSkill(i, prof, now)
+    if not sk.race then st.k, st.t0 = nil, nil; return 0, 0 end
+    local spd, br, gas, steer = car.speedKmh or 0, car.brake or 0, car.gas or 0, car.steer
+    local corner = type(steer) == 'number' and H.cornering01(car, steer, true) or 0
+    local frag = math.min(cm.mistake or 1, 1)
+    -- 1. idle: the hazard, per lap of progress
+    if not st.k and not st.t0 and now >= (st.next or 0) and (car.lapCount or 0) >= H.MV_MIN_LAP and (car.bestLapTimeMs or 0) > 0 then
+        if not sk.sent and H.feedEvent then
+            sk.sent = true
+            pcall(H.feedEvent, 'mistake_model', string.format('"car":%d,"pace":%.2f,"laps_per":%.1f,"rate_x":%.2f,"tier":"%s","top":%s,"profiled":%s,"cons":%.2f,"risk":%.2f',
+                i, sk.pace, sk.laps, H.MV_RATE_X * (H.MV_CLASS_RATE[sk.cls] or 1), sk.tier, tostring(sk.top == true), tostring(sk.prof), sk.cons, sk.risk))
+        end
+        local p = H.pressureV2(i, car, now)
+        local perLap = H.MV_RATE_X * (H.MV_CLASS_RATE[sk.cls] or 1) * (1 + H.MV_PRESS * p * (1 - sk.cons)) / sk.laps
+        if ds > 0 and math.random() < perLap * ds and not (H.busy and H.busy(i)) then
+            local r = math.random() * (H.MV_W_LOCK + H.MV_W_APEX + H.MV_W_LIFT)
+            st.k = H.MV_FORCE_KIND or ((r < H.MV_W_LOCK and 'lockup') or (r < H.MV_W_LOCK + H.MV_W_APEX and 'apex') or 'lift')
+            st.armT, st.sev = now, math.random() ^ (1 + H.MV_SEV_SKILL * sk.x)
+            local bigX = (H.MV_BIG_CLASS[sk.cls] or 1) * (1 - MISTAKE_CRASHY * Troublespots.crashiness())
+            st.big = math.random() < sk.pOff * bigX
+            st.spin = frag >= 0.9 and math.random() < sk.pSpin * bigX
+        end
+    end
+    -- 2. armed: its own moment for half of MV_ARM_S (a forced kind: all of it), then any
+    if st.k and not st.t0 then
+        local waited = now - st.armT
+        if waited > H.MV_ARM_S then mvDrop(i, st, 'no_moment', now); return 0, 0 end
+        H.pressureV2(i, car, now)
+        local nr = H.mvNear[i]
+        if st.k == 'lockup' and nr.aheadM >= 2 * H.MV_AHEAD_M and br < H.MV_BRAKE_IN and spd > H.MV_LOCK_KMH then
+            st.bh = 1 + H.MV_LOCK_BH + H.MV_LOCK_BH_SEV * st.sev + (st.big and H.MV_BIG_BH or 0); st.lv = now + 0.1   -- the late brake, held until the pedal is in
+        end
+        local ph
+        if br > H.MV_BRAKE_IN and spd > H.MV_LOCK_KMH and corner < 0.35 then ph = 'lockup'
+        elseif corner >= 0.5 and br < 0.2 and gas < 0.7 and spd > H.MV_APEX_KMH then ph = 'apex'
+        elseif gas >= 0.7 and corner >= 0.3 and spd > H.MV_LIFT_KMH then ph = 'lift' end
+        if ph and ph ~= st.k and (H.MV_FORCE_KIND or waited < 0.5 * H.MV_ARM_S) then ph = nil end
+        if ph == 'lockup' and nr.aheadM < H.MV_AHEAD_M then ph = nil end
+        if ph and ph ~= 'lift' and mvOverlap(car, nr) then ph = nil end
+        if not ph then return 0, 0 end
+        if H.busy and H.busy(i) then mvDrop(i, st, 'busy', now); return 0, 0 end
+        local own, sev, big = ph == st.k, st.sev, st.big and ph ~= 'lift'
+        st.k, st.t0, st.big, st.side, st.scanT = ph, now, big, nil, nil
+        if ph == 'lift' and st.spin then st.k = 'spin' end
+        if ph == 'lockup' then
+            st.bhv = 1 + H.MV_LOCK_BH + H.MV_LOCK_BH_SEV * sev + (big and H.MV_BIG_BH or 0)
+            st.gv = (H.MV_LOCK_GRIP + H.MV_LOCK_GRIP_SEV * sev) * (0.5 + 0.5 * frag) + (big and H.MV_BIG_GRIP or 0)
+            st.wv, st.dur = big and 1.0 or (H.MV_WIDE + H.MV_WIDE_SEV * sev), 0.2 + (big and 2.0 or H.MV_WIDE_S)
+        elseif ph == 'apex' then
+            st.wv, st.cv = big and 1.0 or (H.MV_WIDE + H.MV_WIDE_SEV * sev), H.MV_APEX_CAUT + H.MV_APEX_CAUT_SEV * sev
+            st.gv, st.dur = H.MV_APEX_GRIP + (big and H.MV_BIG_GRIP or 0), big and 2.2 or (H.MV_APEX_S + H.MV_APEX_S_SEV * sev)
+        elseif st.k == 'spin' then st.gv, st.dur = H.MV_SPIN_GRIP, H.MV_SPIN_S
+        else
+            st.gv, st.tv = (H.MV_SNAP + H.MV_SNAP_SEV * sev) * frag, H.MV_LIFT_THR - H.MV_LIFT_THR_SEV * sev
+            st.dur = H.MV_SNAP_S + H.MV_LIFT_S + H.MV_LIFT_S_SEV * sev
+        end
+        local est = (st.k == 'spin' and 3.0 or ((ph == 'apex' and 0.3 + 0.5 * sev) or (0.3 + 0.6 * sev))) + (big and 1.5 or 0)
+        H.mvN[i] = (H.mvN[i] or 0) + 1
+        if H.feedEvent then
+            pcall(H.feedEvent, 'mistake', string.format('"car":%d,"kind":"%s","sev":%.2f,"est_cost_s":%.2f,"off":%s,"lap":%d,"spline":%.4f,"pressure":%.2f,"behind":%d,"wait_s":%.1f,"own_moment":%s,"pace":%.2f,"laps_per":%.1f,"tier":"%s"',
+                i, st.k == 'apex' and 'missed_apex' or st.k, sev, est, tostring(big), car.lapCount or 0, sp or 0, nr.p, nr.behindM < 60 and nr.behind or -1, waited, tostring(own), sk.pace, sk.laps, sk.tier))
+        end
+    end
+    -- 3. under way: this frame's levers
+    if st.t0 then
+        local e = now - st.t0
+        if e >= st.dur then st.t0, st.k = nil, nil; st.endT = now; st.next = now + H.MV_GAP_S; return 0, 0 end
+        local g, c = 0, 0
+        if st.k == 'lockup' then
+            if e < H.MV_LOCK_HOLD then st.bh = st.bhv end
+            g = st.gv * mvEnv(e, 0.08, H.MV_LOCK_HOLD, 0.3)
+            if e > 0.2 then st.wide, st.lookM = st.wv, H.MV_LOCK_LOOK_M end
+            if e > st.dur - 0.5 then c = H.MV_GATHER end
+        elseif st.k == 'apex' then
+            st.wide, st.lookM, c = st.wv, 0, st.cv
+            g = st.gv * mvEnv(e, 0.2, st.dur - 0.5, 0.3)
+        elseif st.k == 'spin' then g = st.gv * mvEnv(e, 0.15, st.dur - 0.45, 0.3)
+        else                                                           -- lift: the snap (built over MV_SNAP_RAMP), then a throttle cap
+            local e2 = H.MV_LIFT_CAP_FIRST and e - 0.1 or e
+            if e2 > 0 then g = st.gv * mvEnv(e2, H.MV_SNAP_RAMP, H.MV_SNAP_S, 0.3) end
+            if H.MV_LIFT_CAP_FIRST or e > 0.5 * H.MV_SNAP_S then st.thr = st.tv end
+        end
+        st.lv = now + 0.1
+        return g, c
+    end
+    return 0, 0
+end
+
+function H.reset()     -- session start: re-derive the per-track distances; the visible-mistake state starts over
+    scaled = false; H.wu = {}
+    for k in pairs(H.mv) do H.mv[k] = nil end          -- in place: racecraft holds this table (R.humanMv)
+    H.mvSk, H.mvN, H.mvDrop, H.mvNear = {}, {}, {}, {}
+end
 
 -- Returns additive (gripOffset, cautionOffset). Player / slow / recovering cars -> 0,0.
 function H.getModifiers(i)
@@ -346,7 +658,7 @@ function H.getModifiers(i)
         vGrip = (prof and 0 or pers[i]) + dwv * DRIFT_AMP
         vCaut = -dwv * CAUTION_AMP
     end
-    local pGrip, pCaut = 0, 0
+    local pGrip, pCaut, mvG, mvC = 0, 0, 0, 0   -- mvG / mvC: H.MISTAKE_V2's dip and caution (full strength, outside the slew)
 
     pcall(function()
         local car = ac.getCar(i)
@@ -358,9 +670,13 @@ function H.getModifiers(i)
             vGrip = vGrip - FADE_MAX_GRIP * f
             vCaut = vCaut + FADE_MAX_CAUTION * f
 
-            local p = pressure01(i, car, now)
-            if p > 0 then vGrip = vGrip - PRESSURE_NERVES * p end
-            if H.HUMAN_ERRORS then
+            local p = H.NERVES_V2 and H.pressureV2(i, car, now) or pressure01(i, car, now)
+            if p > 0 then vGrip = vGrip - PRESSURE_NERVES * p * (H.NERVES_V2 and H.nervesX(i, prof, now) or 1) end
+            if H.HUMAN_ERRORS and H.MISTAKE_V2 and H.INTENSITY > 0 then
+                mistakeUntil[i] = nil                              -- the bobble model idles while V2 runs
+                local okM, g2, c2 = pcall(H.mistakeV2, i, car, prof, cm, now)   -- a V2 fault can't strip warm-up / wet / dirty air
+                if okM then mvG, mvC = g2 or 0, c2 or 0 end
+            elseif H.HUMAN_ERRORS then
                 local classGate = cm.mistake
                 local rate, sevScale, avoidSharp = 0, 1.0, false
                 if prof then
@@ -372,6 +688,7 @@ function H.getModifiers(i)
                     rate = (MISTAKE_BASE + MISTAKE_RATE * p) * (0.15 + 1.15 * prof.risk) * (0.30 + 0.70 * frag)
                     sevScale = 0.45 + 0.55 * frag
                     avoidSharp = frag < 0.7                       -- no sharp lockup on fragile cars
+                    if prof.wild and Drivers.WILD_ON ~= false and H.WILD_ERR ~= 1 then rate = rate * H.WILD_ERR; avoidSharp = false end   -- (H.WILD_ERR) the chaos driver
                 elseif classGate > 0 then
                     rate = (MISTAKE_BASE + MISTAKE_RATE * p) * classGate
                 end
@@ -433,7 +750,7 @@ function H.getModifiers(i)
 
     local k = H.INTENSITY
     local gripTarget = vGrip * k + pGrip
-    local cautionOff = vCaut * k + pCaut
+    local cautionOff = vCaut * k + pCaut + mvC
     if gripTarget > GRIP_MAX then gripTarget = GRIP_MAX elseif gripTarget < GRIP_MIN then gripTarget = GRIP_MIN end
 
     -- slew-limit grip (anti mid-corner snap)
@@ -447,6 +764,7 @@ function H.getModifiers(i)
     elseif gripTarget < cur - step then cur = cur - step
     else cur = gripTarget end
     smoothedGrip[i] = cur
+    if mvG ~= 0 then return math.max(cur - mvG, H.MV_GRIP_FLOOR), cautionOff end   -- a mistake's dip: fast, outside the slew
     return cur, cautionOff
 end
 

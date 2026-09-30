@@ -344,6 +344,7 @@ function R.lapsOf(i)
     return math.max(ownLaps[i] or 0, car.lapCount or 0)
 end
 R.dropsOff = false         -- repositioning switched off for this session (rate too poor)
+R.wildCar = {}             -- [i] = true (Verve.lua, Racecraft.WILD_NOLEARN): a chaos driver's drops don't count toward that switch-off rate
 
 -- may this car be repositioned automatically right now?
 local function dropsAllowed(i)
@@ -361,7 +362,7 @@ local function judgeDrops(now)
             local c = ac.getCar(d.i)
             if c and (c.speedKmh or 0) > DROP_OK_SPEED then
                 d.ok = true; R.dropOK = R.dropOK + 1
-                if (d.sus or 0) < R.DROP_RATE_SUSP then R.rateN = R.rateN + 1; R.rateOK = R.rateOK + 1 end
+                if (d.sus or 0) < R.DROP_RATE_SUSP and not R.wildCar[d.i] then R.rateN = R.rateN + 1; R.rateOK = R.rateOK + 1 end
             elseif now - d.t > DROP_JUDGE_T or (c and c.isRetired) then
                 d.ok = false
                 local retry = R.GATE_FAIL_RETRY and d.gs and R.gateRetry[d.i] == nil and not (c and c.isRetired)   -- (a parked car: parkInPits set false)
@@ -370,7 +371,7 @@ local function judgeDrops(now)
                 -- retry was granted, judged after it, must not void it: the retry's own record decides. Review 2026-09-28)
                 -- a failure that earns a retry is not scored: the retry is judged on its own. (Counting it dragged
                 -- the session rate down on Baku, where castle-entry landings fail: 4 misses in 5 turn repositioning off.)
-                if not retry and (d.sus or 0) < R.DROP_RATE_SUSP then R.rateN = R.rateN + 1 end
+                if not retry and (d.sus or 0) < R.DROP_RATE_SUSP and not R.wildCar[d.i] then R.rateN = R.rateN + 1 end
             end
         end
         if d.ok == nil or now - d.t < DROP_JUDGE_T + 30 then keep[#keep + 1] = d end   -- (kept a bit longer for the diag trace)
@@ -483,7 +484,7 @@ end
 local function parkInPits(i, why)
     if parked[i] or not R.raceSession or i == 0 then return end   -- never the player's car: a human may take the wheel back
     parked[i] = true
-    if type(R.gateRetry[i]) == 'number' then R.rateN = R.rateN + 1 end   -- (GATE_FAIL_RETRY) a parked car can't use a retry: a granted one
+    if type(R.gateRetry[i]) == 'number' and not R.wildCar[i] then R.rateN = R.rateN + 1 end   -- (GATE_FAIL_RETRY) a parked car can't use a retry: a granted one
     R.gateRetry[i] = false                                               -- counts as the miss it was, and none is granted after this
     -- THE LEDGER: why, and the damage as it was. The teleport below zeroes car.damage, which is how 40 parked Baku
     -- cars read "dmg 0" and were called repeat offenders (2026-09-24). Read first, kept on R for stateOf and the diag.
@@ -1035,7 +1036,7 @@ function R.update(dt)
             episodeT[i] = (episodeT[i] or 0) + dt
             if not reported[i] then          -- log this incident's location for trouble-spot learning (once)
                 reported[i] = true
-                pcall(function() Troublespots.incident(car.splinePosition, Classes.keyOf(i)) end)
+                pcall(function() Troublespots.incident(car.splinePosition, Classes.keyOf(i), i) end)   -- (i: a chaos driver's own crash is muted)
             end
             -- Only hand a car back to AC's retirement once we've genuinely exhausted our options:
             -- either we already REPAIRED it and it STILL won't move after a good while (so it's wedged

@@ -77,12 +77,17 @@ def acs_running():
     return "acs.exe" in out
 
 
+OWNED = {"game": False, "lua": False}   # what THIS process started / wrote: cleanup touches nothing else (2026-09-28: an
+                                        # import or --help from a scratch copy force-killed a live race through this hook)
+
+
 def cleanup():
     """Whatever happens (Ctrl+C, crash, kill), never leave a game instance or a live harness.lua behind --
     a leftover blocks the next run and a stale harness.lua could hijack a real race (it self-expires, but
-    don't rely on it)."""
-    subprocess.run(["taskkill", "/IM", "acs.exe", "/F"], capture_output=True)
-    if os.path.exists(HARNESS_LUA):
+    don't rely on it). Only what this process launched or wrote: an import, --help or a refused run leaves the game alone."""
+    if OWNED["game"]:
+        subprocess.run(["taskkill", "/IM", "acs.exe", "/F"], capture_output=True)
+    if OWNED["lua"] and os.path.exists(HARNESS_LUA):
         try:
             os.remove(HARNESS_LUA)
         except OSError:
@@ -413,8 +418,10 @@ def write_harness_lua(arm, ttl_s, ncars=0, laps=0, weekend=False):
         "troublespots": arm.get("troublespots", {}),   # e.g. {"FRESH": true}: this run neither loads nor saves the learned map
         "fault": arm.get("fault", {}),                 # lib/fault.lua switches, e.g. {"ENABLED": true, "ENFORCE": false}
         "human": arm.get("human", {}),                 # lib/human.lua fields, e.g. {"RAINFX_GRIP": 1.0}
+        "strategy": arm.get("strategy", {}),           # lib/strategy.lua S.* fields (Verve.lua merges them), e.g. {"SETUP_X": 0}
         "fuel": arm.get("fuel", 0),                    # litres for EVERY car when the autopilot arms (0 = AC's own load); a quali-load pace probe
     }
+    OWNED["lua"] = True
     with open(HARNESS_LUA, "w", encoding="utf-8") as f:
         f.write("-- written by tools/harness.py; self-expiring; never shipped\nreturn " + lua_literal(body) + "\n")
 
@@ -863,6 +870,7 @@ def run_once(args, arm, run_idx):
     pure_bak = apply_pure_for_weather(getattr(args, "weather_type", None))
     t_launch = time.time()
     proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
+    OWNED["game"] = True
     # AC occasionally dies at load (a crash box, or an exit within a minute); one relaunch after a pause fixes it
     csp_log = os.path.join(DOCS, "logs", "custom_shaders_patch.log")
     for attempt in range(3):
@@ -1057,7 +1065,7 @@ def run_once(args, arm, run_idx):
     if rt_med is not None and rt_med < realtime.SUSPECT:
         print(f"  !! the sim ran at {rt_med:.2f}x real time over {rt_laps} laps (CPU occupancy): "
               f"treat this race's timings as suspect")
-    m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots", "fault", "csp", "human", "fuel")}, sort_keys=True)
+    m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots", "fault", "csp", "human", "strategy", "fuel")}, sort_keys=True)
     m["weather"] = args.weather or ""
     m["ambient_c"] = args.ambient if args.ambient is not None else DEFAULT_AMBIENT
     m["road_c"] = args.road if args.road is not None else DEFAULT_ROAD
@@ -1094,6 +1102,9 @@ def run_once(args, arm, run_idx):
     return m
 
 
+BASE148 = {"racecraft": {"AGGR_BASE_FIX": True}, "recovery": {"GATE_FAIL_RETRY": True}, "settings": {"paceAbs": True}}   # --base148
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--track"); ap.add_argument("--layout")
@@ -1122,6 +1133,7 @@ def main():
     ap.add_argument("--recovery", help="JSON of Recovery module fields to override for the run, e.g. {\"DROP_API\":\"car\"}")
     ap.add_argument("--racecraft", help="JSON of Racecraft module fields to override for the run")
     ap.add_argument("--troublespots", help="JSON of Troublespots module fields, e.g. {\"FRESH\":true} = clean learned map for this run")
+    ap.add_argument("--strategy", help="JSON of Strategy module fields (lib/strategy.lua S.*), e.g. {\"SETUP_X\":0}")
     ap.add_argument("--human", help="JSON of Human module fields, e.g. {\"RAINFX_GRIP\":1.0,\"RAINFX_CAUT\":1.0}")
     ap.add_argument("--csp", help="JSON of CSP per-user config overrides for this run only, e.g. {\"new_behaviour\":{\"AI_RACE_RUBBERBANDING\":{\"ENABLED\":1}}}")
     ap.add_argument("--minutes", type=int, default=0, help="TIMED race of N minutes (LAPS 0; AC adds a lap after the clock). --laps then only fills race.ini's RACE_LAPS "
@@ -1135,6 +1147,9 @@ def main():
     ap.add_argument("--ab", nargs=2, metavar=("A.json", "B.json"), help="two arm files; runs alternate A,B,A,B...")
     ap.add_argument("--lap-budget-s", type=int, default=150, help="seconds allowed per lap before a run is killed")
     ap.add_argument("--ai-level", type=int, default=0, help="force every AI car's AI_LEVEL (career events and --models grids alike); 0 = as configured")
+    ap.add_argument("--base148", action="store_true", help="a build cut before v0.14.8 (wild0151, dev0152) run on the v0.14.8 defaults: merges "
+                    "AGGR_BASE_FIX into --racecraft, GATE_FAIL_RETRY into --recovery and paceAbs into --settings (a key given explicitly wins); "
+                    "the merged values land in results.csv's arm column")
     args = ap.parse_args()
     global SKIN_MATCH, AI_AGGRESSION
     SKIN_MATCH = getattr(args, "skin_match", None)
@@ -1149,8 +1164,21 @@ def main():
     else:
         arms = [{"label": args.label, "settings": json.loads(args.settings) if args.settings else {}, "drivers": args.drivers, "profiles": args.profiles,
                  "recovery": json.loads(args.recovery) if args.recovery else {}, "racecraft": json.loads(args.racecraft) if args.racecraft else {},
-                 "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}, "human": json.loads(args.human) if args.human else {}, "fuel": args.fuel,
+                 "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}, "human": json.loads(args.human) if args.human else {}, "strategy": json.loads(args.strategy) if args.strategy else {}, "fuel": args.fuel,
                  "assists": json.loads(args.assists) if args.assists else {}, "stop_laps": args.stop_laps}]
+    if args.base148:
+        for arm in arms:
+            for mod, kv in BASE148.items():
+                d = arm.get(mod) or {}
+                for k, v in kv.items():
+                    d.setdefault(k, v)
+                arm[mod] = d
+    try:   # the dev0152 verdict columns need the patched diag.lua (spec 0151 section 3); without it they read blank
+        dsrc = open(os.path.join(VERVE, "diag.lua"), encoding="utf-8", errors="replace").read()
+        if '"ev":"mv"' in dsrc and '"how"' not in dsrc:
+            print('!! diag.lua writes no "how" / "lw" on its mv rows: mv_won_* and mv_legacy_ok will be blank (patch diag.lua first)')
+    except OSError:
+        pass
 
     results = []
     for r in range(args.runs):

@@ -38,7 +38,7 @@ local CLASS_BUCKET = {
 }
 D.DRIVERS = {
     -- F1-modern
-    { key='max_verstappen', name='Pass Nearstappen', say='pass NEER-stuh-pen', bucket='f1', pace=0.87, aggr=0.76, risk=0.29, cons=0.93 },
+    { key='max_verstappen', name='Pass Nearstappen', say='pass NEER-stuh-pen', bucket='f1', pace=1.00, aggr=0.90, risk=0.29, cons=0.95 },   -- owner 2026-09-29: the best on the grid at pace and aggression,
     { key='lewis_hamilton', name='Bruisin Yamilton', say='BROO-zin yuh-MIL-tun', bucket='f1', pace=0.96, aggr=0.53, risk=0.23, cons=0.97 },
     { key='lando_norris', name='Wambo Boris', say='WOM-boh BOR-iss', bucket='f1', pace=0.71, aggr=0.53, risk=0.20, cons=0.86 },
     { key='charles_leclerc', name='Charlie LeKlay', say='CHAR-lee luh-KLAY', bucket='f1', pace=0.71, aggr=0.60, risk=0.46, cons=0.66 },
@@ -451,13 +451,47 @@ D.DRIVERS = {
     { key='arch_rookie',     name='Rookie',     bucket='archetype', pace=0.30, aggr=0.50, risk=0.60, cons=0.50 },
     { key='arch_midfield',   name='Midfielder', bucket='archetype', pace=0.60, aggr=0.55, risk=0.35, cons=0.80 },
     { key='arch_veteran',    name='Veteran',    bucket='archetype', pace=0.85, aggr=0.55, risk=0.20, cons=0.95 },
+
+    -- Chaos driver (owner 2026-09-28): not a person, not an archetype. Listed at the top of every class's picker with the
+    -- archetypes; never picked by Randomize or name matching; never the pace anchor. wild=true lets racecraft's R.WILD layer
+    -- relax his margins (R.WILD=false: the row's numbers only). Keep the field order key, name, say, bucket: the regexes in
+    -- tools/harness.py and tools/apply_names.py depend on it.
+    { key='wrecking_crew', name='Wrecking Crew', say='RECK-ing crew', bucket='wild', pace=0.95, aggr=1.00, risk=1.00, cons=0.10, wild=true },
 }
 
 -- indexes
-local BY_KEY, ARCHETYPES = {}, {}
+local BY_KEY, ARCHETYPES, WILD = {}, {}, {}
 for _, d in ipairs(D.DRIVERS) do
     BY_KEY[d.key] = d
-    if d.bucket == 'archetype' then ARCHETYPES[#ARCHETYPES + 1] = d end
+    if d.bucket == 'archetype' then ARCHETYPES[#ARCHETYPES + 1] = d elseif d.wild then WILD[#WILD + 1] = d end
+end
+
+-- D.RATING_V2 (setting ratingV2; owner 2026-09-29): every real driver is a pro. Each roster's pace is compressed into
+-- V2_LO..V2_HI on a square-root curve that keeps the order (the weakest near V2_LO, a roster's solid middle at about a
+-- Veteran, its best at V2_HI), the Veteran moves up to V2_VET, and pace maps to lap time against V2_REF (1.00: the best
+-- name on the grid is the one at the ceiling) with V2_K % per 1.0 of rating (Rookie 0.30 stays +10 %). Off = 0.14.8.
+D.RATING_V2 = false
+D.V2_LO, D.V2_HI, D.V2_VET, D.V2_MID, D.V2_REF, D.V2_K = 0.86, 1.00, 0.93, 0.65, 1.00, 10 / 0.70
+D.V2_VET_AGGR = 0.65
+local V2 = {}
+do
+    local lo, hi = {}, {}
+    for _, d in ipairs(D.DRIVERS) do
+        if d.bucket ~= 'archetype' and not d.wild then
+            lo[d.bucket] = math.min(lo[d.bucket] or 1, d.pace); hi[d.bucket] = math.max(hi[d.bucket] or 0, d.pace)
+        end
+    end
+    for _, d in ipairs(D.DRIVERS) do
+        local c = {}; for k, v in pairs(d) do c[k] = v end
+        if d.key == 'arch_veteran' then c.pace = D.V2_VET; c.aggr = D.V2_VET_AGGR   -- (a Veteran races harder than a weak pro, e.g. Stroll 0.60)
+        elseif d.key == 'arch_midfield' then c.pace = D.V2_MID
+        elseif d.bucket ~= 'archetype' and not d.wild then
+            local l, h = lo[d.bucket], hi[d.bucket]
+            local n = (h and l and h > l) and clamp((d.pace - l) / (h - l), 0, 1) or 1
+            c.pace = D.V2_LO + math.sqrt(n) * (D.V2_HI - D.V2_LO)
+        end
+        V2[d.key] = c
+    end
 end
 
 function D.nameOf(key) local d = BY_KEY[key]; return d and d.name or key end
@@ -466,6 +500,7 @@ function D.rosterFor(classKey)
     local bucket = CLASS_BUCKET[classKey]
     local out = {}
     for _, d in ipairs(ARCHETYPES) do out[#out + 1] = d end     -- archetypes first, then the class roster
+    for _, d in ipairs(WILD) do out[#out + 1] = d end           -- (the chaos driver sits with them, in every class)
     if bucket then
         for _, d in ipairs(D.DRIVERS) do if d.bucket == bucket then out[#out + 1] = d end end
     end
@@ -492,7 +527,7 @@ local function recomputeFieldMaxPace()
     for i, k in pairs(assigned) do
         if i ~= 0 or slot0AI then
             local d = BY_KEY[k]
-            if d and d.pace and d.pace > m then m = d.pace end
+            if d and d.pace and d.pace > m and not d.wild then m = d.pace end   -- (the chaos driver is never the anchor)
         end
     end
     fieldMaxPace = (m > 0) and m or 1.0
@@ -526,13 +561,16 @@ function D.profileOf(i) return assigned[i] end
 -- Match AC's own driver names to the roster (Content Manager grids often carry real names): a slot whose
 -- in-game name is a known driver gets that profile automatically. Unknown/random names stay unassigned.
 local matched = false
+-- D.AUTO_MATCH (owner 2026-09-29: off): a car whose AC driver name equals a roster name (Verve's own display names) got
+-- that profile automatically. A profile now applies only when the player picks one (true = the old behaviour).
+D.AUTO_MATCH = false
 function D.autoMatch()
-    if matched then return end
+    if matched or not D.AUTO_MATCH then return end
     matched = true
     pcall(function()
         local sim = ac.getSim(); if not sim then return end
         local byName = {}
-        for _, d in ipairs(D.DRIVERS) do byName[d.name:lower()] = d end
+        for _, d in ipairs(D.DRIVERS) do if not d.wild then byName[d.name:lower()] = d end end   -- (never the chaos driver)
         for i = 1, sim.carsCount - 1 do
             local car = ac.getCar(i)
             if car and car.isAIControlled and not assigned[i] then
@@ -546,13 +584,19 @@ end
 function D.statsOf(i)
     local k = assigned[i]
     if not k then return nil end
+    if D.RATING_V2 then return V2[k] or BY_KEY[k] end
     return BY_KEY[k]
 end
+D.WILD_ON = true   -- mirrored from Racecraft.WILD each frame (Verve.lua): one master switch for the chaos driver in every module
+function D.isWild(i) local k = assigned[i]; local d = k and BY_KEY[k]; return d ~= nil and d.wild == true end   -- the chaos driver (wild row)
 function D.anyAssigned() for _ in pairs(assigned) do return true end return false end
 function D.clearAll()
     for i in pairs(assigned) do assigned[i] = nil; applyName(i) end
     assigned = {}; paceDirty = true
 end
+-- (declared before D.reset: when it sat further down, D.reset's `named0 = false` wrote a global and slot 0's public name
+-- was never re-applied in a new session; found 2026-09-28)
+local named0 = false               -- slot 0's public name applied (needs the car to be AI-driven, which lags the autopilot switch by a frame)
 function D.reset(keepPicks)
     -- keepPicks: the same weekend moved to its next session (practice -> qualifying -> race). The picks and AC's
     -- original names stay; the levels are re-read (AC re-creates them per session) and the names re-applied.
@@ -586,11 +630,11 @@ function D.fillGrid(key)
     end)
 end
 
--- how many real-name profiles vs archetypes are on the grid (telemetry)
+-- how many real-name profiles vs archetypes (vs chaos drivers) are on the grid (telemetry)
 function D.counts()
-    local real, arch = 0, 0
-    for _, k in pairs(assigned) do local d = BY_KEY[k]; if d then if d.bucket == 'archetype' then arch = arch + 1 else real = real + 1 end end end
-    return real, arch
+    local real, arch, wild = 0, 0, 0
+    for _, k in pairs(assigned) do local d = BY_KEY[k]; if d then if d.bucket == 'archetype' then arch = arch + 1 elseif d.wild then wild = wild + 1 else real = real + 1 end end end
+    return real, arch, wild
 end
 
 function D.randomizeGrid()
@@ -625,7 +669,6 @@ end
 
 -- `base` = the level the difficulty module wants for this car (configured / career curve); nil = AC's own.
 -- A driver profile spreads the field BELOW that base by pace rating (the fastest profile runs at base).
-local named0 = false               -- slot 0's public name applied (needs the car to be AI-driven, which lags the autopilot switch by a frame)
 function D.applyPace(i, base)
     pcall(function()
         if i == 0 and not named0 and assigned[0] then named0 = true; applyName(0) end
@@ -649,8 +692,11 @@ function D.applyPace(i, base)
             -- the fastest profile on the grid runs at `base`; the rest are spread BELOW it by pace rating,
             -- in lap-time terms (SPREAD_PCT per 1.0 of rating), converted to a level through the measured curve
             local basePct = Difficulty.levelToPct(base)
-            if D.PACE_ABS and not D.LOCKED then   -- (a career event keeps its difficulty curve: an auto-matched name must not override it)
-                lvl = Difficulty.levelForPct(i, math.max(0, (D.PACE_REF - st.pace) * D.PACE_K))   -- (D.PACE_ABS) the profile's own pace
+            if st.wild and not D.PACE_ABS then lvl = base    -- the chaos driver runs at the slider level (he is never the anchor)
+            elseif D.PACE_ABS and not D.LOCKED then   -- (a career event keeps its difficulty curve: an auto-matched name must not override it)
+                local ref, k = D.PACE_REF, D.PACE_K
+                if D.RATING_V2 then ref, k = D.V2_REF, D.V2_K end
+                lvl = Difficulty.levelForPct(i, math.max(0, (ref - st.pace) * k))   -- (D.PACE_ABS) the profile's own pace
             else
                 lvl = math.min(base, Difficulty.pctToLevel(basePct + (fieldMaxPace - st.pace) * SPREAD_PCT))
             end
@@ -661,5 +707,28 @@ function D.applyPace(i, base)
 end
 
 function D.appliedLevel(i) return lastApplied[i] end   -- what Verve last wrote (the conflict watchdog reads it back)
+
+-- A car's pace on the profile scale (Rookie 0.30 .. 0.90 = expert, the paceAbs reference): its profile's, else read back from the level
+-- Verve applied, through its class curve (the inverse of paceAbs: level 100 -> 0.90, slider 90 -> 0.60, slider 80 -> 0.30; a career
+-- band or a spread grid reads as what the car actually runs at). One scale for the manoeuvre tier (strategy S.TIER_MODE 1) and the
+-- visible-mistake rate (human H.MISTAKE_V2). Cached 2 s per car.
+D.paceCache = {}
+function D.paceOf(i)
+    local now = os.clock()
+    local c = D.paceCache[i]
+    if c and now - c.t < 2.0 then return c.p end
+    local st = D.statsOf(i)
+    local p = st and st.pace
+    if type(p) ~= 'number' then
+        local lvl = lastApplied[i]
+        if type(lvl) ~= 'number' then pcall(function() lvl = ac.getCar(i).aiLevel end) end
+        if type(lvl) ~= 'number' or lvl <= 0 then lvl = 1 end
+        p = D.PACE_REF - Difficulty.pctOf(i, lvl) / D.PACE_K
+    end
+    p = clamp(p, 0, 1)
+    if not c then c = {}; D.paceCache[i] = c end
+    c.p, c.t = p, now
+    return p
+end
 
 return D

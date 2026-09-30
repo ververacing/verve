@@ -10,7 +10,7 @@ veteran/star. The owner's eye test 2026-09-17: "veterans get held up by slower c
 import argparse, glob, json, os, re, statistics as st
 from collections import defaultdict
 
-TIER = {"arch_rookie": 0, "arch_midfield": 1, "arch_veteran": 2}
+TIER = {"arch_rookie": 0, "arch_midfield": 1, "arch_veteran": 2, "wrecking_crew": 2}   # (the chaos driver runs at expert pace)
 GAP_M = 40.0
 
 def parse_profiles(s, n):
