@@ -149,11 +149,19 @@ end
 function D.levelFor(i)
     if not D.ENABLED then return nil end
     local sim = ac.getSim(); if not sim then return nil end
-    local idx = sim.currentSessionIndex or 0
+    -- (0.15.1) the two curve options are part of the key: flipped mid-session they apply now, not next session (audit 2026-09-30)
+    local idx = (sim.currentSessionIndex or 0) * 4 + (D.SLIDER_CURVE and 1 or 0) + (D.CAREER_CURVE and 2 or 0)
     if cachedFor ~= idx then cache = {}; cachedFor = idx end
     local v = cache[i]
     if v == nil then v = compute(i) or false; cache[i] = v end
     return v or nil
+end
+
+-- (0.15.1) the launcher's own level for car i (what AC runs with Verve off), 0..1.2; nil when unknown
+function D.stockLevel(i)
+    local v = Career.carLevels[i] or Career.meter
+    if type(v) == 'number' and v > 0 then return math.max(0.3, math.min(1.2, v / 100)) end   -- (not LEVEL_MIN: stock AC runs what the launcher says)
+    return nil
 end
 
 function D.describe()

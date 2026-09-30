@@ -269,6 +269,7 @@ R.GRID_HOLD_MAXLAT = 0        -- track units: a car whose grid lateral is beyond
 -- Monza 1966, Donington 1938, Deutschlandring). LANE_MIN_HALF then reads the road only up to the lane's end (turn 1), not 900 m
 -- (Spa and Monza narrow below 5 m after 350-570 m). false = today.
 R.OL_LANES_LOCAL = true   -- DEFAULT 0.15
+R.OL_LATE_KMH = 80          -- (0.15.1) lights-out capture with an AI car already above this: Verve came on after the start (no start hold)
 R.OL_LANES = true             -- DEFAULT 2026-09-18 (owner): regression suite passed (Spa 8.7 vs 9.7, Barcelona 8.3 vs 8.7, Monza 12 laps not worse); stars at meter >= RS_OL_METER exempt
 R.CONCEDE = 0                 -- >0: a defender concedes the line to a tier-2 driver behind whose pace rating beats his by this much (A/B)
 R.ACX_LAP = 0                 -- ATTACK_CAUT_X applies from this lap on (0 = always; 2 = keep the opening laps as they are) (A/B)
@@ -669,6 +670,36 @@ function R.pitRelease(i)
         cv2.mvBg[i] = nil
         if cv2.bg[i] and cv2.base[i] then cv2.bg[i] = nil; pcall(physics.setAIBrakeHint, i, cv2.base[i]) end
     end
+end
+-- (0.15.1) Verve switched OFF mid-session (or 'Control AI grip' unticked): hand every car back to AC as stock, once. What Verve
+-- writes stays in physics until something writes it again - a yellow-zone top-speed cap, a penalty or convoy throttle cap, a brake
+-- hint, a spline offset, the aggression, the grip, the caution, the AI level - so turning Verve off in a race left cars capped
+-- (audit 2026-09-30). Switching back on needs nothing more: every value is rewritten each frame (the level: Drivers.handBack).
+-- A car Verve parked stays parked. stockLevel(i): the launcher's level for car i (0..1.2) or nil.
+R.offState = { on = false, grip = false }
+function R.offSwitch(on, gripOn, stockLevel)
+    local s = R.offState
+    local dropAll, dropGrip = s.on and not on, s.grip and on and not gripOn
+    s.on, s.grip = on, on and gripOn
+    if not (dropAll or dropGrip) then return end
+    local sim = ac.getSim(); if not sim then return end
+    for i = 0, sim.carsCount - 1 do
+        local car = ac.getCar(i)
+        if car and car.isAIControlled and not Recovery.isParked(i) then
+            pcall(physics.setExtraAIGrip, i, 1.0)
+            if dropAll then
+                pcall(physics.setAIThrottleLimit, i, 1.0); pcall(physics.setAITopSpeed, i, 1e9); pcall(physics.setAIStopCounter, i, 0)
+                if cv2.base[i] then pcall(physics.setAIBrakeHint, i, cv2.base[i]) end
+                pcall(physics.setAISplineOffset, i, 0, false)
+                local b = R.baseAggr[i]; if b and b >= 0 then pcall(physics.setAIAggression, i, b) end
+                pcall(physics.setAICaution, i, 1.0)
+                cv2.thr[i] = nil; cv2.mvThr[i] = nil; cv2.bg[i] = nil; cv2.mvBg[i] = nil
+                pcall(Drivers.handBack, i, stockLevel and stockLevel(i))
+            end
+        end
+    end
+    pcall(ac.log, dropAll and 'Verve: switched off - every car handed back to AC (grip, caution, caps, offset, aggression, level)'
+        or 'Verve: AI grip control off - grip handed back to AC')
 end
 function R.lockOf(car) return car.steerLock end   -- (read under pcall: an older CSP's car state may not have the field)
 -- (R.STEER_FRAC) the steering wheel angle as a fraction of lock (car.steer and car.steerLock are both degrees); nil when unreadable
@@ -1679,15 +1710,18 @@ function R.beginFrame()
     if (R.CONVOY2_ON or R.OL_ROWCAUT) and not cv2.clock then
         pcall(function()
             local s = ac.getSim()
-            local moving, front, sp = false, -1e9, {}
+            local moving, front, sp, top = false, -1e9, {}, 0
             for j = 0, s.carsCount - 1 do
                 local c = ac.getCar(j)
                 if c and c.splinePosition then
                     local x = c.splinePosition; if x > 0.5 then x = x - 1 end
                     sp[j] = x; if x > front then front = x end
-                    if c.isAIControlled and (c.lapCount or 0) == 0 and (c.speedKmh or 0) > 20 then moving = true end
+                    if c.isAIControlled and (c.lapCount or 0) == 0 and (c.speedKmh or 0) > 20 then moving = true; top = math.max(top, c.speedKmh) end
                 end
             end
+            -- (0.15.1) Verve switched on AFTER the lights: the field is already strung out, so its 'rows' would be wrong (a car
+            -- 200 m back held for ~3 s mid-lap, audit 2026-09-30). No staggered release, row caution or lanes this start.
+            if moving and top > R.OL_LATE_KMH then cv2.clock = os.clock(); cv2.late = true; pcall(ac.log, 'Verve: switched on after the start - no start hold this race'); return end
             if moving then
                 cv2.clock = os.clock()
                 -- turn 1: scan forward from the front row for the first corner; remember its inside sign and where it is

@@ -419,7 +419,10 @@ def write_harness_lua(arm, ttl_s, ncars=0, laps=0, weekend=False):
         "fault": arm.get("fault", {}),                 # lib/fault.lua switches, e.g. {"ENABLED": true, "ENFORCE": false}
         "human": arm.get("human", {}),                 # lib/human.lua fields, e.g. {"RAINFX_GRIP": 1.0}
         "strategy": arm.get("strategy", {}),           # lib/strategy.lua S.* fields (Verve.lua merges them), e.g. {"SETUP_X": 0}
-        "fuel": arm.get("fuel", 0),                    # litres for EVERY car when the autopilot arms (0 = AC's own load); a quali-load pace probe
+        "fuel": arm.get("fuel", 0),
+        # scripted mid-session changes (Verve.lua applies them through the app's own calls; settings are never saved), e.g.
+        # [{"lap":4,"settings":{"enabled":false},"label":"off"},{"lap":6,"settings":{"enabled":true},"label":"on"}]
+        "changes": arm.get("changes"),                    # litres for EVERY car when the autopilot arms (0 = AC's own load); a quali-load pace probe
     }
     OWNED["lua"] = True
     with open(HARNESS_LUA, "w", encoding="utf-8") as f:
@@ -1133,6 +1136,7 @@ def main():
     ap.add_argument("--recovery", help="JSON of Recovery module fields to override for the run, e.g. {\"DROP_API\":\"car\"}")
     ap.add_argument("--racecraft", help="JSON of Racecraft module fields to override for the run")
     ap.add_argument("--troublespots", help="JSON of Troublespots module fields, e.g. {\"FRESH\":true} = clean learned map for this run")
+    ap.add_argument("--changes", help="JSON list of mid-session changes: [{\"grid\":true|\"t\":s|\"lap\":n, \"settings\":{..}, \"clear\":true, \"fill\":key, \"randomize\":true, \"profiles\":{\"all\":key,\"slots\":{\"3\":key}}, \"class\":{model:key}, \"label\":..}]")
     ap.add_argument("--strategy", help="JSON of Strategy module fields (lib/strategy.lua S.*), e.g. {\"SETUP_X\":0}")
     ap.add_argument("--human", help="JSON of Human module fields, e.g. {\"RAINFX_GRIP\":1.0,\"RAINFX_CAUT\":1.0}")
     ap.add_argument("--csp", help="JSON of CSP per-user config overrides for this run only, e.g. {\"new_behaviour\":{\"AI_RACE_RUBBERBANDING\":{\"ENABLED\":1}}}")
@@ -1165,7 +1169,8 @@ def main():
         arms = [{"label": args.label, "settings": json.loads(args.settings) if args.settings else {}, "drivers": args.drivers, "profiles": args.profiles,
                  "recovery": json.loads(args.recovery) if args.recovery else {}, "racecraft": json.loads(args.racecraft) if args.racecraft else {},
                  "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}, "human": json.loads(args.human) if args.human else {}, "strategy": json.loads(args.strategy) if args.strategy else {}, "fuel": args.fuel,
-                 "assists": json.loads(args.assists) if args.assists else {}, "stop_laps": args.stop_laps}]
+                 "assists": json.loads(args.assists) if args.assists else {}, "stop_laps": args.stop_laps,
+                 "changes": json.loads(args.changes) if args.changes else None}]
     if args.base148:
         for arm in arms:
             for mod, kv in BASE148.items():

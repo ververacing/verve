@@ -275,6 +275,38 @@ function script.update(dt)
                 harnessDoneT = 0
             end
         end
+        -- (0.15.1) scripted changes mid-session, through the same calls as the app's controls (settings are not saved): does anything
+        -- go wonky when a player changes settings or driver profiles on the grid or halfway through a race? (owner 2026-09-30)
+        -- Harness.changes = { { grid=true | t=<s after the green> | lap=<leader laps>, settings={..}, clear=, fill=<key>, randomize=,
+        -- profiles={all=, slots={['3']=key}}, class={[model]=key}, label= }, ... }
+        if type(Harness.changes) == 'table' and okS and simH and simH.raceSessionType == ac.SessionType.Race then
+            pcall(function()
+                if simH.isSessionStarted then Harness._rt = (Harness._rt or 0) + dt end
+                local lead = 0
+                for k = 0, simH.carsCount - 1 do local c = ac.getCar(k); if c and (c.lapCount or 0) > lead then lead = c.lapCount end end
+                for n, ch in ipairs(Harness.changes) do
+                    local due = (ch.grid and harnessStarted and not simH.isSessionStarted)
+                        or (type(ch.t) == 'number' and simH.isSessionStarted and (Harness._rt or 0) >= ch.t)
+                        or (type(ch.lap) == 'number' and simH.isSessionStarted and lead >= ch.lap)
+                    if due and not ch._done then
+                        ch._done = true
+                        if type(ch.settings) == 'table' then for k, v in pairs(ch.settings) do if DEFAULTS[k] ~= nil then G[k] = v end end end
+                        if ch.clear then Drivers.clearAll() end
+                        if type(ch.fill) == 'string' then Drivers.fillGrid(ch.fill) end
+                        if ch.randomize then Drivers.randomizeGrid() end
+                        if type(ch.profiles) == 'table' then
+                            local sl = {}
+                            for k, v in pairs(ch.profiles.slots or {}) do if tonumber(k) then sl[tonumber(k)] = v end end
+                            Drivers.applyFixed({ all = ch.profiles.all, slots = sl })
+                        end
+                        if type(ch.class) == 'table' then Overrides.autosave = false; for m, key in pairs(ch.class) do Overrides.setClass(m, key) end end
+                        local lab = tostring(ch.label or ''):gsub('[^%w_%-]', '_')
+                        ac.log(string.format('Verve harness: change %d (%s) at leader lap %d, %.1f s after the green', n, lab, lead, Harness._rt or 0))
+                        Feed.event('harness_change', string.format('"n":%d,"label":"%s","lap":%d,"t_race":%.1f', n, lab, lead, Harness._rt or 0))
+                    end
+                end
+            end)
+        end
         if Harness.autopilot and not autopilotArmed then
             -- harness `fuel` (litres): every car gets this load once, so a pace probe runs a quali fuel, not the AI's race fuel
             if type(Harness.fuel) == 'number' and Harness.fuel > 0 and physics.setCarFuel then
@@ -350,6 +382,7 @@ function script.update(dt)
         if Diag then pcall(function() Diag.update(dt, { managed = 0 }) end) end
         Feed.ENABLED = G.raceFeed
         if G.raceFeed then pcall(Feed.update, dt, {}) end
+        pcall(Racecraft.offSwitch, false, false, Difficulty.stockLevel)   -- (0.15.1) switched off mid-session: hand the cars back, once
         return
     end
     local ok, sim = pcall(ac.getSim)
@@ -376,6 +409,7 @@ function script.update(dt)
     Racecraft.VARIABILITY = G.intensity     -- spreads per-driver aggression across the field
     Overrides.autosave    = S.autosave
     Racecraft.beginFrame()
+    pcall(Racecraft.offSwitch, true, G.controlGrip, Difficulty.stockLevel)   -- (0.15.1) 'Control AI grip' unticked: grip handed back, once
     Drivers.WILD_ON = Racecraft.WILD ~= false   -- one master switch (Racecraft.WILD) for the chaos driver in every module
 
     local behaviourOn = G.humanVar or G.classPhys or G.racecraft
