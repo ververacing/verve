@@ -66,7 +66,7 @@ H.MV_PACE = { 0.30, 0.60, 0.85, 0.95 }       -- anchors: Rookie, Midfielder, Vet
 -- (0.15) with Drivers.RATING_V2 (0.14.9 default) the Veteran is 0.93 and the Midfielder 0.65, so the V1 anchors put a Veteran at 13.5
 -- laps per mistake (owner's rate: 8-10). V2 anchors keep the owner's rates on the new ratings.
 H.MV_PACE_V2 = { 0.30, 0.65, 0.93, 1.00 }
-function H.mvPaceAnchors() return (Drivers.RATING_V2 and H.MV_PACE_V2) or H.MV_PACE end
+function H.mvPaceAnchors(prof) return (Drivers.RATING_V2 and prof and H.MV_PACE_V2) or H.MV_PACE end   -- (review) V2 only for a profile: an unprofiled car's pace is the V1 level scale
 H.MV_LAPS = { 2, 4, 9, 15 }                  -- laps per visible mistake at each anchor (log-interpolated; ends held)
 H.MV_OFF_P = { 0.06, 0.025, 0.010, 0.005 }   -- P(a lock-up or a missed apex becomes an off)
 H.MV_SPIN_P = { 0.005, 0, 0, 0 }             -- P(a lift becomes a spin), robust classes only
@@ -431,8 +431,8 @@ function H.cornering01(car, st, frac)   -- frac: the unit-correct read (fraction
 end
 
 -- ---- VISIBLE MISTAKES (H.MISTAKE_V2) ----
-local function mvAnchor(ys, x, logy)          -- ys at pace x on the H.MV_PACE anchors (log-interpolated when logy; ends held)
-    local xs = H.mvPaceAnchors()
+local function mvAnchor(ys, x, logy, xs)      -- ys at pace x on the pace anchors xs (default H.MV_PACE; log-interpolated when logy; ends held)
+    xs = xs or H.MV_PACE
     if x <= xs[1] then return ys[1] end
     for k = 1, #xs - 1 do
         if x <= xs[k + 1] then
@@ -476,16 +476,16 @@ function H.mvSkill(i, prof, now)
     local risk, cons = ra, ca
     if prof then risk, cons = prof.risk or ra, prof.cons or ca end
     local dev = clamp((cons - ca) - (risk - ra), -1, 1)                                  -- steadier and safer than the line at his pace: fewer
-    local laps = mvAnchor(H.MV_LAPS, pace, true) * clamp(1 + 2 * H.MV_CR * dev, 1 - H.MV_CR, 1 + H.MV_CR)
+    local xa = H.mvPaceAnchors(prof)
+    local laps = mvAnchor(H.MV_LAPS, pace, true, xa) * clamp(1 + 2 * H.MV_CR * dev, 1 - H.MV_CR, 1 + H.MV_CR)
     c.top = H.mvTopOf(prof)
     if c.top then laps = math.max(laps, H.MV_LAPS[#H.MV_LAPS]) end
     c.wild = prof ~= nil and prof.wild == true
     if c.wild and Drivers.WILD_ON ~= false and H.WILD_ERR > 0 then laps = laps / H.WILD_ERR end   -- (H.WILD_ERR) the chaos driver, as in the bobble model
     c.pace, c.risk, c.cons, c.prof, c.laps = pace, risk, cons, prof ~= nil, laps
-    c.pOff, c.pSpin = mvAnchor(H.MV_OFF_P, pace), mvAnchor(H.MV_SPIN_P, pace)
-    local xa = H.mvPaceAnchors()
+    c.pOff, c.pSpin = mvAnchor(H.MV_OFF_P, pace, false, xa), mvAnchor(H.MV_SPIN_P, pace, false, xa)
     c.x = clamp((pace - xa[1]) / (xa[#xa] - xa[1]), 0, 1)
-    c.tier = (c.wild and 'wild') or (c.top and 'top') or (pace < 0.45 and 'rookie') or (pace < (Drivers.RATING_V2 and 0.79 or 0.725) and 'midfield') or (pace < (Drivers.RATING_V2 and 0.965 or 0.90) and 'veteran') or 'top'
+    c.tier = (c.wild and 'wild') or (c.top and 'top') or (pace < ((xa == H.MV_PACE_V2) and 0.475 or 0.45) and 'rookie') or (pace < ((xa == H.MV_PACE_V2) and 0.79 or 0.725) and 'midfield') or (pace < ((xa == H.MV_PACE_V2) and 0.965 or 0.90) and 'veteran') or 'top'
     c.cls = Classes.keyOf(i)
     c.race = true
     if H.MV_RACE_ONLY then pcall(function() c.race = ac.getSim().raceSessionType == ac.SessionType.Race end) end
@@ -576,6 +576,7 @@ function H.mistakeV2(i, car, prof, cm, now)
             local r = math.random() * (H.MV_W_LOCK + H.MV_W_APEX + H.MV_W_LIFT)
             st.k = H.MV_FORCE_KIND or ((r < H.MV_W_LOCK and 'lockup') or (r < H.MV_W_LOCK + H.MV_W_APEX and 'apex') or 'lift')
             st.armT, st.sev = now, math.random() ^ (1 + H.MV_SEV_SKILL * sk.x)
+            st.pc = nil   -- (H.MV_LIFT_EXIT) a fresh cornering read for this armed window
             local bigX = (H.MV_BIG_CLASS[sk.cls] or 1) * (1 - MISTAKE_CRASHY * Troublespots.crashiness())
             st.big = math.random() < sk.pOff * bigX
             st.spin = frag >= 0.9 and math.random() < sk.pSpin * bigX

@@ -65,7 +65,7 @@ local st = {}             -- per-session state (F.reset)
 
 function F.reset()
     st = { now = 0, tick = 0, sawPre = false, greenT = nil, doneA = false, fpl = {}, prevBest = nil, visit = {},
-           fuelOnT = -1e9, fuelOn = true, lo = nil, hi = nil, laps = 0, rate = 1, mode = nil }
+           fuelOnT = -1e9, fuelOn = true, lo = nil, hi = nil, laps = 0, rate = 1, mode = nil, lapsRace = 0 }
     F.loadN, F.boxFixN, F.boxReN, F.active = 0, 0, 0, false
 end
 F.reset()
@@ -109,7 +109,7 @@ local function gate(sim)
     if not st.fuelOn then return nil end
     local ss = F.timedSession(sim)
     if ss then st.mode = 'timed'; return ss end
-    if F.RATE_LAPPED and st.rate > 1 then ss = lappedSession(sim); if ss then st.mode = 'lapped'; return ss end end
+    if F.RATE_LAPPED and st.rate > 1 then ss = lappedSession(sim); if ss then st.mode = 'lapped'; st.lapsRace = ss.laps or 0; return ss end end
     return nil
 end
 
@@ -154,7 +154,8 @@ fplBase = function(i, car, trackM)
     if st.fpl[i] then return st.fpl[i] end           -- first reading kept: our own top-ups must not feed back into it
     local cls = (F.LPKM[Classes.keyOf(i)] or F.LPKM_DEFAULT) * F.LPKM_MARGIN * trackM / 1000
     local loaded = car.fuel or 0
-    f = (loaded > 0 and i ~= 0) and math.min(loaded / F.MULT, 2 * cls) or cls   -- (car 0: never AC's race load)
+    local div = (st.mode == 'lapped') and F.MULT * ((st.lapsRace or 0) + 1) or F.MULT   -- (review) a lapped race's AC load is (LAPS+1) x 1.2 laps
+    f = (loaded > 0 and i ~= 0) and math.min(loaded / div, 2 * cls) or cls   -- (car 0: never AC's race load)
     st.fpl[i] = f
     return f
 end
@@ -258,7 +259,7 @@ function F.update(sim, dt)
             pcall(function() ac.log(string.format('Verve fuel: %s race (%.0f min / %d laps, fuel rate %.1f): %d green loads written (%.1f-%.1f L, up to %d laps)',
                 st.mode or '?', ss.durationMinutes or 0, ss.laps or 0, st.rate or 1, F.loadN, st.lo or 0, st.hi or 0, st.laps)) end)
         end
-        boxGuard(sim, ss, trackM)
+        if st.mode ~= 'lapped' then boxGuard(sim, ss, trackM) end   -- (review) lapped: AC refills a positive amount; the guard was built for its 0 L loop
     end
 end
 

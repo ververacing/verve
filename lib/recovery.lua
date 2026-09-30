@@ -1242,6 +1242,7 @@ function R.suspLimp(i, car, spd, dt)
 end
 
 function R.reset()
+    R.holdT = {}
     R.settleUntil = os.clock() + R.SETTLE_S     -- see R.SETTLE_S: the next frames are still the old session's
     R.boxRescued = {}; R.boxRescueN = 0; R.boxSeenN = 0; R.boxTryN = 0; R.boxOkN = 0; R.safeHold = {}
     R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0; R.suspFixN = 0; R.suspFixCar = {}; R.suspOwe = {}
@@ -1305,7 +1306,7 @@ end
 -- throttle management reset the limit to 1 and the car raced out at 188 km/h (tu15_off_1, mv29_m2_on_1, 30 Sep). Verve.lua now
 -- skips racecraft for a parked car and calls this every frame; it re-applies the hold twice a second until AC retires the car.
 R.PARK_HOLD = true
-R.holdT = {}
+R.holdT = {}   -- (reset by R.reset)
 function R.isParked(i) return parked[i] == true end
 function R.holdParked(i, car)
     if not R.PARK_HOLD or (car and car.isRetired) then return end
