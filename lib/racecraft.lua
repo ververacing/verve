@@ -954,7 +954,7 @@ function R.evaluate(i, dt)
             baseA = baseA or me.aiAggression                     -- (switch off: the per-frame read-back, as before)
             if not baseA or baseA < 0 then baseA = K.AGGR_CRUISE end
             baseA = clamp(baseA, 0.2, 1.0)
-            baseA = clamp(baseA + (hash01(i * 11 + 5) * 2 - 1) * K.AGGR_SPREAD * R.VARIABILITY, 0.15, 1.0)
+            baseA = clamp(baseA + (hash01(i * 11 + 5 + R.salt * 61) * 2 - 1) * K.AGGR_SPREAD * R.VARIABILITY, 0.15, 1.0)   -- (0.15) per-session salt
         end
         local myLat = latOf(me.position)          -- current lateral on track (-1 left .. +1 right)
         local target, aggr, wide = 0, math.min(baseA, 1.0), 0    -- wide = 0..1 extra track width earned by an exit-speed run (baseA passes 1 only for a wild car)
@@ -1819,7 +1819,9 @@ function R.beginFrame()
     cv2.roomFollow = cv2.roomEn and (R.ROOM_FOLLOW == true or (type(R.ROOM_FOLLOW) == 'number' and R.ROOM_FOLLOW > 0)) or false   -- (true or 1 from the harness)
     cv2.roomLine = cv2.roomEn and (R.ROOM_LINE == true or (type(R.ROOM_LINE) == 'number' and R.ROOM_LINE > 0)) or false
 end
+R.SESSION_SALT = true; R.salt = 0   -- (0.15, code review) re-drawn each session (R.reset): the aggression spread isn't pinned to the grid slot
 function R.reset()
+    R.salt = R.SESSION_SALT and ((os.time() + math.floor(os.clock() * 1000)) % 9973) or 0
     dmgSeen, dmgLap = {}, {}
     R.hurtSeen, R.hurtLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
