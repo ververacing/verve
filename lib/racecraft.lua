@@ -1831,6 +1831,8 @@ end
 -- (0.15, code review R6) attack + lunge + TOP_CAUT stack with no floor, so applied caution can reach 0 (kamikaze). >0: the summed
 -- negative caution is floored at -CAUT_FLOOR before intensity (the chaos driver is exempt). 0 = no floor (today). A/B 0.8.
 R.CAUT_FLOOR = 0
+R.LAUNCH_WRAP = false   -- (0.15, code review) Verve.lua launch assist also for a grid behind the line (spline > 0.9 on lap 0), until the car first
+                        -- reaches 90 km/h. false = today: only spline < 0.012, so back rows before the line get none until they cross.
 R.SESSION_SALT = true; R.salt = 0   -- (0.15, code review) re-drawn each session (R.reset): the aggression spread isn't pinned to the grid slot
 function R.reset()
     R.salt = R.SESSION_SALT and ((os.time() + math.floor(os.clock() * 1000)) % 9973) or 0

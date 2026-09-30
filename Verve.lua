@@ -64,6 +64,7 @@ local function pc(where, f, ...)                -- pcall that counts AND logs (n
     return ok
 end
 local shiftSet = {}                              -- per car: shift thresholds applied (see Racecraft.SHIFT_UP)
+local launchDone = {}                            -- per car: past 90 km/h once this session (Racecraft.LAUNCH_WRAP)
 local harnessStartT, harnessStarted = 0, false   -- "press Drive" on AC's pre-session screen (ac.tryToStart)
 local harnessEndT = 0                            -- seconds a timed session (practice/quali) has been over
 local harnessDoneT, harnessQuit = 0, false       -- race-over timer / already asked AC to quit
@@ -153,7 +154,7 @@ local function sessionReset(restart)
     pcall(Classes.reset)
     pcall(Human.reset)            -- per-track distances
     pcall(Racecraft.reset)
-    shiftSet = {}
+    shiftSet = {}; launchDone = {}
     pcall(Contacts.reset)
     pcall(Fault.reset)
     pcall(Watch.reset)
@@ -400,7 +401,11 @@ function script.update(dt)
                 if Racecraft.TOP_GRIP > 0 then grip = grip + Racecraft.TOP_GRIP * Racecraft.gripW(Drivers.statsOf(i), Difficulty.levelFor(i)) end   -- (R.TOP_GRIP) top-tier pace
                 -- launch assist: a brief traction boost off a standing start (AC's AI bogs down off the
                 -- line), fading out as the car gets up to speed. Only at the very start of lap 1.
-                if (car.lapCount or 0) == 0 and (car.splinePosition or 1) < 0.012 then
+                local sp = car.splinePosition or 1
+                if Racecraft.LAUNCH_WRAP then   -- (0.15, code review) a grid behind the line (spline 0.97-0.99 on lap 0) gets it too: once per car
+                    if launchDone[i] or (car.speedKmh or 0) >= 90 then launchDone[i] = true; sp = 1 elseif sp > 0.9 then sp = 0 end
+                end
+                if (car.lapCount or 0) == 0 and sp < 0.012 then
                     local s = car.speedKmh or 0
                     if s < 90 then grip = grip + 0.07 * clamp(1 - s / 90, 0, 1) end
                 end
