@@ -1301,6 +1301,19 @@ function R.damageOf(i)
 end
 
 -- per-car recovery state for the diagnostics log (never used for decisions)
+-- (0.15) a car Verve retired must STAY retired. The one-off hold in parkInPits did not survive: back on track, racecraft's
+-- throttle management reset the limit to 1 and the car raced out at 188 km/h (tu15_off_1, mv29_m2_on_1, 30 Sep). Verve.lua now
+-- skips racecraft for a parked car and calls this every frame; it re-applies the hold twice a second until AC retires the car.
+R.PARK_HOLD = true
+R.holdT = {}
+function R.isParked(i) return parked[i] == true end
+function R.holdParked(i, car)
+    if not R.PARK_HOLD or (car and car.isRetired) then return end
+    local now = os.clock()
+    if now - (R.holdT[i] or 0) < 0.5 then return end
+    R.holdT[i] = now
+    pcall(function() physics.setAIThrottleLimit(i, 0); physics.setAITopSpeed(i, 0); physics.setAIStopCounter(i, 36000) end)
+end
 function R.stateOf(i)
     return {
         rec = (recT[i] or 0) > 0, recT = recT[i] or 0, repairN = repairN[i] or 0, laps = R.lapsOf(i),
@@ -1343,7 +1356,7 @@ function R.forceRecover(i)
         dropFailed[i] = nil                                   -- a manual unstick is the driver's call: always allowed
         if parked[i] then     -- un-park: release the brake/throttle hold we put on a car we retired
             parked[i] = nil
-            pcall(function() physics.setAIStopCounter(i, 0); physics.setAIThrottleLimit(i, 1) end)
+            pcall(function() physics.setAIStopCounter(i, 0); physics.setAIThrottleLimit(i, 1); physics.setAITopSpeed(i, 1e9) end)   -- (and R.holdParked's top-speed cap)
         end
     end)
     return done

@@ -384,6 +384,7 @@ function script.update(dt)
         local okCar, eCar = pcall(function()
             local car = ac.getCar(i)
             if not car or not car.isAIControlled then return end
+            if Recovery.isParked(i) then Recovery.holdParked(i, car); return end   -- (0.15) retired by Verve: hold it, never race it again
             if car.isInPitlane then Racecraft.pitRelease(i); return end   -- never touch a car doing a pit stop (player or AI); (H.MISTAKE_V2) drop a mistake's cap
             Drivers.applyPace(i, Difficulty.levelFor(i)) -- configured/career difficulty, then the driver profile's pace on top
             -- shift-point study (harness A/B): R.SHIFT_UP > 0 sets the AI's shift thresholds once per car (stops CSP's own dynamic logic)
