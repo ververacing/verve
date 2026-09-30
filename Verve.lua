@@ -536,7 +536,12 @@ telemetryCtx = function()
     end
     local pu, au, wu = 0, 0, 0
     pcall(function() pu, au, wu = Drivers.counts() end)
-    if (wu or 0) > 0 then settings[#settings + 1] = string.format('"wildDrivers":%d', wu) end   -- chaos drivers: in the settings JSON (no schema change), only when one races
+    if (wu or 0) > 0 then settings[#settings + 1] = string.format('"wildDrivers":%d', wu) end
+    pcall(function()   -- (0.15.1) the launcher's AI aggression (car.aiAggression, read once per car before Verve writes it; 0 % -> 0.05,
+        local v = {}   -- 50 % -> 0.175, 100 % -> 0.65): how many players leave it at 0? decides R.AGGR_FLOOR. In the settings JSON: no schema change
+        for _, a in pairs(Racecraft.baseAggr or {}) do if type(a) == 'number' and a >= 0 then v[#v + 1] = a end end
+        if #v > 0 then table.sort(v); settings[#settings + 1] = string.format('"launcherAggr":%.3f', v[math.floor((#v + 1) / 2)]) end
+    end)   -- chaos drivers: in the settings JSON (no schema change), only when one races
     local playerModel = ''; pcall(function() playerModel = ac.getCarID(0) or '' end)
     local cspBuild = nil; pcall(function() cspBuild = ac.getPatchVersionCode() end)
     return {
