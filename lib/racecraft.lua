@@ -969,8 +969,8 @@ function R.evaluate(i, dt)
         else
             baseA = baseA or me.aiAggression                     -- (switch off: the per-frame read-back, as before)
             if not baseA or baseA < 0 then baseA = K.AGGR_CRUISE end
-            baseA = clamp(baseA, 0.2, 1.0)
-            baseA = clamp(baseA + (hash01(i * 11 + 5 + (R.SESSION_SALT and R.salt or 0) * 61) * 2 - 1) * K.AGGR_SPREAD * R.VARIABILITY, 0.15, 1.0)   -- (0.15) per-session salt
+            baseA = clamp(baseA, R.AGGR_FLOOR, 1.0)   -- (R.AGGR_FLOOR) 0.2 = today
+            baseA = clamp(baseA + (hash01(i * 11 + 5 + (R.SESSION_SALT and R.salt or 0) * 61) * 2 - 1) * K.AGGR_SPREAD * R.VARIABILITY, math.min(0.15, R.AGGR_FLOOR), 1.0)   -- (0.15) per-session salt
         end
         local myLat = latOf(me.position)          -- current lateral on track (-1 left .. +1 right)
         local target, aggr, wide = 0, math.min(baseA, 1.0), 0    -- wide = 0..1 extra track width earned by an exit-speed run (baseA passes 1 only for a wild car)
@@ -1871,6 +1871,10 @@ end
 -- (0.15, code review R6) attack + lunge + TOP_CAUT stack with no floor, so applied caution can reach 0 (kamikaze). >0: the summed
 -- negative caution is floored at -CAUT_FLOOR before intensity (the chaos driver is exempt). 0 = no floor (today). A/B 0.8.
 R.CAUT_FLOOR = 0
+-- (0.15, player-settings check 2026-09-29) AC maps the launcher's aggression 0 / 50 / 100 % to car.aiAggression 0.05 / 0.175 / 0.65.
+-- A car without a profile had its base floored at 0.2, so every slider value from 0 to ~55 % raced the same. AGGR_FLOOR 0.05 keeps
+-- AC's own value (the spread's lower clamp follows it). 0.2 = today.
+R.AGGR_FLOOR = 0.2
 R.LAUNCH_WRAP = false   -- (0.15, code review) Verve.lua launch assist also for a grid behind the line (spline > 0.9 on lap 0), until the car first
                         -- reaches 90 km/h. false = today: only spline < 0.012, so back rows before the line get none until they cross.
 R.SESSION_SALT = true; R.salt = ((os.time() + math.floor(os.clock() * 1000)) % 9973)   -- (drawn at load too: no onSessionStart for the first session) (0.15, code review) re-drawn each session (R.reset): the aggression spread isn't pinned to the grid slot
