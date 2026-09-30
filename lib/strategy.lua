@@ -40,16 +40,16 @@ S.VERDICT_V2 = true     -- INSTRUMENTATION ONLY (no driving change; S.ok, the UI
                         -- left ATTACK or aborted is judged like a finished one, and a win = the car attacked was on my lap when the move
                         -- began and is behind me on the road at the verdict (a lapped target, or a place gained on another car, is not)
 S.CLEAR_COOL = 0        -- s of cooldown after a cleared plan (0 = today: none; a plan that runs its course gets COOLDOWN)
-S.SETUP_X = 1.0         -- x the playbook's set-up caution; 0 = no set-up plans and no 'still serving the set-up' wait (road space instead)
+S.SETUP_X = 0.0         -- DEFAULT 0.15 (was 1.0). x the playbook's set-up caution; 0 = no set-up plans and no 'still serving the set-up' wait (road space instead)
 S.SETUP_RUN = 0         -- km/h, >0: a set-up ends once the car closes this fast on the car ahead (road space takes over)
-S.TIER_MODE = 0         -- 0 = today (S.tierOf: slider >= 90, profile pace). 1 = whatever the slider, every car plans (tier 1); its own pace
+S.TIER_MODE = 1         -- DEFAULT 0.15. 0 = today (S.tierOf: slider >= 90, profile pace). 1 = whatever the slider, every car plans (tier 1); its own pace
                         -- (Drivers.paceOf) >= MOVE_T2 adds the switchback; no new plan on a lapped car letting me by. Manoeuvres only:
                         -- S.tierOf and the star rules in racecraft are untouched
 S.MOVE_T2 = 0.75
 S.CLUMSY = 1.0          -- TIER_MODE 1: x (1 - moveSkill). A Rookie's lunge commits 70 % as long, 1.0x off-line (not 1.4x), 60 % of the
                         -- brake relief, gathers up +0.45 (not +0.3) and gives up at 1.0x attack range (not 1.5x). 0 = everyone like a Veteran
-S.PICK_MOMENT = 0       -- 0-1, TIER_MODE 1: a skilled driver's lunge odds follow his run: x(1 - P) at +0 km/h .. x(1 + P) at +10 (a Rookie's do not)
-S.SAMPLE_M = 0          -- m between corner-geometry samples (0 = today's lap fraction 0.004: 18 m at 4.5 km, 28 m at Spa, 8 m on a 2 km track)
+S.PICK_MOMENT = 0.5     -- DEFAULT 0.15. 0-1, TIER_MODE 1: a skilled driver's lunge odds follow his run: x(1 - P) at +0 km/h .. x(1 + P) at +10 (a Rookie's do not)
+S.SAMPLE_M = 18         -- DEFAULT 0.15. m between corner-geometry samples (0 = today's lap fraction 0.004: 18 m at 4.5 km, 28 m at Spa, 8 m on a 2 km track)
 
 -- the playbook: which manoeuvres a class uses and how readily (weight 0 = never). Set-up corners = how many
 -- corners a driver sits in the tow behind a NEW car before going for it (formula cars need the straight anyway).

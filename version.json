@@ -1,5 +1,5 @@
 {
-  "version": "0.14.9",
+  "version": "0.15.0",
   "url": "https://github.com/ververacing/verve/releases/latest",
-  "summary": "Same-lap cars no longer wave faster ones by, a Wrecking Crew chaos profile, profiles only when you pick them, no race-feed stutter, real drivers rated as pros."
+  "summary": "Visible human mistakes by driver level, faster cars get past more often, full pace for default grids at 100, fuel rate fix."
 }

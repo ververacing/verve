@@ -30,7 +30,7 @@ H.WARMUP_MODE   = 'min'    -- 'min': cold-tyre penalty = the smaller of the temp
                            -- of a stint the tyres are as warm as they get). 'temp': temperature only - which never reached zero for
                            -- GT3 AI at 10 C ambient: a permanent 44 % cold-tyre tax on every car, all race (found 2026-09-20)
 H.wu = {}                  -- per car: the warm-up fraction last applied (diag)
-H.DIRTY_CAUT_X  = 1.0      -- x the dirty-air caution (harness A/B 2026-09-20: an attacking veteran carried +0.12 of it on top of
+H.DIRTY_CAUT_X  = 0.5      -- DEFAULT 0.15 (was 1.0). x the dirty-air caution (harness A/B 2026-09-20: an attacking veteran carried +0.12 of it on top of
                            -- a cancelled attack term, running MORE cautious than a car alone; 0 = dirty air costs grip only)
 H.rainfx        = nil      -- detected at first use: true when the RainFX module is enabled on this install
 -- ac.StateCar.steer is the steering WHEEL angle in DEGREES (car.steerLock: the car's maximum wheel angle, also degrees), not a
@@ -38,7 +38,7 @@ H.rainfx        = nil      -- detected at first use: true when the RainFX module
 -- angle past 0.35 deg counted as full cornering: dirty air on every close follow above 80 km/h, straights included; the tow
 -- almost never; every mistake picked as a cornering one (found 2026-09-26). STEER_FRAC reads the angle as a fraction of lock
 -- instead, full cornering at STEER_CORNER of lock; a car without a usable steerLock keeps the old reading.
-H.STEER_FRAC    = false  -- STATUS 2026-09-28: experimental - the unit bug is real, but the fix showed no gain in its A/Bs, so it stays off
+H.STEER_FRAC    = true   -- DEFAULT 0.15 (with the passing parts: x2.3 real passes at Monza, 30 Sep). Was: the unit bug is real, but the fix alone showed no gain in its A/Bs, so it stayed off
 H.STEER_CORNER  = 0.13     -- x lock = full cornering (STEER_FRAC only; not a positive number -> 0.13). A fraction of lock is a
                            -- fraction of the road wheels' maximum angle (~17-23 deg on GT3, ~30 on road cars). Estimated from
                            -- geometry, not yet measured, GT3 (2.7 m wheelbase): ~0.22-0.28 at 80 km/h, ~0.13 at 120, 0.05-0.14
@@ -48,7 +48,7 @@ H.STEER_CORNER  = 0.13     -- x lock = full cornering (STEER_FRAC only; not a po
                            -- about dev0146's corner dose. A/B arm 0.35 (the -1..1 reading the code was written for) also cuts
                            -- corner dirty air 50-80 %, most in the fast corners where following is hardest. Longer term,
                            -- lateral g (car.acceleration.x) would track aero load better than the steering angle.
-H.DIRTY_LAT = 0            -- >0 (from lap 1): dirty air fades out as the car ahead moves off my line - full within DIRTY_LAT/2 of it, none
+H.DIRTY_LAT = 0.35         -- DEFAULT 0.15 (was 0). >0 (from lap 1): dirty air fades out as the car ahead moves off my line - full within DIRTY_LAT/2 of it, none
                            -- beyond DIRTY_LAT (track half-widths; 0.35 = about one car width on a 12 m road); pit-lane and parked cars
                            -- (under 30 km/h) make no wake. 0 = today (spline gap only, every car)
 
@@ -58,8 +58,8 @@ H.DIRTY_LAT = 0            -- >0 (from lap 1): dirty air fades out as the car ah
 -- reads its applied level as pace, so a car at 100 is a Veteran); rare offs, very rare spins. Levers: a grip dip returned outside the grip
 -- slew, caution, and racecraft's brake hint / throttle limit / spline offset through H.mv. Race sessions only, never lap 0, never slot 0.
 -- A wild profile (the Wrecking Crew) is never a roster's top, reports tier 'wild' and keeps H.WILD_ERR on this rate too.
-H.MISTAKE_V2 = false
-H.NERVES_V2 = false        -- nerves x NERVES_K x (1 - cons); pressure only from a rival on the road (not pit lane, parked or lapped)
+H.MISTAKE_V2 = true        -- DEFAULT 0.15: visible mistakes by tier (rate anchors on RATING_V2; measured 30 Sep: Rookie ~3, Mid 4-5, Vet 10-15 laps per mistake)
+H.NERVES_V2 = true         -- DEFAULT 0.15. nerves x NERVES_K x (1 - cons); pressure only from a rival on the road (not pit lane, parked or lapped)
 H.NERVES_K = 2.0
 H.MV_RACE_ONLY = true
 H.MV_PACE = { 0.30, 0.60, 0.85, 0.95 }       -- anchors: Rookie, Midfielder, Veteran (drivers.lua archetypes), a top name
@@ -81,9 +81,9 @@ H.MV_MIN_LAP = 1
 H.MV_GAP_S = 8             -- s between two mistakes by one car
 H.MV_ARM_S = 10            -- s a drawn mistake waits for a moment (its own kind for the first half; a forced kind all of it)
 H.MV_LAP_S = 110           -- s per lap, only for a car with no spline
-H.MV_W_LOCK = 40
-H.MV_W_APEX = 35
-H.MV_W_LIFT = 25
+H.MV_W_LOCK = 25   -- DEFAULT 0.15 (was 40)
+H.MV_W_APEX = 45   -- DEFAULT 0.15 (was 35)
+H.MV_W_LIFT = 30   -- DEFAULT 0.15 (was 25)
 H.MV_SEV_SKILL = 1.5
 H.MV_AHEAD_M = 20          -- no lock-up with a car this close ahead (twice this for the late-brake set-up)
 H.MV_SIDE_M = 6

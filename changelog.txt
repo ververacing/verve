@@ -1,3 +1,18 @@
+0.15.0
+- Drivers make visible, human mistakes, more often the less experienced they are: in testing a Rookie about once every
+  3 laps, a Midfielder every 4 to 5, a Veteran every 10 to 15. A lock-up, a missed apex or a lift on the exit costs time
+  and sometimes the place.
+- Faster cars get past more often: better slipstreaming on the straights and less over-caution behind a car in a corner, and
+  drivers of every level try a move when the chance is there.
+- A grid without driver profiles at difficulty 100 gets the same extra grip as the best drivers (about 1 s a lap at Monza),
+  fading out by difficulty 90.
+- The start: cars hold their grid column into turn 1 only where the grid really is two columns (single-file, three-wide
+  and diagonal grids no longer squeeze cars together).
+- Fuel: with the fuel rate above normal the AI now starts with enough fuel (before, at triple rate every car stopped 3-4 times).
+- A car Verve retires stays retired (it could drive back out of the pits and crash).
+- Every car's personality is re-drawn each race, so grid slot 7 is not the same driver every time.
+- Race feed: lap events carry the exact lap time. Race reports include the tyre wear setting.
+
 0.14.9
 - A car on the same lap no longer pulls over for a faster one unless it is damaged or crawling (in 0.14.8, mixed
   Rookie / Midfielder / Veteran grids had slower cars waving faster ones by, even for the lead).

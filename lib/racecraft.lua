@@ -268,7 +268,7 @@ R.GRID_HOLD_MAXLAT = 0        -- track units: a car whose grid lateral is beyond
 -- give NO lane where the grid there is not two columns (single file: Targa, hill climbs; 3-wide / 3-2-3 / 4-2-4: Silverstone 1967,
 -- Monza 1966, Donington 1938, Deutschlandring). LANE_MIN_HALF then reads the road only up to the lane's end (turn 1), not 900 m
 -- (Spa and Monza narrow below 5 m after 350-570 m). false = today.
-R.OL_LANES_LOCAL = false
+R.OL_LANES_LOCAL = true   -- DEFAULT 0.15
 R.OL_LANES = true             -- DEFAULT 2026-09-18 (owner): regression suite passed (Spa 8.7 vs 9.7, Barcelona 8.3 vs 8.7, Monza 12 laps not worse); stars at meter >= RS_OL_METER exempt
 R.CONCEDE = 0                 -- >0: a defender concedes the line to a tier-2 driver behind whose pace rating beats his by this much (A/B)
 R.ACX_LAP = 0                 -- ATTACK_CAUT_X applies from this lap on (0 = always; 2 = keep the opening laps as they are) (A/B)
@@ -347,7 +347,7 @@ R.PASS_COMMIT_LAP = 0         -- >0: PASS_COMMIT's commit (paceEdge) on MEASURED
 R.CAUTION_DEFEND = -0.25      -- defend relief from lap 2 (laps 0-1 keep K.CAUTION_DEFEND); x intensity => -0.175 applied (the rubber band)
 R.PACK_STRETCH = 0.14         -- pack-leader stretch from lap 2 (laps 0-1 keep K.PACK_STRETCH)
 R.ISO_PACE_ALL = false        -- ISO_PACE's exemption from the lone ease-off for EVERY car with a car within CV.ISO_REACH_M ahead (not only tier 2)
-R.STEER_FRAC = false          -- pounce and TOW_ATTACK read the wheel angle as a fraction of lock (R.steerIn) instead of raw degrees
+R.STEER_FRAC = true           -- DEFAULT 0.15. pounce and TOW_ATTACK read the wheel angle as a fraction of lock (R.steerIn) instead of raw degrees
 R.POUNCE_STEER = 0.02         -- STEER_FRAC: pounce under this fraction of lock (a straight reads under 0.02), off the brakes, lap 2+
 R.TOW_STEER = 0.02            -- STEER_FRAC: TOW_ATTACK under this fraction of lock
 R.MV_SIDE_M = 6.0             -- (H.MISTAKE_V2) no run-wide into a car overlapping this close (centre to centre, m) on the side it runs to
@@ -447,7 +447,7 @@ R.CAUT_BASE = 0.0       -- flat caution offset on every AI car (harness: is ther
 -- TOP PACE (owner 2026-09-29: Veterans and stars must lap like the best humans; the Wrecking Crew's control arm showed how much
 -- margin the AI keeps). A car's weight w = its profile pace from TOP_FROM (0) to TOP_FULL (1); unprofiled cars count as
 -- TOP_UNPROF (0 = today). From lap 1 on, not while yielding: caution - TOP_CAUT x w, and the lone-car ease-off x (1 - w x TOP_ISO).
-R.TOP_CAUT = 0.0; R.TOP_ISO = 0.0; R.TOP_FROM = 0.80; R.TOP_FULL = 0.95; R.TOP_UNPROF = 0.0
+R.TOP_CAUT = 0.0; R.TOP_ISO = 0.0; R.TOP_FROM = 0.80; R.TOP_FULL = 0.95; R.TOP_UNPROF = 1.0   -- DEFAULT 0.15: TOP_UNPROF
 R.ISO_X = 1.0           -- x the lone-car ease-off (K.ISOLATED_CAUT / _AGGR) for every car (harness A/B; 1 = today, 0 = off)
 R.TOP_GRIP = 0.15       -- DEFAULT 0.14.9. extra AI grip x the car's top-pace weight (Verve.lua; 29 Sep: grip is the one lever past AC's level-100 ceiling -
                         -- 1.20 -> 1.40 took Monza GT3 from +4.0 % to +3.1 % off the RSR top-10; 0 = off)
