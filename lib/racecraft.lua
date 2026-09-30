@@ -321,11 +321,11 @@ K.ALONGSIDE_LAT = 0.45  -- lateral separation under which two cars overlap
 K.LEAVEROOM_CAUT = 0.20  -- lift when overlapping and not the car with the corner
 -- PASSING PACKAGE (owner 2026-09-28: no same-lap pace yield except hurt or crawling cars; pursuers more effective at passing). Every
 -- switch defaults to 0.14.8's behaviour; K.* is not harness-reachable, so the A/B'd values are R.* fields with the K default.
-R.PACE_YIELD_MODE = 0         -- 0 = today: a same-class car whose best lap is PACE_YIELD_RATIO slower moves over for a quicker one closing.
+R.PACE_YIELD_MODE = 1         -- DEFAULT 0.14.9. 0 = today: a same-class car whose best lap is PACE_YIELD_RATIO slower moves over for a quicker one closing.
                               -- 1 = only a HURT car (R.hurtOf) does, from lap 1. Blue flags, the class yield and damage nursing are
                               -- unchanged. Mode 1 also stops the AI moving over for the human player on pace (changelog)
 R.PACE_YIELD_RATIO = 1.04     -- mode 0 threshold (was K.PACE_YIELD_RATIO)
-R.PACE_YIELD_DMG = 25         -- mode 1: km/h of damage since the last repair that can make a car hurt (nursing starts at K.DAMAGE_YIELD 55)...
+R.PACE_YIELD_DMG = 45         -- DEFAULT 0.14.9 (25 kept lightly hit cars yielding). mode 1: km/h of damage since the last repair that can make a car hurt (nursing starts at K.DAMAGE_YIELD 55)...
 R.PACE_YIELD_SLOW = 0.02      -- ...when fresh (K.DAMAGE_NURSE_LAPS) or still costing pace: last lap > best lap x (1 + this)
 R.hurtSeen, R.hurtLap = {}, {} -- mode 1 only: per car, damage since repair last seen and the lap of the last fresh hit (a repair lowers it;
                               -- nursing's dmgSeen / dmgLap keep today's worst-seen reading)
@@ -443,7 +443,7 @@ R.CAUT_BASE = 0.0       -- flat caution offset on every AI car (harness: is ther
 -- TOP_UNPROF (0 = today). From lap 1 on, not while yielding: caution - TOP_CAUT x w, and the lone-car ease-off x (1 - w x TOP_ISO).
 R.TOP_CAUT = 0.0; R.TOP_ISO = 0.0; R.TOP_FROM = 0.80; R.TOP_FULL = 0.95; R.TOP_UNPROF = 0.0
 R.ISO_X = 1.0           -- x the lone-car ease-off (K.ISOLATED_CAUT / _AGGR) for every car (harness A/B; 1 = today, 0 = off)
-R.TOP_GRIP = 0.0        -- extra AI grip x the car's top-pace weight (Verve.lua; 29 Sep: grip is the one lever past AC's level-100 ceiling -
+R.TOP_GRIP = 0.15       -- DEFAULT 0.14.9. extra AI grip x the car's top-pace weight (Verve.lua; 29 Sep: grip is the one lever past AC's level-100 ceiling -
                         -- 1.20 -> 1.40 took Monza GT3 from +4.0 % to +3.1 % off the RSR top-10; 0 = off)
 K.YELLOW_LAT = 1.3   -- a stopped car this far from the centre line still counts (edge/kerb); deep in the gravel doesn't
 -- SLOW-CAR YELLOW (harness A/B: R.YELLOW_SLOW > 0). The yellow above only sees a car under K.BLOCK_SPEED (24 km/h), so at

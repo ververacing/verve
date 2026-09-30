@@ -1,3 +1,15 @@
+0.14.9
+- A car on the same lap no longer pulls over for a faster one unless it is damaged or crawling (in 0.14.8, mixed
+  Rookie / Midfielder / Veteran grids had slower cars waving faster ones by, even for the lead).
+- New driver profile, right below Veteran in the list: Wrecking Crew, a chaos driver - top pace, elbows out, almost no margin.
+- A driver profile is only used when you pick one (no more automatic profiles from matching driver names).
+- Nearstappen is now rated the fastest and most aggressive F1 profile.
+- Real drivers are rated as the pros they are: every roster now runs from just under a Veteran to the very top,
+  so a grid of real names races close; the Veteran is almost as quick as the stars.
+- The best drivers (stars, then Veterans) get a little extra grip, so difficulty 100 is closer to the fastest humans.
+- Race feed (for Verve Booth / Race Engineer): no more short freeze every 5 seconds in long races.
+- The driver name on your own car is re-applied correctly in later sessions of a weekend.
+
 0.14.8
 - Driver profiles set a car's pace outright: Rookie = difficulty 80, Midfielder = 90, Veteran about 98, the fastest real
   drivers 99-100. Before, profiles were relative to the fastest driver on the grid, so an all-Rookie grid raced at full pace.

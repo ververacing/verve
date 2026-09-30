@@ -1,5 +1,5 @@
 {
-  "version": "0.14.8",
+  "version": "0.14.9",
   "url": "https://github.com/ververacing/verve/releases/latest",
-  "summary": "Driver profiles set their own pace (Rookie = difficulty 80), one-click all-Rookie / Midfielder / Veteran grids, steadier aggression without profiles, a second try for a car whose reposition at a sector line fails."
+  "summary": "Same-lap cars no longer wave faster ones by, a Wrecking Crew chaos profile, profiles only when you pick them, no race-feed stutter, real drivers rated as pros."
 }

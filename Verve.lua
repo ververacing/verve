@@ -71,7 +71,7 @@ local DEFAULTS = {
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     timedFuel = true,    -- DEFAULT 0.14.6 (lib/fuel.lua): fuel a TIMED race's AI for the clock, stop AC's empty-tank pit loop
     paceAbs = true,      -- DEFAULT 0.14.8 (lib/drivers.lua D.PACE_ABS): a driver profile sets the car's pace outright
-    ratingV2 = false,    -- harness switch (lib/drivers.lua D.RATING_V2): real drivers rated as pros around a Veteran (owner 2026-09-29)
+    ratingV2 = true,     -- DEFAULT 0.14.9; harness switch (lib/drivers.lua D.RATING_V2): real drivers rated as pros around a Veteran (owner 2026-09-29)
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
 
@@ -85,7 +85,7 @@ local S = ac.storage({
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     timedFuel = true,
     paceAbs = true,
-    ratingV2 = false,
+    ratingV2 = true,
     autosave = true, schema = 1,
 })
 -- settings migration: 0.12 made crash repair + trouble spots core (they were opt-in experiments; a day-long
