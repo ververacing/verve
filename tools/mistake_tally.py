@@ -149,7 +149,7 @@ def analyse(feed, spec, level, ros):
     offs, incs, overt = by("off_track"), [e for e in events if e.get("type") == "incident"], [e for e in events if e.get("type") == "overtake"]
     pits = [e for e in events if e.get("type") in ("pit_in", "pit_out")]
     # laps: (car, lapnum) -> (t_end, seconds); a lap is dirty with a mistake, incident, off or pit event inside it
-    lapT = {(e["car"], e["lap"]): (e["t"], float(e["time_s"])) for e in laps if e.get("time_s")}
+    lapT = {(e["car"], e["lap"]): (e["t"], (e["lap_ms"] / 1000.0) if e.get("lap_ms") else float(e["time_s"])) for e in laps if e.get("time_s")}   # lap_ms (0.15 feed): AC's own time; time_s is 1 Hz
     mistake_laps = Counter((m["car"], (m.get("lap") or 0) + 1) for m in mistakes)
     dirty_ev = [(e["car"], e["t"]) for e in offs + pits] + [(e["car"], e["t"]) for e in incs] + \
                [(int(x), e["t"]) for e in incs for x in (e.get("contact") or [])]

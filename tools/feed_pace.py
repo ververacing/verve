@@ -32,7 +32,7 @@ def laps(path):
             if (d.get("e") or d.get("type")) != "lap":
                 continue
             car = d.get("car", d.get("i"))
-            t = d.get("time_s", d.get("time"))
+            t = (d["lap_ms"] / 1000.0) if d.get("lap_ms") else d.get("time_s", d.get("time"))   # lap_ms (0.15 feed) = AC's own lap time
             n = d.get("lap", d.get("n", 0))
             if car is None or not t:
                 continue
