@@ -52,10 +52,14 @@ local function scanCareer()
         for _, series in ipairs(listDir(root)) do
             if series:match('^series%d+$') then
                 local sdir = root .. '/' .. series
-                local oppNames = {}
+                local oppNames, oppModels = {}, {}
                 local opp = parseIni(io.load(sdir .. '/opponents.ini', ''))
                 for sec, kv in pairs(opp) do
-                    if sec:match('^AI%d+$') and kv.NAME then oppNames[kv.NAME:lower()] = true end
+                    -- (0.15.1) series 8-28 write DRIVER_NAME (and each car's MODEL), series 1-5 write NAME: reading only NAME left
+                    -- every later series without names, so a real race there was 'Not a career event' (car15, 1 Oct)
+                    local nm = kv.NAME or kv.DRIVER_NAME
+                    if sec:match('^AI%d+$') and nm and #nm > 0 then oppNames[nm:lower()] = true end
+                    if sec:match('^AI%d+$') and kv.MODEL and #kv.MODEL > 0 then oppModels[kv.MODEL:lower()] = true end
                 end
                 for _, ev in ipairs(listDir(sdir)) do
                     if ev:match('^event%d+$') then
@@ -69,6 +73,7 @@ local function scanCareer()
                                 if sec:match('^CAR_%d+$') and kv.MODEL and kv.MODEL ~= '-' then models[kv.MODEL:lower()] = true end
                             end
                             models[(race.MODEL or ''):lower()] = true
+                            for m in pairs(oppModels) do models[m] = true end
                             local level = tonumber(race.AI_LEVEL) or 0
                             events[#events + 1] = {
                                 series = series, event = ev,

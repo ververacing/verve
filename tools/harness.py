@@ -213,13 +213,20 @@ def career_race_ini(spec, base_path):
         sec = f"AI{a}"
         if not opp.has_section(sec):
             break
+        # series 8-28 write each opponent's own MODEL, DRIVER_NAME and AI_LEVEL; series 1-5 write NAME and a LEVEL % (2026-10-01:
+        # reading only NAME made every later-series grid 'AI n' drivers in the event's car - Verve then saw no career event)
+        omodel = opp.get(sec, "MODEL", fallback="") or model
         skin = opp.get(sec, "SKIN", fallback="")
-        if not os.path.isdir(os.path.join(AC_DIR, "content", "cars", model, "skins", skin)):
-            skin = first_skin(model)
-        lvl = float(opp.get(sec, "LEVEL", fallback="95"))
+        if not os.path.isdir(os.path.join(AC_DIR, "content", "cars", omodel, "skins", skin)):
+            skin = first_skin(omodel)
+        if opp.has_option(sec, "AI_LEVEL"):
+            olevel = str(int(float(opp.get(sec, "AI_LEVEL"))))
+        else:
+            olevel = str(int(round(level * float(opp.get(sec, "LEVEL", fallback="95")) / 100.0)))
+        oname = opp.get(sec, "NAME", fallback="") or opp.get(sec, "DRIVER_NAME", fallback="") or f"AI {a}"
         ini.add_section(f"CAR_{n}")
-        for kk, vv in [("MODEL", model), ("MODEL_CONFIG", ""), ("AI_LEVEL", str(int(round(level * lvl / 100.0)))), ("AI_AGGRESSION", AI_AGGRESSION),
-                       ("SKIN", skin), ("DRIVER_NAME", opp.get(sec, "NAME", fallback=f"AI {a}")), ("NATIONALITY", ""), ("NATION_CODE", "")]:
+        for kk, vv in [("MODEL", omodel), ("MODEL_CONFIG", ""), ("AI_LEVEL", olevel), ("AI_AGGRESSION", AI_AGGRESSION),
+                       ("SKIN", skin), ("DRIVER_NAME", oname), ("NATIONALITY", ""), ("NATION_CODE", "")]:
             ini.set(f"CAR_{n}", kk, vv)
         n += 1
     ini.set("RACE", "CARS", str(n))
