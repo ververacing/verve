@@ -285,7 +285,7 @@ function script.update(dt)
                 local lead = 0
                 for k = 0, simH.carsCount - 1 do local c = ac.getCar(k); if c and (c.lapCount or 0) > lead then lead = c.lapCount end end
                 for n, ch in ipairs(Harness.changes) do
-                    local due = (ch.grid and harnessStarted and not simH.isSessionStarted)
+                    local due = (ch.grid and harnessStarted and (autopilotArmed or not Harness.autopilot) and not simH.isSessionStarted)   -- (after the harness's own grid setup: its profiles land when the autopilot arms)
                         or (type(ch.t) == 'number' and simH.isSessionStarted and (Harness._rt or 0) >= ch.t)
                         or (type(ch.lap) == 'number' and simH.isSessionStarted and lead >= ch.lap)
                     if due and not ch._done then
