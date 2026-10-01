@@ -77,6 +77,7 @@ local function scanCareer()
                                 laps = tonumber(ini.SESSION_0 and ini.SESSION_0.LAPS) or 0,
                                 level = level, names = names, models = models,
                                 sun = tonumber(ini.LIGHTING and ini.LIGHTING.SUN_ANGLE),
+                                sig = C.sigOf(ini),
                             }
                             if level > 0 then
                                 rampMin = rampMin and math.min(rampMin, level) or level
@@ -88,6 +89,15 @@ local function scanCareer()
             end
         end
     end)
+end
+
+-- (0.15.1) what tells an 'Extreme' / 'Advanced' series from its base series (same track, car, grid and opponents): the
+-- track-rubber preset, the session list and the race-laps key (series19 v series18: preset 3 v 4, 3 sessions v 1;
+-- series12 v series9: RACE_LAPS 20 v 5). Read from event.ini and from race.ini alike.
+function C.sigOf(ini)
+    local d, r, n = ini.DYNAMIC_TRACK or {}, ini.RACE or {}, 0
+    for sec in pairs(ini) do if sec:match('^SESSION_%d+$') then n = n + 1 end end
+    return { preset = tonumber(d.PRESET), start = tonumber(d.SESSION_START), sessions = n, raceLaps = tonumber(r.RACE_LAPS) }
 end
 
 -- Read the launched race. Called once per session (cheap); safe to call every frame.
@@ -117,6 +127,7 @@ function C.detect()
             end
         end
         local sun = tonumber(ini.LIGHTING and ini.LIGHTING.SUN_ANGLE)
+        local sig = C.sigOf(ini)
         scanCareer()
         -- (0.15.1) score EVERY matching event, best wins: two events of one series on the same track with the same car and grid
         -- (KTM series3 event2 and event5, both Imola, 8 cars) were told apart by nothing, so event5 ran as event2 (ramp 0.14,
@@ -134,6 +145,10 @@ function C.detect()
                     for _, m in ipairs(raceModels) do if not e.models[m] then mOk = false; break end end
                     if mOk then score = score + 50 end
                     if e.laps > 0 and e.laps == C.laps then score = score + 10 end
+                    local es = e.sig or {}
+                    if sig.preset and sig.preset == es.preset and sig.start == es.start then score = score + 40 end
+                    if sig.raceLaps and sig.raceLaps == es.raceLaps then score = score + 20 end
+                    if sig.sessions > 0 and sig.sessions == es.sessions then score = score + 20 end
                     if score > bestScore then best, bestScore = e, score end
                 end
             end
