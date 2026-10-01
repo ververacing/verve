@@ -102,8 +102,24 @@ local function gate(sim)
     if sim.isOnlineRace or sim.isReplayOnlyMode then return nil end
     if st.now - st.fuelOnT > 10 then              -- fuel consumption off: nothing burns (re-read now and then: menu-editable)
         st.fuelOnT = st.now
-        local on, rate = true, 1
-        pcall(function() local a = ac.getAssists(); if a and type(a.fuelRate) == 'number' then on = a.fuelRate > 0; rate = a.fuelRate end end)
+        local on, rate, api = true, 1, nil
+        pcall(function() local a = ac.getAssists(); if a and type(a.fuelRate) == 'number' then api = a.fuelRate end end)
+        -- (0.15.1, PC #2 1 Oct) CSP 3465 gives no fuelRate here: a lapped race at fuel rate 3 got no green load and 3-4 stops a car.
+        -- Then (or when it reads 1) the launcher's own cfg/assists.ini FUEL_RATE decides.
+        local ini = nil
+        if api == nil or api == 1 then
+            pcall(function()
+                local t = io.load(ac.getFolder(ac.FolderID.Cfg) .. '/assists.ini', '') or ''
+                local v = t:match('FUEL_RATE%s*=%s*([%d%.]+)')   -- (one FUEL_RATE key in [ASSISTS])
+                ini = tonumber(v)
+            end)
+        end
+        local r = (api ~= nil and api ~= 1) and api or ini or api or 1
+        on, rate = r > 0, r
+        if st.rateSrc == nil then
+            st.rateSrc = (api ~= nil and api ~= 1) and 'csp' or (ini and 'assists.ini') or 'default'
+            pcall(ac.log, string.format('Verve fuel: fuel rate %.1f (from %s; csp %s, assists.ini %s)', r, st.rateSrc, tostring(api), tostring(ini)))
+        end
         st.fuelOn, st.rate = on, math.max(1, rate)
     end
     if not st.fuelOn then return nil end

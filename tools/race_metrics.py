@@ -61,7 +61,7 @@ def metrics(path, skip_frozen=()):
             if r["t"] >= t_end:
                 break
             c = next(x for x in r["grid"] if x["i"] == ci)
-            if c["spd"] < 3 and not c["pit"] and (r["t"] - t0) > 30:
+            if c["spd"] < 3 and not c["pit"] and not c.get("park") and (r["t"] - t0) > 30:   # (a car Verve parked is held, not frozen: Baku's pit boxes read pit False)
                 run += 8
             else:
                 if run >= 40:
