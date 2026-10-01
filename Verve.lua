@@ -440,7 +440,7 @@ function script.update(dt)
                 if Racecraft.TOP_GRIP > 0 then
                     local prof, pct = Drivers.statsOf(i), nil
                     if not prof and Racecraft.TOP_UNPROF > 0 then local l = Difficulty.levelFor(i); if l then pct = Difficulty.pctOf(i, l) end end
-                    grip = grip + Racecraft.TOP_GRIP * Racecraft.gripW(prof, pct)
+                    grip = grip + Racecraft.topEase(i, Racecraft.TOP_GRIP * Racecraft.gripW(prof, pct), car, dt)   -- (0.15.1) eased on a moving car
                 end   -- (R.TOP_GRIP) top-tier pace
                 -- launch assist: a brief traction boost off a standing start (AC's AI bogs down off the
                 -- line), fading out as the car gets up to speed. Only at the very start of lap 1.

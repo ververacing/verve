@@ -701,6 +701,19 @@ function R.offSwitch(on, gripOn, stockLevel)
     pcall(ac.log, dropAll and 'Verve: switched off - every car handed back to AC (grip, caution, caps, offset, aggression, level)'
         or 'Verve: AI grip control off - grip handed back to AC')
 end
+-- (0.15.1) the top-driver grip (R.TOP_GRIP x gripW) moves at most R.TOP_EASE per second on a moving car: Clear drivers mid-race
+-- gave two unprofiled midfielders TOP_UNPROF's +0.13..0.16 grip in one frame, side by side into the Parabolica, and they collided
+-- (mc15b_clear_1, 1 Oct). The grid, the pits and the first value of a session are set at once.
+R.TOP_EASE = 0.05; R.topV = {}
+function R.topEase(i, target, car, dt)
+    local v = R.topV[i]
+    if v and R.TOP_EASE > 0 and (car.speedKmh or 0) > 30 and not car.isInPitlane then
+        local mx = R.TOP_EASE * (dt or 0)
+        if target > v + mx then target = v + mx elseif target < v - mx then target = v - mx end
+    end
+    R.topV[i] = target
+    return target
+end
 function R.lockOf(car) return car.steerLock end   -- (read under pcall: an older CSP's car state may not have the field)
 -- (R.STEER_FRAC) the steering wheel angle as a fraction of lock (car.steer and car.steerLock are both degrees); nil when unreadable
 function R.steerIn(car)
@@ -1919,7 +1932,7 @@ function R.reset()
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     letbyT, letbyDone, letbyFor = {}, {}, {}
     cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {} }; R.cv2 = cv2
-    R.crawlN = 0
+    R.crawlN = 0; R.topV = {}
     R.roomN = 0; R.roomAct = 0; R.evalN = 0; R.fastTuckN = 0; R.yellowSlowN = 0
     -- AGGR_BASE_FIX: the next session reads each car afresh; this session's capture and Verve's last write carry over for
     -- R.aggrBase's guard (empty while the switch is off: nothing happens)
