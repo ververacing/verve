@@ -507,6 +507,8 @@ function D.rosterFor(classKey)
     return out
 end
 
+D.LEVEL_SLEW = 0.03   -- (0.15.1) AI level change per second at most for a moving car (0 = step at once, as before)
+D.slewT = {}          -- per car: time of the last eased step
 D.LOCKED = false      -- career events: profiles are off (the difficulty curve owns the field)
 
 local assigned = {}
@@ -601,7 +603,7 @@ function D.reset(keepPicks)
     -- keepPicks: the same weekend moved to its next session (practice -> qualifying -> race). The picks and AC's
     -- original names stay; the levels are re-read (AC re-creates them per session) and the names re-applied.
     if not keepPicks then assigned = {}; origName = {}; matched = false end
-    baseLevel = {}; lastApplied = {}; fieldMaxPace = 1.0; paceDirty = true; lastSlot0AI = nil; named0 = false
+    baseLevel = {}; lastApplied = {}; D.slewT = {}; fieldMaxPace = 1.0; paceDirty = true; lastSlot0AI = nil; named0 = false
     if keepPicks then for i in pairs(assigned) do applyName(i) end end
 end
 
@@ -702,6 +704,21 @@ function D.applyPace(i, base)
             end
         end
         lvl = math.floor(lvl * 1000 + 0.5) / 1000
+        -- (0.15.1) a MOVING car eases into a new level (D.LEVEL_SLEW per second, in 0.25 s steps): Clear drivers mid-race stepped
+        -- a Veteran 0.93 -> 1.00 in one frame braking for the Parabolica - later brake point, off (mc15, 30 Sep). On the grid, in the
+        -- pits or on the first write the level is set at once.
+        local prev = lastApplied[i]
+        if prev and D.LEVEL_SLEW > 0 and math.abs(lvl - prev) > 0.0015 and (car.speedKmh or 0) > 30 and not car.isInPitlane then
+            local now = os.clock()
+            local t0 = D.slewT[i]
+            if not t0 then D.slewT[i] = now; return end
+            if now - t0 < 0.25 then return end
+            D.slewT[i] = now
+            local step = D.LEVEL_SLEW * math.min(now - t0, 1.0)
+            if math.abs(lvl - prev) > step then lvl = math.floor((prev + (lvl > prev and step or -step)) * 1000 + 0.5) / 1000 end
+        else
+            D.slewT[i] = nil
+        end
         if lastApplied[i] ~= lvl then physics.setAILevel(i, lvl); lastApplied[i] = lvl end   -- only on change (18 cars x 60 Hz otherwise)
     end)
 end
@@ -711,7 +728,7 @@ function D.appliedLevel(i) return lastApplied[i] end
 -- back on writes the profile level again (applyPace only writes on a change)
 function D.handBack(i, lvl)
     if lvl then pcall(physics.setAILevel, i, lvl) end
-    lastApplied[i] = nil
+    lastApplied[i] = lvl   -- (switched back on mid-race, a moving car eases from the launcher level to its profile: D.LEVEL_SLEW)
 end   -- what Verve last wrote (the conflict watchdog reads it back)
 
 -- A car's pace on the profile scale (Rookie 0.30 .. 0.90 = expert, the paceAbs reference): its profile's, else read back from the level
