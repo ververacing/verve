@@ -62,18 +62,21 @@ local function scanCareer()
                         local ini = parseIni(io.load(sdir .. '/' .. ev .. '/event.ini', ''))
                         local race = ini.RACE
                         if race and race.TRACK then
-                            local names = {}
+                            local names, models = {}, {}
                             for k in pairs(oppNames) do names[k] = true end
                             for sec, kv in pairs(ini) do
                                 if sec:match('^CAR_%d+$') and kv.DRIVER_NAME and #kv.DRIVER_NAME > 0 then names[kv.DRIVER_NAME:lower()] = true end
+                                if sec:match('^CAR_%d+$') and kv.MODEL and kv.MODEL ~= '-' then models[kv.MODEL:lower()] = true end
                             end
+                            models[(race.MODEL or ''):lower()] = true
                             local level = tonumber(race.AI_LEVEL) or 0
                             events[#events + 1] = {
                                 series = series, event = ev,
                                 track = (race.TRACK or ''):lower(), layout = (race.CONFIG_TRACK or ''):lower(),
                                 model = (race.MODEL or ''):lower(), cars = tonumber(race.CARS) or 0,
                                 laps = tonumber(ini.SESSION_0 and ini.SESSION_0.LAPS) or 0,
-                                level = level, names = names,
+                                level = level, names = names, models = models,
+                                sun = tonumber(ini.LIGHTING and ini.LIGHTING.SUN_ANGLE),
                             }
                             if level > 0 then
                                 rampMin = rampMin and math.min(rampMin, level) or level
@@ -103,28 +106,42 @@ function C.detect()
         C.laps = tonumber(ini.SESSION_0 and ini.SESSION_0.LAPS) or 0
         C.sessionType = ini.SESSION_0 and ini.SESSION_0.TYPE or nil
         C.meter = tonumber(race.AI_LEVEL) or 100
-        local raceNames = {}
+        local raceNames, raceModels = {}, {}
         for sec, kv in pairs(ini) do
             local n = sec:match('^CAR_(%d+)$')
             if n then
                 n = tonumber(n)
                 if kv.AI_LEVEL then C.carLevels[n] = tonumber(kv.AI_LEVEL) end
                 if kv.DRIVER_NAME and #kv.DRIVER_NAME > 0 and n > 0 then raceNames[#raceNames + 1] = kv.DRIVER_NAME:lower() end
+                if n > 0 and kv.MODEL and kv.MODEL ~= '-' then raceModels[#raceModels + 1] = kv.MODEL:lower() end
             end
         end
+        local sun = tonumber(ini.LIGHTING and ini.LIGHTING.SUN_ANGLE)
         scanCareer()
+        -- (0.15.1) score EVERY matching event, best wins: two events of one series on the same track with the same car and grid
+        -- (KTM series3 event2 and event5, both Imola, 8 cars) were told apart by nothing, so event5 ran as event2 (ramp 0.14,
+        -- not 0.71: the last KTM race got the first one's difficulty, car15 30 Sep). Sun angle, grid models and laps decide.
+        local best, bestScore = nil, -1
         for _, e in ipairs(events) do
             if e.track == C.track and e.layout == C.layout and e.model == C.model and e.cars == C.cars then
                 -- the same track/car/grid could be a quick race: require the launcher's opponent names
                 local hit = 0
                 for _, nm in ipairs(raceNames) do if e.names[nm] then hit = hit + 1 end end
                 if hit >= 1 or #raceNames == 0 then
-                    C.active, C.series, C.event, C.eventLevel = true, e.series, e.event, e.level
-                    if rampMin and rampMax and rampMax > rampMin then
-                        C.ramp = math.max(0, math.min(1, (e.level - rampMin) / (rampMax - rampMin)))
-                    end
-                    break
+                    local score = hit
+                    if sun and e.sun and math.abs(sun - e.sun) < 0.5 then score = score + 100 end
+                    local mOk = #raceModels > 0
+                    for _, m in ipairs(raceModels) do if not e.models[m] then mOk = false; break end end
+                    if mOk then score = score + 50 end
+                    if e.laps > 0 and e.laps == C.laps then score = score + 10 end
+                    if score > bestScore then best, bestScore = e, score end
                 end
+            end
+        end
+        if best then
+            C.active, C.series, C.event, C.eventLevel = true, best.series, best.event, best.level
+            if rampMin and rampMax and rampMax > rampMin then
+                C.ramp = math.max(0, math.min(1, (best.level - rampMin) / (rampMax - rampMin)))
             end
         end
     end)
