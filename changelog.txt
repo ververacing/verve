@@ -1,3 +1,18 @@
+0.15.1
+- Career mode: Verve now recognises every career race. Before, most series from the Lotus Lightweight Trofeo on - the Ferrari
+  Trofeos, Formula Abarth and every GT3 and GT2 series with their Extreme versions - ran as normal races without the career
+  difficulty curve, and two races of one series on the same track could be mixed up.
+- Switching Verve off during a race hands every car back to standard AC at once (before, cars could keep a speed limit, grip or
+  pace that Verve had set). Unticking 'Control AI grip' hands the grip back the same way.
+- Changing driver profiles during a race (Clear, Randomize, a pick) eases each car into its new pace, grip and aggression over a
+  few seconds instead of in one step, which could put a car off mid-corner. Changes on the grid still apply at once.
+- Verve switched on after the start no longer holds cars back as if they were on the grid, and with Verve off across the start
+  it no longer refuels the whole field in the middle of the race.
+- The 'slider in lap-time steps' and 'career curve' options take effect at once instead of in the next session.
+- Fuel: the fuel rate set in the launcher is now read on older CSP builds too (such as 3465), so with double or triple fuel
+  the AI starts with enough fuel there as well (before, every car could stop three or four times in a short race).
+- Race feed: a retired car is reported once. Race reports include the launcher's AI aggression setting.
+
 0.15.0
 - Drivers make visible, human mistakes, more often the less experienced they are: in testing a Rookie about once every
   3 laps, a Midfielder every 4 to 5, a Veteran every 10 to 15. A lock-up, a missed apex or a lift on the exit costs time
