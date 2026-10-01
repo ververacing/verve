@@ -103,7 +103,9 @@ local function newFile(sim)
         esc(track), laps, math.floor(amb), math.floor(road), table.concat(cars, ',')))
 end
 
+F.retSent = {}
 function F.reset()
+    F.retSent = {}
     feedEvSeen = {}
     F.wildSent = {}
     namesSent, namesT = '', 0
@@ -266,7 +268,8 @@ function F.update(dt, stats)
             end
             if c.pit and not p.pit then event(t, 'pit_in', string.format('"car":%d,"lap":%d', i, c.lap)) end
             if p.pit and not c.pit then event(t, 'pit_out', string.format('"car":%d,"lap":%d', i, c.lap)) end
-            if (c.ret and not p.ret) or (c.park and not p.park) then
+            if ((c.ret and not p.ret) or (c.park and not p.park)) and not F.retSent[i] then
+                F.retSent[i] = true   -- (0.15.1) once per car per session: Verve switched off and on again re-read a parked car as newly retired
                 event(t, 'retire', string.format('"car":%d,"lap":%d,"reason":"%s"', i, c.lap, c.park and 'hopeless' or (c.dmg >= 150 and 'damage' or 'ac')))
             end
             -- Verve decisions (edge-triggered; attack/defend only when there's actually a car within reach)
