@@ -6,7 +6,8 @@
 Per race: tools/race_metrics.py (incidents, heavy80, retirements, frozen cars, lap 0-1, drops, spread / dnf / incidents vs the
 real class), pace from the race feed (AC's lap_ms when the feed has it; best and median race lap), the best lap against the
 human hotlap reference when tools/human_baselines.json has the track|model pair, and 'Verve error' lines in the kept CSP log.
-URGENT (fix during the observation period): a race that never ran (too few frames), frozen cars, a Lua error, or a field that
+URGENT (fix during the observation period): a race that never ran (too few frames), frozen AI cars (car 0 = the autopilot is left
+out: Verve never parks the player's slot), a Lua error, or a field that
 lost more than 40 % of its cars.
 """
 import argparse
@@ -61,6 +62,36 @@ def feed_pace(path):
     return min(allt), st.median(allt), hdr
 
 
+def frozen_ai(path):
+    """race_metrics' frozen-car count without car 0: the harness autopilot sits in the player's slot, which Verve never parks
+    (a human may take the wheel back), so a wrecked autopilot car reads 'frozen' for the rest of the race (obs_pc1_005, 1 Oct)."""
+    rows = []
+    for line in open(path, encoding="utf-8", errors="replace"):
+        if line.startswith('{"t"'):
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                pass
+    if not rows:
+        return 0
+    t0 = rows[0]["t"]
+    t_end = max((r["t"] for a, r in zip(rows, rows[1:]) if r.get("leaderLap") != a.get("leaderLap")), default=rows[-1]["t"] + 1)
+    frozen = 0
+    for ci in {c["i"] for r in rows for c in r.get("grid", []) if c["i"] != 0}:
+        run = 0
+        for r in rows:
+            if r["t"] >= t_end:
+                break
+            c = next((x for x in r.get("grid", []) if x["i"] == ci), None)
+            if c and c.get("spd", 99) < 3 and not c.get("pit") and (r["t"] - t0) > 30:
+                run += 8
+            else:
+                frozen += 1 if run >= 40 else 0
+                run = 0
+        frozen += 1 if run >= 40 else 0
+    return frozen
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--glob", default="diag_race_*_obs_*.jsonl")
@@ -108,8 +139,9 @@ def main():
             errs += sum(1 for line in open(lp, encoding="utf-8", errors="replace") if "Verve error" in line)
         r["verve_errors"] = errs
         n = r.get("cars") or 0
-        if (r.get("frozen_cars") or 0) > 0:
-            urgent.append((label, "frozen cars %s" % r["frozen_cars"]))
+        r["frozen_ai"] = frozen_ai(p)
+        if r["frozen_ai"] > 0:
+            urgent.append((label, "frozen AI cars %s (car 0, the autopilot, not counted)" % r["frozen_ai"]))
         if errs:
             urgent.append((label, "Verve errors in the CSP log: %d" % errs))
         if n and (r.get("retired_or_parked") or 0) / n > 0.4:
