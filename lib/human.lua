@@ -74,6 +74,10 @@ H.MV_CR = 0.25             -- consistency and risk against the archetype line at
 H.MV_TOP_FRAC = 0.10       -- the top this fraction of a roster bucket by pace gets the last anchor (15 laps)
 H.MV_ARCH = { { 0.30, 0.60, 0.50 }, { 0.60, 0.35, 0.80 }, { 0.85, 0.20, 0.95 } }   -- pace, risk, cons of the archetypes (the line)
 H.MV_RATE_X = 1.0
+-- (0.15.1 test, owner yes 1 Oct) H.MV_COMP: a mistake drawn while the car is busy in traffic, or armed and dropped for want of a
+-- moment, is OWED (at most MV_COMP_MAX) and paid at the next clear stretch (MV_COMP_PER_LAP per lap of progress). Measured 30 Sep
+-- (gate15a C arm): realised laps per mistake Rookie 3.0 / Mid 4.5 / Veteran 15 against anchors 2 / 4 / 9 - the gap is the drops.
+H.MV_COMP = false; H.MV_COMP_MAX = 2; H.MV_COMP_PER_LAP = 4.0
 H.MV_PRESS = 1.0           -- a rival right behind: rate x (1 + this x pressure x (1 - cons))
 H.MV_CLASS_RATE = { drift = 0 }
 H.MV_BIG_CLASS = { formula = 0.5, prototype = 0.5, hypercar = 0.5, nascar = 0, drift = 0 }   -- x the off and spin odds
@@ -544,6 +548,7 @@ local function mvOverlap(car, nr)              -- a car within MV_SIDE_M either 
 end
 local function mvDrop(i, st, why, now)         -- a drawn mistake that never happened: counted, so a rate miss can be told from a moment miss
     H.mvDrop[i] = (H.mvDrop[i] or 0) + 1
+    if H.MV_COMP then st.owed = math.min((st.owed or 0) + 1, H.MV_COMP_MAX) end   -- (H.MV_COMP) paid back at the next clear stretch
     if H.feedEvent then pcall(H.feedEvent, 'mistake_drop', string.format('"car":%d,"kind":"%s","why":"%s","wait_s":%.1f', i, tostring(st.k), why, now - (st.armT or now))) end
     st.k = nil; st.next = now + 2
 end
@@ -572,7 +577,16 @@ function H.mistakeV2(i, car, prof, cm, now)
         end
         local p = H.pressureV2(i, car, now)
         local perLap = H.MV_RATE_X * (H.MV_CLASS_RATE[sk.cls] or 1) * (1 + H.MV_PRESS * p * (1 - sk.cons)) / sk.laps
-        if ds > 0 and math.random() < perLap * ds and not (H.busy and H.busy(i)) then
+        local hit = ds > 0 and math.random() < perLap * ds
+        local busy = false   -- (read only when it matters: a draw, or an owed mistake waiting - as before when H.MV_COMP is off)
+        if (hit or (H.MV_COMP and (st.owed or 0) > 0)) and H.busy then busy = H.busy(i) and true or false end
+        if H.MV_COMP then
+            if hit and busy then st.owed = math.min((st.owed or 0) + 1, H.MV_COMP_MAX); hit = false
+            elseif not hit and not busy and (st.owed or 0) > 0 and ds > 0 and math.random() < H.MV_COMP_PER_LAP * ds then
+                st.owed = st.owed - 1; hit = true
+            end
+        end
+        if hit and not busy then
             local r = math.random() * (H.MV_W_LOCK + H.MV_W_APEX + H.MV_W_LIFT)
             st.k = H.MV_FORCE_KIND or ((r < H.MV_W_LOCK and 'lockup') or (r < H.MV_W_LOCK + H.MV_W_APEX and 'apex') or 'lift')
             st.armT, st.sev = now, math.random() ^ (1 + H.MV_SEV_SKILL * sk.x)
