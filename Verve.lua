@@ -282,10 +282,14 @@ function script.update(dt)
         if type(Harness.changes) == 'table' and okS and simH and simH.raceSessionType == ac.SessionType.Race then
             pcall(function()
                 if simH.isSessionStarted then Harness._rt = (Harness._rt or 0) + dt end
+                local pending = false
+                for _, ch in ipairs(Harness.changes) do if not ch._done then pending = true; break end end
+                if not pending then return end   -- (review) no leader-lap scan once every change has fired
                 local lead = 0
                 for k = 0, simH.carsCount - 1 do local c = ac.getCar(k); if c and (c.lapCount or 0) > lead then lead = c.lapCount end end
                 for n, ch in ipairs(Harness.changes) do
                     local due = (ch.grid and harnessStarted and (autopilotArmed or not Harness.autopilot) and not simH.isSessionStarted)   -- (after the harness's own grid setup: its profiles land when the autopilot arms)
+                        or (ch.grid and simH.isSessionStarted)   -- (review) the arming came after the green: apply now rather than never
                         or (type(ch.t) == 'number' and simH.isSessionStarted and (Harness._rt or 0) >= ch.t)
                         or (type(ch.lap) == 'number' and simH.isSessionStarted and lead >= ch.lap)
                     if due and not ch._done then
@@ -383,6 +387,7 @@ function script.update(dt)
         Feed.ENABLED = G.raceFeed
         if G.raceFeed then pcall(Feed.update, dt, {}) end
         pcall(Racecraft.offSwitch, false, false, Difficulty.stockLevel)   -- (0.15.1) switched off mid-session: hand the cars back, once
+        pcall(Fuel.offTick)                                                 -- (0.15.1) off across the green: no green load later
         return
     end
     local ok, sim = pcall(ac.getSim)
@@ -484,7 +489,7 @@ function script.update(dt)
     Recovery.CRASH_REPAIR = G.crashRepair
     Recovery.REPAIR_BODY  = G.repairOnTrack ~= false
     if G.recovery then Recovery.update(dt) end
-    if G.timedFuel then pc('fuel', Fuel.update, sim, dt) end   -- timed races: green fuel load + pit-box guard (lib/fuel.lua)
+    if G.timedFuel then pc('fuel', Fuel.update, sim, dt) else pcall(Fuel.offTick) end   -- timed races: green fuel load + pit-box guard (lib/fuel.lua)
     Troublespots.ENABLED = G.troubleSpots
     Troublespots.update(dt)
 
@@ -536,12 +541,12 @@ telemetryCtx = function()
     end
     local pu, au, wu = 0, 0, 0
     pcall(function() pu, au, wu = Drivers.counts() end)
-    if (wu or 0) > 0 then settings[#settings + 1] = string.format('"wildDrivers":%d', wu) end
+    if (wu or 0) > 0 then settings[#settings + 1] = string.format('"wildDrivers":%d', wu) end   -- chaos drivers: in the settings JSON (no schema change), only when one races
     pcall(function()   -- (0.15.1) the launcher's AI aggression (car.aiAggression, read once per car before Verve writes it; 0 % -> 0.05,
         local v = {}   -- 50 % -> 0.175, 100 % -> 0.65): how many players leave it at 0? decides R.AGGR_FLOOR. In the settings JSON: no schema change
-        for _, a in pairs(Racecraft.baseAggr or {}) do if type(a) == 'number' and a >= 0 then v[#v + 1] = a end end
+        for i, a in pairs(Racecraft.baseAggr or {}) do if i ~= 0 and type(a) == 'number' and a >= 0 then v[#v + 1] = a end end   -- (not slot 0: the autopilot reads 1.0)
         if #v > 0 then table.sort(v); settings[#settings + 1] = string.format('"launcherAggr":%.3f', v[math.floor((#v + 1) / 2)]) end
-    end)   -- chaos drivers: in the settings JSON (no schema change), only when one races
+    end)
     local playerModel = ''; pcall(function() playerModel = ac.getCarID(0) or '' end)
     local cspBuild = nil; pcall(function() cspBuild = ac.getPatchVersionCode() end)
     return {

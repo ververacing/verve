@@ -237,16 +237,21 @@ local function boxGuard(sim, ss, trackM)
     end
 end
 
+-- (0.15.1) Called every frame F.update is NOT (Verve off, or the timed-fuel option off). Off across the green: no green load later -
+-- it would refuel the whole field mid-race (audit 2026-09-30); off inside the green window: the window ends. A pause across the
+-- green is not an 'off' (the frames simply stop) and keeps the load - which is why this is not a wall-clock test (review 1 Oct).
+function F.offTick()
+    local ok, sim = pcall(ac.getSim)
+    if ok and sim and sim.isSessionStarted and st.sawPre then
+        if st.greenT == nil then st.sawPre = false else st.greenT = F.GREEN_S end
+    end
+end
+
 function F.update(sim, dt)
     dt = dt or 0
     st.now = st.now + dt
-    if not sim.isSessionStarted then st.sawPre = true; st.greenT = nil; st.preClk = os.clock()   -- before the green (grid, countdown)
-    elseif st.sawPre then                                                   -- (loaded mid-race: no green load, box guard only)
-        -- (0.15.1) Verve off across the green and back on later: F.update did not run, so greenT would start counting now and the
-        -- green load would refuel the whole field mid-race (audit 2026-09-30). Missed the green by more than GREEN_S: box guard only.
-        if st.greenT == nil and st.preClk and os.clock() - st.preClk > F.GREEN_S then st.sawPre = false
-        else st.greenT = (st.greenT or 0) + dt end
-    end
+    if not sim.isSessionStarted then st.sawPre = true; st.greenT = nil      -- before the green (grid, countdown)
+    elseif st.sawPre then st.greenT = (st.greenT or 0) + dt end             -- (loaded mid-race: no green load, box guard only)
     st.tick = st.tick + dt
     if st.tick < F.TICK_S then return end
     st.tick = 0

@@ -429,10 +429,10 @@ def write_harness_lua(arm, ttl_s, ncars=0, laps=0, weekend=False):
         "fault": arm.get("fault", {}),                 # lib/fault.lua switches, e.g. {"ENABLED": true, "ENFORCE": false}
         "human": arm.get("human", {}),                 # lib/human.lua fields, e.g. {"RAINFX_GRIP": 1.0}
         "strategy": arm.get("strategy", {}),           # lib/strategy.lua S.* fields (Verve.lua merges them), e.g. {"SETUP_X": 0}
-        "fuel": arm.get("fuel", 0),
+        "fuel": arm.get("fuel", 0),                    # litres for EVERY car when the autopilot arms (0 = AC's own load); a quali-load pace probe
         # scripted mid-session changes (Verve.lua applies them through the app's own calls; settings are never saved), e.g.
         # [{"lap":4,"settings":{"enabled":false},"label":"off"},{"lap":6,"settings":{"enabled":true},"label":"on"}]
-        "changes": arm.get("changes"),                    # litres for EVERY car when the autopilot arms (0 = AC's own load); a quali-load pace probe
+        "changes": arm.get("changes"),
     }
     OWNED["lua"] = True
     with open(HARNESS_LUA, "w", encoding="utf-8") as f:

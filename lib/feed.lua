@@ -268,6 +268,7 @@ function F.update(dt, stats)
             end
             if c.pit and not p.pit then event(t, 'pit_in', string.format('"car":%d,"lap":%d', i, c.lap)) end
             if p.pit and not c.pit then event(t, 'pit_out', string.format('"car":%d,"lap":%d', i, c.lap)) end
+            if F.retSent[i] and not c.ret and not c.park and c.spd > 30 then F.retSent[i] = nil end   -- (un-parked and racing again: a later park is news)
             if ((c.ret and not p.ret) or (c.park and not p.park)) and not F.retSent[i] then
                 F.retSent[i] = true   -- (0.15.1) once per car per session: Verve switched off and on again re-read a parked car as newly retired
                 event(t, 'retire', string.format('"car":%d,"lap":%d,"reason":"%s"', i, c.lap, c.park and 'hopeless' or (c.dmg >= 150 and 'damage' or 'ac')))

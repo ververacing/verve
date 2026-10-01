@@ -20,7 +20,9 @@ def load(path):
     return hdr, rows, drops, contacts, mvs
 
 
-def metrics(path):
+def metrics(path, skip_frozen=()):
+    """skip_frozen: car indices left out of the frozen-car count (obs_score passes (0,): the harness autopilot sits in the player's
+    slot, which Verve never parks, so a wrecked autopilot reads 'frozen' for the rest of the race)."""
     hdr, rows, drops, contacts, mvs = load(path)
     if len(rows) < 3:
         return {"file": path, "error": "too few frames"}
@@ -52,6 +54,8 @@ def metrics(path):
     t_end = max((r["t"] for a, r in zip(rows, rows[1:]) if r["leaderLap"] != a["leaderLap"]), default=rows[-1]["t"] + 1)
     frozen, longest = 0, 0
     for ci in range(n):
+        if ci in skip_frozen:
+            continue
         run = 0
         for r in rows:
             if r["t"] >= t_end:

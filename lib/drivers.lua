@@ -727,9 +727,8 @@ function D.appliedLevel(i) return lastApplied[i] end
 -- (0.15.1) Verve switched off: the launcher's level back (lvl nil = leave it), and forget what Verve wrote, so that switching Verve
 -- back on writes the profile level again (applyPace only writes on a change)
 function D.handBack(i, lvl)
-    if lvl then pcall(physics.setAILevel, i, lvl) end
-    lastApplied[i] = lvl   -- (switched back on mid-race, a moving car eases from the launcher level to its profile: D.LEVEL_SLEW)
-end   -- what Verve last wrote (the conflict watchdog reads it back)
+    if lvl then pcall(physics.setAILevel, i, lvl); lastApplied[i] = lvl end   -- (unknown launcher level: the car keeps what it has, and
+end   -- switched back on mid-race a moving car eases from there to its profile: D.LEVEL_SLEW)   -- what Verve last wrote (the conflict watchdog reads it back)
 
 -- A car's pace on the profile scale (Rookie 0.30 .. 0.90 = expert, the paceAbs reference): its profile's, else read back from the level
 -- Verve applied, through its class curve (the inverse of paceAbs: level 100 -> 0.90, slider 90 -> 0.60, slider 80 -> 0.30; a career

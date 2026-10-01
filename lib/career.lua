@@ -57,7 +57,7 @@ local function scanCareer()
                 for sec, kv in pairs(opp) do
                     -- (0.15.1) series 8-28 write DRIVER_NAME (and each car's MODEL), series 1-5 write NAME: reading only NAME left
                     -- every later series without names, so a real race there was 'Not a career event' (car15, 1 Oct)
-                    local nm = kv.NAME or kv.DRIVER_NAME
+                    local nm = kv.NAME; if not nm or #nm == 0 then nm = kv.DRIVER_NAME end   -- (an empty NAME= falls through)
                     if sec:match('^AI%d+$') and nm and #nm > 0 then oppNames[nm:lower()] = true end
                     if sec:match('^AI%d+$') and kv.MODEL and #kv.MODEL > 0 then oppModels[kv.MODEL:lower()] = true end
                 end
@@ -79,7 +79,7 @@ local function scanCareer()
                                 series = series, event = ev,
                                 track = (race.TRACK or ''):lower(), layout = (race.CONFIG_TRACK or ''):lower(),
                                 model = (race.MODEL or ''):lower(), cars = tonumber(race.CARS) or 0,
-                                laps = tonumber(ini.SESSION_0 and ini.SESSION_0.LAPS) or 0,
+                                laps = C.raceLapsOf(ini),
                                 level = level, names = names, models = models,
                                 sun = tonumber(ini.LIGHTING and ini.LIGHTING.SUN_ANGLE),
                                 sig = C.sigOf(ini),
@@ -94,6 +94,15 @@ local function scanCareer()
             end
         end
     end)
+end
+
+-- (0.15.1, review) the RACE session's laps (TYPE 3): in an Extreme / Advanced event SESSION_0 is the practice (no LAPS)
+function C.raceLapsOf(ini)
+    for n = 0, 9 do
+        local s = ini['SESSION_' .. n]
+        if s and tostring(s.TYPE) == '3' then return tonumber(s.LAPS) or 0 end
+    end
+    return tonumber(ini.SESSION_0 and ini.SESSION_0.LAPS) or 0
 end
 
 -- (0.15.1) what tells an 'Extreme' / 'Advanced' series from its base series (same track, car, grid and opponents): the
@@ -118,7 +127,7 @@ function C.detect()
         local race = ini.RACE or {}
         C.track = (race.TRACK or ''):lower(); C.layout = (race.CONFIG_TRACK or ''):lower()
         C.model = (race.MODEL or ''):lower(); C.cars = tonumber(race.CARS) or sim.carsCount
-        C.laps = tonumber(ini.SESSION_0 and ini.SESSION_0.LAPS) or 0
+        C.laps = C.raceLapsOf(ini)
         C.sessionType = ini.SESSION_0 and ini.SESSION_0.TYPE or nil
         C.meter = tonumber(race.AI_LEVEL) or 100
         local raceNames, raceModels = {}, {}

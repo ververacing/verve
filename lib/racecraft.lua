@@ -688,7 +688,7 @@ function R.offSwitch(on, gripOn, stockLevel)
         if car and car.isAIControlled and not Recovery.isParked(i) then
             pcall(physics.setExtraAIGrip, i, 1.0)
             if dropAll then
-                pcall(physics.setAIThrottleLimit, i, 1.0); pcall(physics.setAITopSpeed, i, 1e9); pcall(physics.setAIStopCounter, i, 0)
+                pcall(physics.setAIThrottleLimit, i, 1.0); pcall(physics.setAITopSpeed, i, 1e9)   -- (no stop-counter write: Verve holds only parked cars, and AC's own post-incident wait is AC's)
                 if cv2.base[i] then pcall(physics.setAIBrakeHint, i, cv2.base[i]) end
                 pcall(physics.setAISplineOffset, i, 0, false)
                 local b = R.baseAggr[i]; if b and b >= 0 then pcall(physics.setAIAggression, i, b) end
@@ -704,28 +704,20 @@ end
 -- (0.15.1) the top-driver grip (R.TOP_GRIP x gripW) moves at most R.TOP_EASE per second on a moving car: Clear drivers mid-race
 -- gave two unprofiled midfielders TOP_UNPROF's +0.13..0.16 grip in one frame, side by side into the Parabolica, and they collided
 -- (mc15b_clear_1, 1 Oct). The grid, the pits and the first value of a session are set at once.
-R.TOP_EASE = 0.05; R.topV = {}
--- the same for the profile's base aggression (R.AGG_EASE per second): Clear drivers dropped a Veteran 0.58 -> 0.15 in one frame and
--- two cars were in contact 0.3-0.5 s later in both mc15b_clear races; the attack / defend / yield changes on top stay instant
-R.AGG_EASE = 0.1; R.aggV = {}
-function R.aggEase(i, target, car, dt)
-    local v = R.aggV[i]
-    if v and R.AGG_EASE > 0 and (car.speedKmh or 0) > 30 and not car.isInPitlane then
-        local mx = R.AGG_EASE * (dt or 0)
+-- The same for the profile's base aggression (R.AGG_EASE per second): Clear drivers dropped a Veteran 0.58 -> 0.15 in one frame and
+-- two cars were in contact 0.3-0.5 s later in both mc15b_clear races; the attack / defend / yield changes on top stay instant.
+R.TOP_EASE = 0.05; R.AGG_EASE = 0.1; R.topV = {}; R.aggV = {}
+function R.ease(tbl, i, target, car, dt, rate)   -- toward target at `rate` per second for a moving car; at once otherwise
+    local v = tbl[i]
+    if v and rate > 0 and (car.speedKmh or 0) > 30 and not car.isInPitlane then
+        local mx = rate * (dt or 0)
         if target > v + mx then target = v + mx elseif target < v - mx then target = v - mx end
     end
-    R.aggV[i] = target
+    tbl[i] = target
     return target
 end
-function R.topEase(i, target, car, dt)
-    local v = R.topV[i]
-    if v and R.TOP_EASE > 0 and (car.speedKmh or 0) > 30 and not car.isInPitlane then
-        local mx = R.TOP_EASE * (dt or 0)
-        if target > v + mx then target = v + mx elseif target < v - mx then target = v - mx end
-    end
-    R.topV[i] = target
-    return target
-end
+function R.topEase(i, target, car, dt) return R.ease(R.topV, i, target, car, dt, R.TOP_EASE) end
+function R.aggEase(i, target, car, dt) return R.ease(R.aggV, i, target, car, dt, R.AGG_EASE) end
 function R.lockOf(car) return car.steerLock end   -- (read under pcall: an older CSP's car state may not have the field)
 -- (R.STEER_FRAC) the steering wheel angle as a fraction of lock (car.steer and car.steerLock are both degrees); nil when unreadable
 function R.steerIn(car)
@@ -1747,7 +1739,7 @@ function R.beginFrame()
             end
             -- (0.15.1) Verve switched on AFTER the lights: the field is already strung out, so its 'rows' would be wrong (a car
             -- 200 m back held for ~3 s mid-lap, audit 2026-09-30). No staggered release, row caution or lanes this start.
-            if moving and top > R.OL_LATE_KMH then cv2.clock = os.clock(); cv2.late = true; pcall(ac.log, 'Verve: switched on after the start - no start hold this race'); return end
+            if moving and top > R.OL_LATE_KMH then cv2.clock = os.clock(); pcall(ac.log, 'Verve: switched on after the start - no start hold this race'); return end   -- (cv2.back stays empty: no hold)
             if moving then
                 cv2.clock = os.clock()
                 -- turn 1: scan forward from the front row for the first corner; remember its inside sign and where it is
