@@ -362,10 +362,19 @@ end
 function F.finish()
     local ok, sim = pcall(ac.getSim)
     if ok and sim and started then
-        local parts = {}
+        -- in finishing order (a reader taking results[1] as the winner was handed car 0); a car with no place goes last
+        local rows, parts = {}, {}
         for i = 0, sim.carsCount - 1 do
             local c = ac.getCar(i)
-            if c then parts[#parts + 1] = string.format('{"pos":%d,"car":%d,"laps":%d,"ret":%s}', c.racePosition or 0, i, c.lapCount or 0, tostring(c.isRetired == true)) end
+            if c then rows[#rows + 1] = { pos = c.racePosition or 0, i = i, laps = c.lapCount or 0, ret = c.isRetired == true } end
+        end
+        table.sort(rows, function(a, b)
+            local pa, pb = a.pos > 0 and a.pos or 1e9, b.pos > 0 and b.pos or 1e9
+            if pa ~= pb then return pa < pb end
+            return a.i < b.i
+        end)
+        for _, r in ipairs(rows) do
+            parts[#parts + 1] = string.format('{"pos":%d,"car":%d,"laps":%d,"ret":%s}', r.pos, r.i, r.laps, tostring(r.ret))
         end
         event(now(), 'race_end', '"results":[' .. table.concat(parts, ',') .. ']')
     end
