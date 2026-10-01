@@ -96,6 +96,10 @@ def check(diag):
                 nxt = [l for (w, l, s, t) in laps.get(car, []) if t >= e["t"]]
                 if nxt:
                     inclap.add((car, min(nxt)))
+    # the race's end: the leader's last lap event (after the flag AC moves every car to the pits: 18 'pit_in' at one instant)
+    lapsev = [e for e in ev if e.get("type") == "lap"]
+    lastlap = max((e.get("lap") or 0 for e in lapsev), default=0)
+    t_end = min((e["t"] for e in lapsev if (e.get("lap") or 0) == lastlap), default=1e12)   # the leader crossing the flag
     base = {c: med([s for (w, l, s, t) in v if w == 0 and (l or 0) >= 2 and (c, l) not in pitlap]) for c, v in laps.items()}
     usual = {}
     for (car, lap), v in top.items():
@@ -142,7 +146,7 @@ def check(diag):
             for (w, l, s, t) in v:
                 if w == k and (l or 0) >= 2 and (c, l) not in pitlap and (c, l) not in inclap and usual.get(c) and top.get((c, l), 0) < 0.85 * usual[c]:
                     capped += 1
-        cnt = collections.Counter(e.get("type") for e in ev if edges[k] <= e["t"] < edges[k + 1])
+        cnt = collections.Counter(e.get("type") for e in ev if edges[k] <= e["t"] < min(edges[k + 1], t_end))
         lv = med(lvl.get(k, []))
         print("  %-34s %6s %5d %6d %6d %6s %4d %4d %5d %5d %6d" % (
             names[k][:34], ("%.2f" % med(ls)) if ls else "-", slow, capped, refuel[k], ("%.0f" % lv) if lv else "-",
