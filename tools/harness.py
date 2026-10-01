@@ -261,11 +261,14 @@ def set_sessions(ini, args):
 def build_race_ini(args, base_path):
     if args.career:
         ini, n = career_race_ini(args.career, base_path)
+        # the RACE session (TYPE=3): an Extreme / Advanced event runs practice and qualifying first, and --laps on SESSION_0 shortened
+        # the practice while the race kept its 27 laps (2026-10-01). RACE_LAPS stays the event's (Verve's career signature reads it).
+        rs = next((x for x in ini.sections() if x.startswith("SESSION_") and ini.get(x, "TYPE", fallback="") == "3"), "SESSION_0")
         if args.laps:
-            ini.set("SESSION_0", "LAPS", str(args.laps)); ini.set("RACE", "RACE_LAPS", str(args.laps))
+            ini.set(rs, "LAPS", str(args.laps))
         else:
-            args.laps = int(ini.get("SESSION_0", "LAPS", fallback="4"))
-        ini.set("SESSION_0", "STARTING_POSITION", str(args.start_pos))
+            args.laps = int(ini.get(rs, "LAPS", fallback="4"))
+        ini.set(rs, "STARTING_POSITION", str(args.start_pos))
         return ini, n
     ini = read_ini(base_path)
     grid_src = read_ini(args.grid) if args.grid else ini
