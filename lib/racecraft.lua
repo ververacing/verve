@@ -705,6 +705,18 @@ end
 -- gave two unprofiled midfielders TOP_UNPROF's +0.13..0.16 grip in one frame, side by side into the Parabolica, and they collided
 -- (mc15b_clear_1, 1 Oct). The grid, the pits and the first value of a session are set at once.
 R.TOP_EASE = 0.05; R.topV = {}
+-- the same for the profile's base aggression (R.AGG_EASE per second): Clear drivers dropped a Veteran 0.58 -> 0.15 in one frame and
+-- two cars were in contact 0.3-0.5 s later in both mc15b_clear races; the attack / defend / yield changes on top stay instant
+R.AGG_EASE = 0.1; R.aggV = {}
+function R.aggEase(i, target, car, dt)
+    local v = R.aggV[i]
+    if v and R.AGG_EASE > 0 and (car.speedKmh or 0) > 30 and not car.isInPitlane then
+        local mx = R.AGG_EASE * (dt or 0)
+        if target > v + mx then target = v + mx elseif target < v - mx then target = v - mx end
+    end
+    R.aggV[i] = target
+    return target
+end
 function R.topEase(i, target, car, dt)
     local v = R.topV[i]
     if v and R.TOP_EASE > 0 and (car.speedKmh or 0) > 30 and not car.isInPitlane then
@@ -1016,6 +1028,7 @@ function R.evaluate(i, dt)
             baseA = clamp(baseA, R.AGGR_FLOOR, 1.0)   -- (R.AGGR_FLOOR) 0.2 = today
             baseA = clamp(baseA + (hash01(i * 11 + 5 + (R.SESSION_SALT and R.salt or 0) * 61) * 2 - 1) * K.AGGR_SPREAD * R.VARIABILITY, math.min(0.15, R.AGGR_FLOOR), 1.0)   -- (0.15) per-session salt
         end
+        baseA = R.aggEase(i, baseA, me, dt)       -- (0.15.1) a profile change mid-race eases the base in (attack/defend stay instant)
         local myLat = latOf(me.position)          -- current lateral on track (-1 left .. +1 right)
         local target, aggr, wide = 0, math.min(baseA, 1.0), 0    -- wide = 0..1 extra track width earned by an exit-speed run (baseA passes 1 only for a wild car)
         -- body damage SINCE the car's last repair (km/h). Not raw `me.damage`: that's a never-decreasing
@@ -1932,7 +1945,7 @@ function R.reset()
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     letbyT, letbyDone, letbyFor = {}, {}, {}
     cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {} }; R.cv2 = cv2
-    R.crawlN = 0; R.topV = {}
+    R.crawlN = 0; R.topV = {}; R.aggV = {}
     R.roomN = 0; R.roomAct = 0; R.evalN = 0; R.fastTuckN = 0; R.yellowSlowN = 0
     -- AGGR_BASE_FIX: the next session reads each car afresh; this session's capture and Verve's last write carry over for
     -- R.aggrBase's guard (empty while the switch is off: nothing happens)
