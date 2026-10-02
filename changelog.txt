@@ -1,3 +1,10 @@
+0.15.2
+- A car crawling round on light suspension damage is repaired where it is: before, a car with a slightly bent corner could
+  drive at walking pace for up to 20 minutes (seen with 2026 F1 cars at Bahrain) until the game retired it.
+- Timed races: if the game does not report the race as timed, Verve reads the race's own settings file, so the AI still gets
+  fuel for the whole race instead of pitting every lap. Race reports now say whether the timed-race fuel step ran.
+- Race feed: the results at the flag are listed in finishing order.
+
 0.15.1
 - Career mode: Verve now recognises every career race. Before, most series from the Lotus Lightweight Trofeo on - the Ferrari
   Trofeos, Formula Abarth and every GT3 and GT2 series with their Extreme versions - ran as normal races without the career
