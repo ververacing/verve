@@ -79,11 +79,28 @@ def views(rows):
         "incidents_per_car_ran": per_car(ran),
         "repositions": {b: {"n": v[0], "ok_pct": round(100 * v[1] / v[0], 1)} for b, v in builds.items() if v[0] >= 10},
         "installs": len({r.get("inst") for r in rows if r.get("inst")}),
-        "versions": dict(collections.Counter(r.get("verve_version") or "?" for r in rows).most_common(4)),
+        "versions": installs_by_version(rows),
         "tracks_new": sorted({r.get("track") for r in rows if r.get("track")}),
         "wet_races": sum(1 for r in races if r.get("is_wet")),
         "lua_errors": sum(1 for r in rows if r.get("lua_errors")),
     }
+
+
+def installs_by_version(rows):
+    """Installs by the newest Verve version each has reported, newest version first (every version, not a top few:
+    a new release shows up here the day players take it)."""
+    newest = {}
+    for r in rows:
+        i, t = r.get("inst"), r.get("created_at") or ""
+        if i and (i not in newest or t > newest[i][0]):
+            newest[i] = (t, r.get("verve_version") or "?")
+    def key(v):
+        try:
+            return tuple(int(x) for x in v.split("."))
+        except ValueError:
+            return (-1,)
+    c = collections.Counter(v for _, v in newest.values())
+    return {v: c[v] for v in sorted(c, key=key, reverse=True)}
 
 
 def main():
@@ -113,7 +130,7 @@ def main():
     line("lap1_share_ran", "{:.0%}"); line("incidents_per_car_ran", "{:.2f}")
     line("wet_races"); line("lua_errors")
     if full or now["versions"] != old.get("versions"):
-        print(f"  versions                 {now['versions']}")
+        print(f"  installs on (newest)     {now['versions']}")
     oldrep = old.get("repositions") or {}
     for b, v in sorted(now["repositions"].items()):
         was = oldrep.get(b)
