@@ -1177,7 +1177,8 @@ R.boxTryN = 0              -- rescues attempted
 R.boxOkN = 0               -- rescues that returned success
 R.boxRescueN = 0           -- session tally (diagnostics)
 R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0
-R.SUSP_FIX = 0.25          -- DEFAULT 0.14.4; >0: a car crawling on suspension damage >= this for SUSP_FIX_T s is REPAIRED where it is (all
+R.SUSP_FIX = 0.10          -- DEFAULT 0.15.2 (0.14.4: 0.25 - RSS 2026 cars at Bahrain crawled 6-20 min on 0.17, 1 Oct; 0.10 cut it to 3 min,
+                           -- crawl DNFs 2 -> 0, both PCs' suites not worse). >0: a car crawling on suspension damage >= this for SUSP_FIX_T s is REPAIRED where it is (all
 R.SUSP_FIX_T = 15.0        -- damage; its own fuel and tyre temperatures kept) and asked to pit. Owner's idea, 2026-09-25: Baku
 R.suspFixN = 0             -- cars at 0.30-0.49 ran at a median 30 km/h for the rest of the race. 0 = off.
 R.SUSP_FIX_MAX = 2         -- repairs per car per race; the next crawl retires it (a corner that keeps breaking is done)
