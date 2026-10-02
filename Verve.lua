@@ -547,6 +547,7 @@ telemetryCtx = function()
         for i, a in pairs(Racecraft.baseAggr or {}) do if i ~= 0 and type(a) == 'number' and a >= 0 then v[#v + 1] = a end end   -- (not slot 0: the autopilot reads 1.0)
         if #v > 0 then table.sort(v); settings[#settings + 1] = string.format('"launcherAggr":%.3f', v[math.floor((#v + 1) / 2)]) end
     end)
+    pcall(function() local f = Fuel.summary(); if f then settings[#settings + 1] = f end end)   -- (0.15.2) timed/lapped fuel work, if any
     local playerModel = ''; pcall(function() playerModel = ac.getCarID(0) or '' end)
     local cspBuild = nil; pcall(function() cspBuild = ac.getPatchVersionCode() end)
     return {

@@ -77,15 +77,67 @@ local function field(o, k)                        -- a newer CSP field, read wit
     return nil
 end
 
+-- (0.15.2) The launcher's own cfg/race.ini, read once a session: its sections by name ([SESSION_0] ...), keys upper-cased.
+local function raceIni()
+    if st.ini == nil then
+        st.ini = false
+        pcall(function()
+            local t = io.load(ac.getFolder(ac.FolderID.Cfg) .. '/race.ini', '') or ''
+            local secs, cur = {}, nil
+            for line in t:gmatch('[^\r\n]+') do
+                local h = line:match('^%s*%[([^%]]+)%]')
+                if h then cur = {}; secs[h:upper()] = cur
+                elseif cur then
+                    local k, v = line:match('^%s*([%w_]+)%s*=%s*([^;]*)')     -- (a ';' starts a comment)
+                    if k then cur[k:upper()] = v:match('^(.-)%s*$') end
+                end
+            end
+            st.ini = secs
+        end)
+    end
+    return st.ini or nil
+end
+
 -- The current session if it is a TIMED race (a duration, no lap count), else nil. Verve.lua's harness code uses it too.
+-- (0.15.2) CSP's session API first; when it shows no timed race, the launcher's cfg/race.ini decides (the current session's
+-- TYPE=3 with LAPS=0 and DURATION_MINUTES > 0). Insurance, not a proven fix: one player's timed F1 races at Bahrain (CSP 4184,
+-- 1 Oct) ran 21 % slow with half the field pitting in 3 laps, cause unknown (one install, one car pack); the race report's
+-- fuel summary (F.summary) shows whether the green load ran. The ini session has no extra-lap flag: it counts one (more fuel).
 function F.timedSession(sim)
-    local ss = nil
+    local ss, api = nil, nil
     pcall(function()
         if sim.raceSessionType ~= ac.SessionType.Race then return end
         local s = ac.getSession(sim.currentSessionIndex or 0)
+        api = s
         if s and (s.durationMinutes or 0) > 0 and (s.isTimedRace == true or (s.laps or 0) == 0) then ss = s end
     end)
+    if ss then st.src = st.src or 'csp'; return ss end
+    -- (no early 'the API says lapped' return: a build that reports a timed race with a lap count would skip the fallback;
+    -- race.ini is written by the launcher for this very launch; online races and replays never get here - see gate)
+    pcall(function()
+        if sim.raceSessionType ~= ac.SessionType.Race then return end   -- (works on 4184: its reports carry the race-only field spread)
+        local idx = sim.currentSessionIndex or 0
+        local sec = (raceIni() or {})['SESSION_' .. tostring(idx)]
+        if not sec or sec.TYPE ~= '3' then return end
+        local laps, mins = tonumber(sec.LAPS or '0') or 0, tonumber(sec.DURATION_MINUTES or '0') or 0
+        if laps == 0 and mins > 0 then
+            ss = { durationMinutes = mins, laps = 0, isTimedRace = true, hasAdditionalLap = true }
+            if st.src == nil then
+                st.src = 'race.ini'
+                pcall(ac.log, string.format('Verve fuel: timed race from race.ini (SESSION_%d: %d min); csp session: dur %s laps %s timed %s',
+                    idx, mins, tostring(api and api.durationMinutes), tostring(api and api.laps), tostring(api and api.isTimedRace)))
+            end
+        end
+    end)
     return ss
+end
+
+-- (0.15.2) for the race report's settings JSON (no schema change): did the timed / lapped fuel work run, from which source,
+-- and what did it write. nil when it never acted this session.
+function F.summary()
+    if not st.mode then return nil end
+    return string.format('"fuel":{"mode":"%s","src":"%s","rate":%.1f,"loads":%d,"boxFix":%d,"boxRe":%d,"laps":%d}',
+        st.mode, st.mode == 'lapped' and 'csp' or (st.src or '?'), st.rate or 1, F.loadN or 0, F.boxFixN or 0, F.boxReN or 0, st.laps or 0)
 end
 
 local function lappedSession(sim)                 -- (F.RATE_LAPPED) the current session if it is a LAPPED race
