@@ -361,7 +361,7 @@ def lua_literal(v):
 
 
 def parse_profiles(spec, ncars):
-    """'all=arch_rookie,last=lewis_hamilton,3=kevin_estre' -> {"all": key, "slots": {idx: key}}; 'last' = the back of the grid."""
+    """'all=arch_rookie,last=arch_veteran,3=gt_014' -> {"all": key, "slots": {idx: key}}; 'last' = the back of the grid."""
     if not spec:
         return None
     out = {"all": "", "slots": {}}
@@ -1157,7 +1157,7 @@ def main():
     ap.add_argument("--assists", help="JSON of launcher assists for this run only (cfg/assists.ini [ASSISTS]), e.g. {\"DAMAGE\":0} = damage off")
     ap.add_argument("--fault", help="JSON of Fault module fields (penalties), e.g. {\"ENABLED\":true,\"ENFORCE\":false}")
     ap.add_argument("--drivers", choices=["none", "random"], default="none", help="random: assign Verve driver profiles to the whole grid (the Randomize button)")
-    ap.add_argument("--profiles", help="fixed profiles: 'all=arch_rookie,last=lewis_hamilton,3=kevin_estre' (slot 0 = the autopilot player car; 'last' = back of the grid)")
+    ap.add_argument("--profiles", help="fixed profiles: 'all=arch_rookie,last=arch_veteran,3=gt_014' (slot 0 = the autopilot player car; 'last' = back of the grid)")
     ap.add_argument("--ab", nargs=2, metavar=("A.json", "B.json"), help="two arm files; runs alternate A,B,A,B...")
     ap.add_argument("--lap-budget-s", type=int, default=150, help="seconds allowed per lap before a run is killed")
     ap.add_argument("--ai-level", type=int, default=0, help="force every AI car's AI_LEVEL (career events and --models grids alike); 0 = as configured")
