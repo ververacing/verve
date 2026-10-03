@@ -1,5 +1,5 @@
 {
-  "version": "0.15.2",
+  "version": "0.15.3",
   "url": "https://github.com/ververacing/verve/releases/latest",
-  "summary": "Crawling cars on light suspension damage repaired, timed-race fuel safety net, race results in finishing order."
+  "summary": "Smoother frame times: less work per frame and fewer saves during a race, same racing."
 }
