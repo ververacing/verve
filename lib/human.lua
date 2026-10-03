@@ -673,32 +673,14 @@ function H.reset()     -- session start: re-derive the per-track distances; the 
 end
 
 -- Returns additive (gripOffset, cautionOffset). Player / slow / recovering cars -> 0,0.
-function H.getModifiers(i)
-    if not H.ENABLED then return 0, 0 end
-    if not scaled then scaled = true; pcall(function() scaleToTrack(ac.getSim().trackLengthM) end) end
-    if i == nil or i < 0 then return 0, 0 end
-    if i == 0 then local isAI = false; pcall(function() local c = ac.getCar(0); isAI = c ~= nil and c.isAIControlled == true end); if not isAI then return 0, 0 end end
-    do
-        local ok, spd = pcall(function() local c = ac.getCar(i); return (c and c.speedKmh) or 999 end)
-        if ok and spd and spd < 40 then return 0, 0 end
-    end
-    seed(i)
-    local now = os.clock()
-    local prof = Drivers.statsOf(i)     -- optional per-slot driver profile (nil = normal system)
-
-    local vGrip, vCaut = 0, 0
-    if H.HUMAN_VAR then
-        -- a driver profile pins consistency (metronomic vs streaky) and cancels the random pace
-        -- bias (pace is handled deterministically via the car's AI level in the director).
-        local consDiv = prof and (0.4 + 1.2 * prof.cons) or cons[i]
-        local dwv = 0.6 * math.sin(now * 0.050 + phase[i]) + 0.4 * math.sin(now * 0.017 + phase[i] * 1.7)
-        dwv = dwv / consDiv
-        vGrip = (prof and 0 or pers[i]) + dwv * DRIFT_AMP
-        vCaut = -dwv * CAUTION_AMP
-    end
-    local pGrip, pCaut, mvG, mvC = 0, 0, 0, 0   -- mvG / mvC: H.MISTAKE_V2's dip and caution (full strength, outside the slew)
-
-    pcall(function()
+-- (lean016) getModifiers' inner body is ONE closure for the whole session: it was a pcall(function() ... end) built per car
+-- per frame, plus a closure for the speed read - ~1.7 KB of garbage per car per frame, the biggest single source in the
+-- profiler's per-function probe (3 Oct). The car, the clock, the profile and the six levers live in this do-block (nothing
+-- else in the file sees them); Verve.lua's car loop is the only caller, one car at a time. The bodies are unchanged.
+do
+local i, now, prof, vGrip, vCaut, pGrip, pCaut, mvG, mvC = nil, 0, nil, 0, 0, 0, 0, 0, 0
+local spdOf = function() local c = ac.getCar(i); return (c and c.speedKmh) or 999 end
+local modBody = function()
         local car = ac.getCar(i)
         if not car then return end
         local cm = Classes.multOf(i)
@@ -784,7 +766,34 @@ function H.getModifiers(i)
             local da = dirtyair01(i, car)
             if da > 0 and cm.dirty > 0 then pGrip = pGrip - DIRTY_MAX_GRIP * da * cm.dirty; pCaut = pCaut + DIRTY_MAX_CAUT * da * cm.dirty * H.DIRTY_CAUT_X end
         end
-    end)
+    end
+function H.getModifiers(i_)
+    i = i_
+    if not H.ENABLED then return 0, 0 end
+    if not scaled then scaled = true; pcall(function() scaleToTrack(ac.getSim().trackLengthM) end) end
+    if i == nil or i < 0 then return 0, 0 end
+    if i == 0 then local isAI = false; pcall(function() local c = ac.getCar(0); isAI = c ~= nil and c.isAIControlled == true end); if not isAI then return 0, 0 end end
+    do
+        local ok, spd = pcall(spdOf)
+        if ok and spd and spd < 40 then return 0, 0 end
+    end
+    seed(i)
+    now = os.clock()
+    prof = Drivers.statsOf(i)     -- optional per-slot driver profile (nil = normal system)
+
+    vGrip, vCaut = 0, 0
+    if H.HUMAN_VAR then
+        -- a driver profile pins consistency (metronomic vs streaky) and cancels the random pace
+        -- bias (pace is handled deterministically via the car's AI level in the director).
+        local consDiv = prof and (0.4 + 1.2 * prof.cons) or cons[i]
+        local dwv = 0.6 * math.sin(now * 0.050 + phase[i]) + 0.4 * math.sin(now * 0.017 + phase[i] * 1.7)
+        dwv = dwv / consDiv
+        vGrip = (prof and 0 or pers[i]) + dwv * DRIFT_AMP
+        vCaut = -dwv * CAUTION_AMP
+    end
+    pGrip, pCaut, mvG, mvC = 0, 0, 0, 0   -- mvG / mvC: H.MISTAKE_V2's dip and caution (full strength, outside the slew)
+
+    pcall(modBody)
 
     local k = H.INTENSITY
     local gripTarget = vGrip * k + pGrip
@@ -805,5 +814,6 @@ function H.getModifiers(i)
     if mvG ~= 0 then return math.max(cur - mvG, H.MV_GRIP_FLOOR), cautionOff end   -- a mistake's dip: fast, outside the slew
     return cur, cautionOff
 end
+end   -- (lean016) the getModifiers do-block
 
 return H
