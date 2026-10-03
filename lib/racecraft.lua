@@ -728,10 +728,13 @@ function R.steerIn(car)
     return nil
 end
 
-function R.evaluate(i, dt)
-    if not R.ENABLED then return 0 end
-    local caut, state = 0, 0
-    pcall(function()
+-- (lean016) The evaluate body is ONE closure for the whole session. It was a pcall(function() ... end) built per car per frame:
+-- the closure plus the locals it captured, ~1 KB of garbage each time, and the owner-video repro (3 Oct) showed Verve's garbage
+-- feeding the GC inside the hitch bursts. Its inputs and outputs live in this do-block (nothing else in the file sees them);
+-- R.evaluate is the only caller, from Verve.lua's car loop, one car at a time, never re-entered. The body is unchanged.
+do
+local i, dt, caut, state = 0, 0, 0, 0
+local evalBody = function()
         local me = ac.getCar(i)
         if not me or not me.isAIControlled then return end
         local spd = me.speedKmh or 0
@@ -904,7 +907,7 @@ function R.evaluate(i, dt)
             if tightHere >= R.ROOM_ON then
                 R.roomN = (R.roomN or 0) + 1
                 local L0 = R.last[i]
-                roomB = (cv2.roomFollow and not lappedAhead and not (Recovery.stateOf(i) or {}).rec
+                roomB = (cv2.roomFollow and not lappedAhead and not (Recovery.stateOf(i) or R.NOSTATE).rec
                         and not (L0 and (math.abs(L0.off or 0) > 0.25 or L0.rs or (L0.mv or 0) > 0))) or false
                 roomOn = spd < R.ROOM_VMAX
                 roomF = roomOn and roomB
@@ -931,7 +934,7 @@ function R.evaluate(i, dt)
         pcall(function() physics.setAITopSpeed(i, cap) end)
         -- CONVOY v2: throttle only (see the constants). Left alone for a car recovery is driving (its own throttle ramp).
         local thr = 1.0
-        if R.CONVOY2_ON and (myLap == 0 or roomF) and crowd >= 1 and not (Recovery.stateOf(i) or {}).rec then
+        if R.CONVOY2_ON and (myLap == 0 or roomF) and crowd >= 1 and not (Recovery.stateOf(i) or R.NOSTATE).rec then
             if myLap == 0 and cv2.clock and cv2.back[i] then
                 local tl0 = os.clock() - cv2.clock
                 if tl0 < (cv2.react[i] or 0) then thr = math.min(thr, CV.REACT_THR)   -- reaction time: not on the gas yet
@@ -956,7 +959,7 @@ function R.evaluate(i, dt)
             if myLap == 0 and R.OL_SIDEYIELD and sideBy and cornerAhead(mySpline) then thr = math.min(thr, CV.SIDE_THR) end
         end
         -- FAST TUCK (R.FAST_TUCK): two abreast at speed into a bend, the car behind by a nose backs out instead of squeezing
-        if R.FAST_TUCK > 0 and (sideBy or fastBy) and spd > R.FAST_TUCK and myLap >= R.FAST_TUCK_MINLAP and not (Recovery.stateOf(i) or {}).rec then
+        if R.FAST_TUCK > 0 and (sideBy or fastBy) and spd > R.FAST_TUCK and myLap >= R.FAST_TUCK_MINLAP and not (Recovery.stateOf(i) or R.NOSTATE).rec then
             local look = (mySpline + spd / 3.6 * R.FAST_TUCK_LOOK / trackLen) % 1
             if (cornerAhead(look) or cornerAhead(mySpline))
                and (not R.FAST_TUCK_TS or Troublespots.cautionAt(look, classKey) > 0 or Troublespots.cautionAt(mySpline, classKey) > 0) then
@@ -968,7 +971,7 @@ function R.evaluate(i, dt)
         -- VISIBLE MISTAKE (lib/human.lua H.MISTAKE_V2): human wrote this frame's levers just before (Verve.lua: getModifiers, then evaluate);
         -- lv = valid-until. A lift's throttle cap here, a late brake's hint in the guard below, a run-wide's offset after the side-hold.
         local hm = R.humanMv and R.humanMv[i]
-        if hm and (os.clock() >= (hm.lv or 0) or (Recovery.stateOf(i) or {}).rec) then hm = nil end
+        if hm and (os.clock() >= (hm.lv or 0) or (Recovery.stateOf(i) or R.NOSTATE).rec) then hm = nil end
         if hm and hm.thr then thr = math.min(thr, hm.thr); cv2.mvThr[i] = true end
         if thr < 1.0 then cv2.thr[i] = true; pcall(physics.setAIThrottleLimit, i, thr)
         elseif cv2.thr[i] then cv2.thr[i] = nil; cv2.mvThr[i] = nil; pcall(physics.setAIThrottleLimit, i, 1.0) end
@@ -981,7 +984,7 @@ function R.evaluate(i, dt)
             end
             local mul = R.BG_ALL > 0 and R.BG_ALL or 1.0
             if wild and R.WILD_BH ~= 1 and R.last[i] and R.last[i].state == 1 then mul = mul * R.WILD_BH end   -- (R.WILD_BH) attacking: his own brake point
-            if ((R.OL_BRAKEGUARD and startX > 0 and myLap <= 1 and not (wild and R.WILD_START)) or roomB) and aheadIdx >= 0 and not (Recovery.stateOf(i) or {}).rec then
+            if ((R.OL_BRAKEGUARD and startX > 0 and myLap <= 1 and not (wild and R.WILD_START)) or roomB) and aheadIdx >= 0 and not (Recovery.stateOf(i) or R.NOSTATE).rec then
                 local gm = gapA * trackLen
                 local reach = CV.BG_M
                 if roomB then reach = reach * (1 + R.ROOM_BG * tightHere) end   -- ROOM_FOLLOW: a longer reach into tight room (the corridor entries, at any speed)
@@ -1713,12 +1716,18 @@ function R.evaluate(i, dt)
         L.wild = wild and (wm > 0 and 'tilt' or 'calm') or nil   -- (R.WILD) the feed's verve.wild
         L.mv = Strategy.last[i] or 0
         R.last[i] = L
-    end)
+    end
+function R.evaluate(i_, dt_)
+    if not R.ENABLED then return 0 end
+    i, dt, caut, state = i_, dt_, 0, 0
+    pcall(evalBody)
     if state == 1 then R.attacking = R.attacking + 1
     elseif state == 2 then R.defending = R.defending + 1 end
     return caut + (R.CAUT_BASE or 0)
 end
+end   -- (lean016) the evaluate do-block
 
+R.NOSTATE = {}              -- (lean016) read-only stand-in for 'no recovery state': never write to it
 R.last = {}                 -- per-car applied values (offset/aggr/caution/state) -- diagnostics only
 function R.beginFrame()
     R.attacking = 0; R.defending = 0

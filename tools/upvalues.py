@@ -11,10 +11,12 @@ for path in sys.argv[1:]:
             names.add(n.strip())
     for m in re.finditer(r"^local function\s+(\w+)", s, re.M):
         names.add(m.group(1))
-    for m in re.finditer(r"^function\s+([\w.]+)\s*\(", s, re.M):
+    # a function starts at 'function name(' or (lean016: the racecraft evaluate body) 'local name = function(' in column 0
+    FN = r"^(?:function\s+([\w.]+)\s*\(|local\s+(\w+)\s*=\s*function\s*\()"
+    for m in re.finditer(FN, s, re.M):
         start = m.end()
-        nxt = re.search(r"^function\s+[\w.]+\s*\(", s[start:], re.M)
+        nxt = re.search(FN, s[start:], re.M)
         body = s[start:start + nxt.start()] if nxt else s[start:]
         used = [n for n in names if n and re.search(r"\b" + re.escape(n) + r"\b", body)]
         flag = "  <-- near the limit" if len(used) > 105 else ""
-        print(f"{path}: {m.group(1)}: {len(used)} upvalue candidates{flag}")
+        print(f"{path}: {m.group(1) or m.group(2)}: {len(used)} upvalue candidates{flag}")
