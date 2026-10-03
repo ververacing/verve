@@ -706,37 +706,12 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
     return okp
 end
 
-function R.update(dt)
-    if not R.ENABLED then R.count = 0; return end
-    local ok, sim = pcall(ac.getSim)
-    if not ok or not sim then return end
-    if os.clock() < R.settleUntil then R.count = 0; return end   -- a new session's first frames are the old one's (R.SETTLE_S)
-    local active = 0
-    if not scaled then scaled = true; pcall(function() scaleToTrack(sim.trackLengthM) end) end   -- per-track distances (self-heals after a hot-reload)
-    if #drops > 0 or (R.dropsOff and R.DROP_REARM_S > 0 and R.DROP_RATE_V2) then pcall(judgeDrops, os.clock()) end   -- (R.DROP_REARM_S) the re-arm needs a tick with no drops left
-    pcall(function() R.raceSession = (sim.raceSessionType == ac.SessionType.Race) end)
-    if R.pointToPoint == nil then      -- once per session: a hill climb / touge has no lap to rejoin and its finish is a stop
-        R.pointToPoint = false
-        pcall(function()
-            local a = ac.trackProgressToWorldCoordinate(0.0, false); local b = ac.trackProgressToWorldCoordinate(0.995, false)
-            if a and b and a:distance(b) > 300 then R.pointToPoint = true; ac.log('Verve: point-to-point track - recovery stands down') end
-        end)
-    end
-    if not overridesCleared then
-        -- After a (re)load our per-car tables are empty but the limits we set on the PHYSICS side persist: a
-        -- car mid throttle-ramp would stay at 40% throttle for the rest of the race. Clear them all once.
-        overridesCleared = true
-        for i = 0, sim.carsCount - 1 do
-            pcall(function()
-                local c = ac.getCar(i)
-                if c and c.isAIControlled and not c.isRetired then physics.setAIThrottleLimit(i, 1); physics.setAITopSpeed(i, 1e9); physics.setAIStopCounter(i, 0) end
-            end)
-            overriding[i] = true; releaseControls(i)      -- and any stale control override from before the (re)load
-        end
-    end
-    if R.pointToPoint then R.count = 0; return end
-    for i = 0, sim.carsCount - 1 do          -- includes the player's car WHEN it's under AI control (Ctrl+C)
-        pcall(function()
+-- (lean016) The per-car body is ONE closure for the whole session: it was a pcall(function() ... end) built per car per frame
+-- (recovery allocated ~16 KB per frame in the owner-video repro, 3 Oct). Its inputs (the car, the sim, dt) and the active-car
+-- count live in this do-block (nothing else in the file sees them); R.update is the only caller, once per frame. Body unchanged.
+do
+local i, sim, dt, active = 0, nil, 0, 0
+local carBody = function()
             local car = ac.getCar(i)
             if not car then return end
             trackLaps(i, car)
@@ -1157,10 +1132,45 @@ function R.update(dt)
                     end
                 end
             end
+        end
+function R.update(dt_)
+    dt = dt_
+    if not R.ENABLED then R.count = 0; return end
+    local ok, sim_ = pcall(ac.getSim)
+    if not ok or not sim_ then return end
+    sim = sim_
+    if os.clock() < R.settleUntil then R.count = 0; return end   -- a new session's first frames are the old one's (R.SETTLE_S)
+    active = 0
+    if not scaled then scaled = true; pcall(function() scaleToTrack(sim.trackLengthM) end) end   -- per-track distances (self-heals after a hot-reload)
+    if #drops > 0 or (R.dropsOff and R.DROP_REARM_S > 0 and R.DROP_RATE_V2) then pcall(judgeDrops, os.clock()) end   -- (R.DROP_REARM_S) the re-arm needs a tick with no drops left
+    pcall(function() R.raceSession = (sim.raceSessionType == ac.SessionType.Race) end)
+    if R.pointToPoint == nil then      -- once per session: a hill climb / touge has no lap to rejoin and its finish is a stop
+        R.pointToPoint = false
+        pcall(function()
+            local a = ac.trackProgressToWorldCoordinate(0.0, false); local b = ac.trackProgressToWorldCoordinate(0.995, false)
+            if a and b and a:distance(b) > 300 then R.pointToPoint = true; ac.log('Verve: point-to-point track - recovery stands down') end
         end)
+    end
+    if not overridesCleared then
+        -- After a (re)load our per-car tables are empty but the limits we set on the PHYSICS side persist: a
+        -- car mid throttle-ramp would stay at 40% throttle for the rest of the race. Clear them all once.
+        overridesCleared = true
+        for i = 0, sim.carsCount - 1 do
+            pcall(function()
+                local c = ac.getCar(i)
+                if c and c.isAIControlled and not c.isRetired then physics.setAIThrottleLimit(i, 1); physics.setAITopSpeed(i, 1e9); physics.setAIStopCounter(i, 0) end
+            end)
+            overriding[i] = true; releaseControls(i)      -- and any stale control override from before the (re)load
+        end
+    end
+    if R.pointToPoint then R.count = 0; return end
+    for i_ = 0, sim.carsCount - 1 do          -- includes the player's car WHEN it's under AI control (Ctrl+C)
+        i = i_
+        pcall(carBody)
     end
     R.count = active
 end
+end   -- (lean016) the recovery update do-block
 
 -- SUSPENSION LIMPER (harness A/B: R.SUSP_LIMP > 0 = the suspension damage, 0..1, that counts). Re-bodying never fixes
 -- suspension, so a car with a broken corner crawls at 30 km/h on the racing line for the rest of the race (Barcelona
