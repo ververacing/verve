@@ -211,6 +211,15 @@ function F.update(dt, stats)
             if c.lap > p.lap then
                 local lt = t - (lapStart[i] or t)
                 lapStart[i] = t
+                if p.lap == 0 then
+                    -- (0.16) The FIRST lap gets an event too. It used to be skipped because it is not a clean lap time
+                    -- (lapStart is when this feed first saw the car, so it includes the grid wait), but the consequence was
+                    -- that anyone counting laps from lap events undercounted by one per car - it cost the broadcast side a
+                    -- wrong car-lap total on the Brands Hatch comparison (3 Oct). Same field shape so no loader breaks:
+                    -- 'first':true marks it, 'best' is false, and it never touches bestLap / overallBest / fastest_lap.
+                    -- Consumers wanting lap TIMES must skip first:true; consumers counting laps can now count events.
+                    event(t, 'lap', string.format('"car":%d,"lap":1,"time_s":%.1f,"best":false,"first":true', i, lt))
+                end
                 if p.lap >= 1 and lt > 20 then
                     local best = lt < (bestLap[i] or 1e9)
                     if best then bestLap[i] = lt end
