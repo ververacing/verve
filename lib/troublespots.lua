@@ -65,6 +65,12 @@ local dirtyStore = false
 local booted = false             -- have we loaded this track's data yet? (self-heal after a hot-reload)
 local recent = 0                 -- decaying count of incidents this session
 T.storeLen = 0                   -- diagnostics: size of the last persisted map
+-- (lean016) seconds between in-race saves. Each save re-serialised every track's map (~40 KB, up to 20 ms on PC #1) and the
+-- per-second decay marks the map dirty, so at 20 s it was a hitch every 20 s all race long (profiler, 3 Oct). The live map
+-- in memory is what the AI reads; the disk copy only carries it to the next session - saved at every session change
+-- (T.reset) and when the app unloads (Verve.lua's onRelease), so a longer interval only risks a crash's last minutes.
+T.SAVE_EVERY = 300
+T._all = nil                     -- (lean016) the decoded store, kept between saves (it was parsed again for every save)
 T.lastSaveOk = true              -- diagnostics: did the last save read back intact?
 
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
@@ -109,7 +115,7 @@ function T.save(force)
     if not force and not dirtyStore then return end
     pcall(function()
         for _, bins in pairs(data) do pruneClass(bins) end    -- hard-bound each class before writing
-        local all = loadAll()
+        local all = T._all or loadAll(); T._all = all
         -- NEVER overwrite a track's learned data with an empty set. A CSP hot-reload (or the app
         -- re-initialising) resets `data` to {}; without this guard the next save/reset would wipe the
         -- stored history for the track. If we have nothing in memory, leave whatever's on disk alone.
@@ -141,7 +147,8 @@ function T.reset()
     recent = 0
     T.mute = {}
     if not T.FRESH then pcall(function()
-        local td = loadAll()[trackKey]
+        T._all = loadAll()
+        local td = T._all[trackKey]
         if type(td) == 'table' then data = td end
     end) end
     refreshPeaks()
@@ -223,7 +230,7 @@ function T.update(dt)
         recent = math.max(0, recent * (1 - el / RECENT_TAU))
         refreshPeaks()
     end
-    if now - lastSave > SAVE_EVERY then lastSave = now; T.save(false) end
+    if now - lastSave > (T.SAVE_EVERY or SAVE_EVERY) then lastSave = now; T.save(false) end
 end
 
 -- diagnostic: how many genuine trouble spots the track currently has (track-wide map)
