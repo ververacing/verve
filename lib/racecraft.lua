@@ -178,6 +178,8 @@ R.FAST_TUCK_MINLAP = 0        -- the rule acts from this lap on (Verve's lap cou
                               -- 25, 14 with FAST_TUCK 200 vs 5, 10 without - the lift into turn 1 in the opening pack concertinas
 R.fastTuckN = 0               -- diag: car-frames tucking in
 R.BG_T = 0                    -- >0: the guard's reach is closing speed x this many seconds (min CV.BG_M) and a much slower car ahead counts as braking (A/B)
+R.BG_RACE = false             -- the brake-zone guard keeps working after the opening lap (A/B with BG_T). 60% of the damaging
+                              -- nose-to-tail contacts on open-wheel grids happen from lap 2 on, where the guard is gated off today.
 R.OL_BRAKEGUARD = true        -- opening lap: brake earlier when the car ahead on my line is already braking inside CV.BG_M (harness A/B)
 R.BG_ALL = 0                  -- >0: every AI car's brake hint x this all race (direction test only; 0 = off)
 -- ROAD SPACE (harness A/B: R.ROADSPACE): "use the whole road". The reactive pass aims a fixed small nudge off the racing
@@ -984,7 +986,7 @@ local evalBody = function()
             end
             local mul = R.BG_ALL > 0 and R.BG_ALL or 1.0
             if wild and R.WILD_BH ~= 1 and R.last[i] and R.last[i].state == 1 then mul = mul * R.WILD_BH end   -- (R.WILD_BH) attacking: his own brake point
-            if ((R.OL_BRAKEGUARD and startX > 0 and myLap <= 1 and not (wild and R.WILD_START)) or roomB) and aheadIdx >= 0 and not (Recovery.stateOf(i) or R.NOSTATE).rec then
+            if ((R.OL_BRAKEGUARD and startX > 0 and (myLap <= 1 or R.BG_RACE) and not (wild and R.WILD_START)) or roomB) and aheadIdx >= 0 and not (Recovery.stateOf(i) or R.NOSTATE).rec then
                 local gm = gapA * trackLen
                 local reach = CV.BG_M
                 if roomB then reach = reach * (1 + R.ROOM_BG * tightHere) end   -- ROOM_FOLLOW: a longer reach into tight room (the corridor entries, at any speed)
