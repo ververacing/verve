@@ -378,7 +378,36 @@ def parse_profiles(spec, ncars):
                 out["slots"][i] = v
         else:
             out["slots"][int(k)] = v
+    warn_unknown_profiles(out)
     return out
+
+
+def roster_keys():
+    """Every profile key lib/drivers.lua defines, or None if it cannot be read."""
+    try:
+        with open(os.path.join(VERVE, "lib", "drivers.lua"), encoding="utf-8") as f:
+            return set(re.findall(r"key='([^']+)'", f.read())) or None
+    except Exception:
+        return None
+
+
+_warned_profiles = set()
+
+
+def warn_unknown_profiles(prof):
+    """Say so when a profile key is not in the roster. A stale key is otherwise silent: the slot simply gets no
+    profile and the grid falls back to generic names, which only shows up after the race (the 0.15.3 key rename made
+    every old real-name key stale). Warning only - never fail a queued run over it."""
+    keys = roster_keys()
+    if not keys:
+        return
+    wanted = [v for v in [prof.get("all")] + list((prof.get("slots") or {}).values()) if v]
+    for v in wanted:
+        if v not in keys and v not in _warned_profiles:
+            _warned_profiles.add(v)
+            print("  !! profile key %r is not in the roster - that slot gets NO profile (generic name, default pace)." % v)
+            if "_" in v and not v.split("_")[-1].isdigit():
+                print("     keys became <bucket>_<NNN> in 0.15.3 (f1_001, gt_014); archetypes arch_rookie / arch_midfield / arch_veteran are unchanged.")
 
 
 PLAYER_NAME_FALLBACK = "Kai Weber"   # fictional, and not one the generic grid names produce
