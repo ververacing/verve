@@ -23,3 +23,10 @@ docs/
 .env
 .env.*
 .claude/settings.local.json
+
+# roster sources: real drivers' names and our ratings of them - desk only, never committed or shipped
+# (owner's call 3 Oct 2026; they had been public since v0.10.0. Kept in verve_desk/racecraft/roster_sources/)
+tools/verve_driver_profiles.csv
+tools/raw_*.csv
+tools/gen_drivers.py
+roster_names*.csv

@@ -428,7 +428,7 @@ Verve - changelog
 - Cleaner racing: a grid funnel so the field merges onto the line gradually off the start instead of
   all diving for it at once; a launch boost so cars don't bog off the line; opportunistic inside AND
   outside passes that use more of the track when a car has a real speed run -- and scale with the
-  driver's aggression (Verstappen takes every opening, Prost picks his); and an anti-rear-end ease so
+  driver's aggression (an attacker takes every opening, a measured driver picks his); and an anti-rear-end ease so
   a fast-closing car doesn't pile into the back of a slower one in the braking zone, without killing
   the overtake.
 
@@ -439,7 +439,7 @@ Verve - changelog
   record, so the field feels like individuals. Class-filtered, type-to-search dropdown next to
   each car; one-click "Randomize driver grid"; session-only, so five identical cars can be five
   different drivers. Cross-discipline: drivers show up in every category they genuinely raced
-  (e.g. Verstappen in a kart). Pace sets each car's AI level. Leave a slot blank for the normal
+  (e.g. a modern F1 star in a kart). Pace sets each car's AI level. Leave a slot blank for the normal
   slider-driven behaviour.
 - Crash & retirement control: Verve now decides retirements, not AC. A car that spins or crashes
   is held (AC's own retirement blocked), given a quick wing/body repair in place after a penalty,

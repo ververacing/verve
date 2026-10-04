@@ -703,7 +703,7 @@ local modBody = function()
                     -- driver RISK drives errors, and works even on classes that never bobble by
                     -- default (e.g. formula). Fragile aero classes (low classGate) get errors far
                     -- LESS often and gentler, so a driver's risk shows as the odd lost place, not a
-                    -- spin/DNF -- while the relative order between drivers (Lance > Lewis) is kept.
+                    -- spin/DNF -- while the relative order between drivers (the riskier one still errs more) is kept.
                     local frag = math.min(classGate, 1)          -- 0 = fragile aero .. 1 = robust
                     rate = (MISTAKE_BASE + MISTAKE_RATE * p) * (0.15 + 1.15 * prof.risk) * (0.30 + 0.70 * frag)
                     sevScale = 0.45 + 0.55 * frag

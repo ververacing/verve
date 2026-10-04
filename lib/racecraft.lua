@@ -1168,7 +1168,7 @@ local evalBody = function()
                 -- a genuine exit-speed run earns extra width -- and how readily a car takes it scales
                 -- with AGGRESSION (the driver profile's aggr, or the Quick Race slider, via baseA): an
                 -- aggressive driver pounces on a smaller advantage AND commits harder to it; a cautious
-                -- one needs a bigger gap and uses less width. Verstappen takes every opening; Prost picks his.
+                -- one needs a bigger gap and uses less width. An attacker takes every opening; a measured driver picks his.
                 local minAdv = K.OUTSIDE_MIN_ADV * (1.4 - baseA)
                 wide = clamp(clamp((spd - aheadSpd - minAdv) / K.OUTSIDE_RANGE, 0, 1) * (0.5 + baseA), 0, 1.5)
                 if isCorner and inside ~= 0 then
