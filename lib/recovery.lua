@@ -214,11 +214,11 @@ local dropFailed = {}      -- cars whose last reposition did NOT rejoin: no seco
 R.dropN, R.dropOK = 0, 0   -- session tally (for the UI / diagnostics)
 R.DROP_RATE_V2 = true      -- DEFAULT 0.14.4; switch-off rate over JUDGED drops of cars undamaged at the drop (false = dropOK/dropN, which counts
 R.DROP_RATE_SUSP = 0.20    -- pending drops and bent-suspension crawlers as failures: 4 false switch-offs in 535 races, 2026-09-25)
-R.DROP_HURT_SPEED = 0      -- >0: a drop of a car already on bent suspension (recorded susp >= R.DROP_RATE_SUSP) counts as
-                           -- rejoined at THIS speed instead of DROP_OK_SPEED. A crippled car that is rolling HAS rejoined -- the
-                           -- suspension logic (SUSP_FIX / SUSP_LIMP) then owns its fate, pit or retire, which is what real racing does.
-R.DROP_HURT_KEEP = false   -- a failed drop of a crippled car does not bar that car from being repositioned again (DROP_MAX_PER_CAR
-                           -- still caps it at 6). Today one failure sets dropFailed for the whole race, even after the car is repaired.
+R.DROP_ROLL = 0            -- >0: a repositioned car that has covered THIS fraction of a lap and is still moving counts as
+                           -- rejoined even if it never passed DROP_OK_SPEED. A car under way on bent suspension HAS rejoined;
+                           -- SUSP_FIX / SUSP_LIMP then decide whether it pits or retires, which is what real racing does. Today
+                           -- the flat 60 km/h test calls it a failure, which also bars it from any further reposition that race.
+R.DROP_ROLL_SPEED = 10     -- ...and is still moving at least this fast, so a car that rolled to a stop is not excused.
 R.rateOK, R.rateN = 0, 0   -- the V2 tally (judged, undamaged at the drop)
 R.TEMP_WHEELS = { 0, 1, 2, 3 }   -- DEFAULT 0.14.4; tyre restore: a 4-list {FL,FR,RL,RR} of the wheel argument to use (false = WHEEL_BITS, which restores
                            -- 2 of 4 wheels - front-left always 12 C after a drop, 2026-09-25). Candidates {0,1,2,3}, {1,2,4,8}.
@@ -368,17 +368,20 @@ local function judgeDrops(now)
     for _, d in ipairs(drops) do
         if d.ok == nil then
             local c = ac.getCar(d.i)
-            local okSpd = DROP_OK_SPEED
-            if R.DROP_HURT_SPEED > 0 and (d.sus or 0) >= R.DROP_RATE_SUSP then okSpd = R.DROP_HURT_SPEED end
-            if c and (c.speedKmh or 0) > okSpd then
+            local rolled = false
+            if R.DROP_ROLL > 0 and c and d.spl and (c.speedKmh or 0) > R.DROP_ROLL_SPEED then
+                local gained = (c.splinePosition or 0) - d.spl          -- wrapped: a drop before the line, judged after it
+                if gained < -0.5 then gained = gained + 1 elseif gained > 0.5 then gained = gained - 1 end
+                rolled = gained >= R.DROP_ROLL
+            end
+            if c and ((c.speedKmh or 0) > DROP_OK_SPEED or rolled) then
                 d.ok = true; R.dropOK = R.dropOK + 1
                 if (d.sus or 0) < R.DROP_RATE_SUSP and not R.wildCar[d.i] then R.rateN = R.rateN + 1; R.rateOK = R.rateOK + 1 end
             elseif now - d.t > DROP_JUDGE_T or (c and c.isRetired) then
                 d.ok = false
                 local retry = R.GATE_FAIL_RETRY and d.gs and R.gateRetry[d.i] == nil and not (c and c.isRetired)   -- (a parked car: parkInPits set false)
                 if retry then R.gateRetry[d.i] = d.gs; R.gateRetryT[d.i] = now   -- one ungated retry where it stopped
-                elseif not (R.gateRetryT[d.i] and d.t < R.gateRetryT[d.i])
-                   and not (R.DROP_HURT_KEEP and (d.sus or 0) >= R.DROP_RATE_SUSP) then dropFailed[d.i] = true end   -- (a drop made BEFORE the
+                elseif not (R.gateRetryT[d.i] and d.t < R.gateRetryT[d.i]) then dropFailed[d.i] = true end   -- (a drop made BEFORE the
                 -- retry was granted, judged after it, must not void it: the retry's own record decides. Review 2026-09-28)
                 -- a failure that earns a retry is not scored: the retry is judged on its own. (Counting it dragged
                 -- the session rate down on Baku, where castle-entry landings fail: 4 misses in 5 turn repositioning off.)
