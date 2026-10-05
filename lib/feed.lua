@@ -73,7 +73,7 @@ end
 local function sessionMs(sim) return sim.currentSessionTime end
 local function simNow()
     local ok, sim = pcall(ac.getSim)
-    if ok and sim then local ok2, v = pcall(sessionMs, sim); if ok2 and type(v) == 'number' then return math.floor(v) end end
+    if ok and sim then local ok2, v = pcall(sessionMs, sim); if ok2 and type(v) == 'number' and v > -1e9 and v < 1e10 then return math.floor(v) end end
     return nil
 end
 F.simMs = nil                 -- the session clock at the last state tick (the time every event of that tick carries)
@@ -156,7 +156,7 @@ function F.update(dt, stats)
     end
     if t < 3.0 then return end   -- a new session's first frames still show the old session's cars (weekend race, 2026-09-26)
     lastState = t
-    do local okT, v = pcall(sessionMs, sim); F.simMs = (okT and type(v) == 'number') and math.floor(v) or nil end
+    do local okT, v = pcall(sessionMs, sim); F.simMs = (okT and type(v) == 'number' and v > -1e9 and v < 1e10) and math.floor(v) or nil end   -- (before the session clock runs AC hands back a non-finite value: written as -9.2e18, 5 Oct)
     stats = stats or {}
     if t - namesT >= 5 then namesT = t; pcall(namesEvent, sim, t) end   -- every 5 s, written only when a name changed
     local rc = stats.rc or {}
