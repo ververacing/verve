@@ -26,6 +26,8 @@ import statistics
 import sys
 
 MIN_LAPS = 3          # fewer than this and the +-8 s snapshot resolution swamps the answer
+SNAP_S = 8.0          # the diag snapshot interval: every wall-clock anchor taken from it carries this much error
+LAP1_MAX_ERR = 0.03   # refuse a lap-1 ratio whose anchor error exceeds this fraction - see lap1_ratio()
 SUSPECT = 0.95        # below this the race ran slower than real time
 
 
@@ -286,7 +288,17 @@ def lap1_ratio(diag_path):
     lap1 = sim.get(1)
     if not lap1 or not lap1[0] or lap1[0] < 10:
         return None
-    return round(lap1[0] / (first_cross - wall_m), 3)
+    # Both wall anchors come from 8 s diag snapshots, so each carries up to 8 s of error: on a 130 s lap that
+    # is +-12% combined, against a start penalty we are trying to resolve at a few percent. WORSE, the error
+    # is not symmetric - AC times lap 1 from the lights, while _first_motion fires when a car first exceeds
+    # 20 km/h, so the wall interval systematically EXCLUDES the launch that the sim time includes and the
+    # ratio is biased high by construction (measured 1.085 on a race whose whole-race figure was 0.994).
+    # Refuse rather than return a number that looks like a measurement. This becomes usable the moment the
+    # diag records a wall+sim pair at the green light and at the leader's first crossing - see the 0.16 list.
+    wall = first_cross - wall_m
+    if 2 * SNAP_S / wall > LAP1_MAX_ERR:
+        return None
+    return round(lap1[0] / wall, 3)
 
 
 def _sibling(diag_path):
@@ -328,7 +340,9 @@ def main():
         print(f"  lap 1 (the start): {l1:.3f}"
               + ("   <-- the START is the slow part, not the race" if l1 < med - 0.02 else ""))
     else:
-        print("  lap 1 (the start): not measurable - this build's feed has no first-lap event")
+        print("  lap 1 (the start): not measurable - either this build's feed carries no first-lap event, or the"
+              "
+                     8 s snapshot anchors leave more error than the effect (see lap1_ratio)")
 
 
 if __name__ == "__main__":
