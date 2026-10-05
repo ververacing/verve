@@ -53,7 +53,7 @@ def feed_pace(path):
             hdr = d
         elif d.get("type") == "lap":
             t = (d["lap_ms"] / 1000.0) if d.get("lap_ms") else d.get("time_s")
-            if t and t > 20:
+            if t and t > 20 and not d.get("first") and (d.get("lap") or 0) >= 2:   # 0.16 first-lap event: counted, never timed
                 laps[d.get("car")].append(float(t))
     player = next((c["i"] for c in (hdr or {}).get("cars", []) if c.get("player")), None)
     allt = [t for c, v in laps.items() if c != player for t in v]

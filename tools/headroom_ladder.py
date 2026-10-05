@@ -9,7 +9,8 @@ def laps(p):
     for l in open(p, encoding="utf-8", errors="ignore"):
         try: r = json.loads(l)
         except Exception: continue
-        if (r.get("ev") or r.get("type") or r.get("event")) == "lap" and r.get("car") == 0 and r.get("time_s"): out.append(r["time_s"])
+        # 0.16 first-lap event (first:true) is a lap COUNT marker, not a lap time: skip it here
+        if (r.get("ev") or r.get("type") or r.get("event")) == "lap" and r.get("car") == 0 and r.get("time_s") and not r.get("first") and (r.get("lap") or 0) >= 2: out.append(r["time_s"])
     return out
 for k, hh, mm, cmd in steps:
     t0 = int(hh) * 60 + int(mm)
