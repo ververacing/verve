@@ -212,6 +212,7 @@ local dropFailed = {}      -- cars whose last reposition did NOT rejoin: no seco
 -- at Monza against GT3 7/7. Both removed rather than left switched off: dead switches cost upvalue headroom
 -- on a module three candidates from LuaJIT's limit, and this one carried two real bugs of its own.)
 R.dropN, R.dropOK = 0, 0   -- session tally (for the UI / diagnostics)
+R.dropVoid = 0             -- attempts superseded by a later drop of the same car before they were judged (review 2026-10-04)
 R.DROP_RATE_V2 = true      -- DEFAULT 0.14.4; switch-off rate over JUDGED drops of cars undamaged at the drop (false = dropOK/dropN, which counts
 R.DROP_RATE_SUSP = 0.20    -- pending drops and bent-suspension crawlers as failures: 4 false switch-offs in 535 races, 2026-09-25)
 R.DROP_ROLL = 0            -- >0: a repositioned car that has covered THIS fraction of a lap and is still moving counts as
@@ -392,10 +393,11 @@ local function judgeDrops(now)
         if (d.ok == nil and not d.void) or now - d.t < DROP_JUDGE_T + 30 then keep[#keep + 1] = d end   -- (kept a bit longer for the diag trace; a void record leaves at the normal time)
     end
     drops = keep
-    local judged = 0
-    for _, d in ipairs(drops) do if d.ok ~= nil then judged = judged + 1 end end
-    judged = math.max(judged, R.dropN - #drops)   -- (older ones dropped from the list were judged too)
-    local poor = R.dropN >= DROP_TRIAL and judged >= DROP_TRIAL and (R.dropOK / R.dropN) < DROP_MIN_RATE
+    local judged, live = 0, 0
+    for _, d in ipairs(drops) do if d.ok ~= nil then judged = judged + 1 end; if not d.void then live = live + 1 end end
+    local attempts = R.dropN - R.dropVoid                   -- superseded attempts never get a verdict: not in the V1 rate
+    judged = math.max(judged, attempts - live)              -- (older non-void ones dropped from the list were judged too)
+    local poor = attempts >= DROP_TRIAL and judged >= DROP_TRIAL and (R.dropOK / math.max(1, attempts)) < DROP_MIN_RATE
     if R.DROP_RATE_V2 then poor = R.rateN >= DROP_TRIAL and (R.rateOK / R.rateN) < DROP_MIN_RATE end
     if R.dropsOff and R.DROP_RATE_V2 and R.DROP_REARM_S > 0 and os.clock() - (R.dropsOffT or 0) > R.DROP_REARM_S then
         R.dropsOff = false; R.rateOK, R.rateN = 0, 0   -- (R.DROP_REARM_S) a fresh trial
@@ -708,7 +710,7 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
     if okp then
         if retrying then R.gateRetry[i] = false; hopeless[i] = nil end   -- (a hopeless mark from before the grant: the retry is judged instead)
         rejoinUntil[i] = os.clock() + REJOIN_RAMP            -- rejoin gently (see REJOIN_RAMP)
-        for _, od in ipairs(drops) do if od.i == i and od.ok == nil then od.void = true end end   -- (0.16) a new drop supersedes an unjudged
+        for _, od in ipairs(drops) do if od.i == i and od.ok == nil and not od.void then od.void = true; R.dropVoid = R.dropVoid + 1 end end   -- (0.16) a new drop supersedes an unjudged
         -- older one for the same car: from here on that record's "progress" would be this teleport, not driving (review 2026-10-04)
         drops[#drops + 1] = { i = i, t = os.clock(), ok = nil, spl = progress, sus = maxSusp(ac.getCar(i)), tt = temps,
                               gs = gated and reqProgress or nil }   -- judged over the next DROP_JUDGE_T; gs = the stop spot of a gated drop
@@ -1306,6 +1308,7 @@ function R.reset()
     R.stallEngT, R.stallRestarts = {}, {}; R.stallRestartN = 0
     R.wetHint = {}
     R.dropN, R.dropOK, R.dropsOff, R.dropFlips, R.gateMoves = 0, 0, false, 0, 0
+    R.dropVoid = 0
     R.rateOK, R.rateN = 0, 0
     gateStage = {}
     scaled = false
