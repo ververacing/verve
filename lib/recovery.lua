@@ -205,7 +205,7 @@ R.stallRestartN = 0
 R.DROP_MAX_PER_CAR = 6     -- repositions per car per race; past it the car is AC's (Imola F3 2026-09-21: 92 drops in 4 laps)
 R.DROP_SAME_M = 200        -- two drops within this many metres = the same CORNER (the gate scatters requests 50-150 m; 60 missed most repeats, Imola 2026-09-21)...
 R.DROP_SKIP_M = 150        -- ...the next one goes this much further along the track (past the corner it cannot take)
-local dropFailed = {}      -- cars whose last reposition did NOT rejoin: no second drop -- they retire
+local dropFailed = {}      -- cars whose last reposition did NOT rejoin: no second drop -- they retire (R.DROP_FAIL_CLEAR lifts it)
 -- (DROP_RETRY and OW_CLEAR lived here until 2026-09-24. Retrying a failed reposition made the rate WORSE
 -- (75.0% -> 66.7% over three pairs at Baku) and extra clearance for open-wheel cars did nothing (76.4% vs
 -- 75.0%, cars lost unchanged) - and the second test PC then showed the class effect was the tracks: F1 repositioned 15/16
@@ -363,6 +363,19 @@ local function dropsAllowed(i)
     return true
 end
 
+-- (A/B, owner yes 5 Oct) R.DROP_FAIL_CLEAR. A failed reposition bars the car from any further one for the whole race, so a car that is
+-- repaired, pits, or simply gets going again and races on is still barred at its next off: 'hopeless', AC's AI must drive it out or it is
+-- parked. Archive since 28 Sep: 85 barred cars in 781 races, 40 raced again (above 60 km/h), 14 of those later lost. true: a barred car
+-- seen above DROP_OK_SPEED again has rejoined after all - the bar lifts and its next stop is a new episode like any other car's.
+R.DROP_FAIL_CLEAR = false
+R.dropFailN, R.dropFailClear = 0, 0   -- diag: cars barred / bars lifted this session (session line dfN, dfC)
+function R.clearFailedDrops()
+    for i in pairs(dropFailed) do
+        local c = ac.getCar(i)
+        if c and (c.speedKmh or 0) > DROP_OK_SPEED and not c.isRetired then dropFailed[i] = nil; R.dropFailClear = R.dropFailClear + 1 end
+    end
+end
+
 -- score the pending drops; switch repositioning off for the session if the rate is poor
 local function judgeDrops(now)
     local keep = {}
@@ -383,7 +396,7 @@ local function judgeDrops(now)
                 d.ok = false
                 local retry = R.GATE_FAIL_RETRY and d.gs and R.gateRetry[d.i] == nil and not (c and c.isRetired)   -- (a parked car: parkInPits set false)
                 if retry then R.gateRetry[d.i] = d.gs; R.gateRetryT[d.i] = now   -- one ungated retry where it stopped
-                elseif not (R.gateRetryT[d.i] and d.t < R.gateRetryT[d.i]) then dropFailed[d.i] = true end   -- (a drop made BEFORE the
+                elseif not (R.gateRetryT[d.i] and d.t < R.gateRetryT[d.i]) then R.dropFailN = R.dropFailN + (dropFailed[d.i] and 0 or 1); dropFailed[d.i] = true end   -- (a drop made BEFORE the
                 -- retry was granted, judged after it, must not void it: the retry's own record decides. Review 2026-09-28)
                 -- a failure that earns a retry is not scored: the retry is judged on its own. (Counting it dragged
                 -- the session rate down on Baku, where castle-entry landings fail: 4 misses in 5 turn repositioning off.)
@@ -1159,6 +1172,7 @@ function R.update(dt_)
     active = 0
     if not scaled then scaled = true; pcall(function() scaleToTrack(sim.trackLengthM) end) end   -- per-track distances (self-heals after a hot-reload)
     if #drops > 0 or (R.dropsOff and R.DROP_REARM_S > 0 and R.DROP_RATE_V2) then pcall(judgeDrops, os.clock()) end   -- (R.DROP_REARM_S) the re-arm needs a tick with no drops left
+    if R.DROP_FAIL_CLEAR then pcall(R.clearFailedDrops) end
     pcall(function() R.raceSession = (sim.raceSessionType == ac.SessionType.Race) end)
     if R.pointToPoint == nil then      -- once per session: a hill climb / touge has no lap to rejoin and its finish is a stop
         R.pointToPoint = false
@@ -1309,6 +1323,7 @@ function R.reset()
     R.wetHint = {}
     R.dropN, R.dropOK, R.dropsOff, R.dropFlips, R.gateMoves = 0, 0, false, 0, 0
     R.dropVoid = 0
+    R.dropFailN, R.dropFailClear = 0, 0
     R.rateOK, R.rateN = 0, 0
     gateStage = {}
     scaled = false
