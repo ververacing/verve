@@ -236,6 +236,59 @@ def ratio(diag_path, race_out_path):
     return round(span, 3), round(min(rs), 3), len(rs), len(last["grid"])
 
 
+def lap1_ratio(diag_path):
+    """Sim seconds per wall second across the leader's FIRST lap, or None if it cannot be measured.
+
+    Needs the feed's first-lap event (dev016 f240f85: feed.lua used to gate lap events behind `p.lap >= 1`, so on
+    0.15.3 and earlier this returns None and that is not a fault). Wall duration runs from first motion - the grid
+    actually releasing, not the session clock - to the leader's first spline wrap. A standing start is slower in sim
+    time than a flying lap, which is fine: the ratio is sim over wall, so the start's own slowness cancels.
+    """
+    rows = _rows(diag_path)
+    if len(rows) < 4:
+        return None
+    rows = _race_rows(rows)
+    if len(rows) < 4:
+        return None
+    last = rows[-1]
+    leader = max(last["grid"], key=lambda c: c.get("lap", 0) + min((c.get("spline", 0) or 0) / 1000.0, 1.0))
+    car = leader.get("i")
+    motion = _first_motion(diag_path, rows)
+    if not motion:
+        return None
+    wall_m, _ = motion
+    # the leader's first real line crossing, by the same half-lap rule ratio() uses (a grid sitting at 0.998 and
+    # rolling to 0.02 is not a lap)
+    prev_sp, seen_lo, seen_hi, first_cross = None, False, False, None
+    for r in rows:
+        c = next((x for x in r["grid"] if x.get("i") == car), None)
+        if c is None:
+            continue
+        sp = (c.get("spline") or 0) / 1000.0
+        if prev_sp is not None and prev_sp > 0.85 and sp < 0.15 and seen_lo and seen_hi:
+            first_cross = r["t"]
+            break
+        if sp < 0.5:
+            seen_lo = True
+        else:
+            seen_hi = True
+        prev_sp = sp
+    if first_cross is None or first_cross - wall_m < 10:
+        return None
+    sim = _sim_laps_from_feed(diag_path, car, None)
+    if not sim:
+        return None
+    # it must BE lap 1, not merely the earliest lap the feed happens to carry. On 0.15.3 the feed skips each
+    # car's first lap, so the earliest key is 2, and pairing lap 2's sim time with lap 1's wall duration
+    # returns a plausible-looking number that means nothing (0.997 on a race whose lap 1 was never recorded).
+    if min(sim) != 1:
+        return None
+    lap1 = sim.get(1)
+    if not lap1 or not lap1[0] or lap1[0] < 10:
+        return None
+    return round(lap1[0] / (first_cross - wall_m), 3)
+
+
 def _sibling(diag_path):
     """The race_out AC wrote for this race (race_card already knows how to find it)."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
@@ -263,11 +316,19 @@ def main():
         return
     diag = args[0]
     med, worst, n, cars = ratio(diag, args[1] if len(args) > 1 else _sibling(diag))
+    l1 = lap1_ratio(diag)
     if med is None:
         print(f"not measurable ({n} usable laps)")
         return
     print(f"{cars} cars, {n} laps: real-time ratio {med:.3f} (whole race), worst lap {worst:.3f}"
           + ("  -- SLOWER THAN REAL TIME, treat this race's timings as suspect" if med < SUSPECT else ""))
+    # lap 1 separately: the whole-race figure averages it away and the worst-lap figure excludes it outright,
+    # so a start-load spike is invisible in both. None on builds before the feed's first-lap event.
+    if l1 is not None:
+        print(f"  lap 1 (the start): {l1:.3f}"
+              + ("   <-- the START is the slow part, not the race" if l1 < med - 0.02 else ""))
+    else:
+        print("  lap 1 (the start): not measurable - this build's feed has no first-lap event")
 
 
 if __name__ == "__main__":
