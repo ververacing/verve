@@ -340,9 +340,9 @@ def main():
         print(f"  lap 1 (the start): {l1:.3f}"
               + ("   <-- the START is the slow part, not the race" if l1 < med - 0.02 else ""))
     else:
-        print("  lap 1 (the start): not measurable - either this build's feed carries no first-lap event, or the"
-              "
-                     8 s snapshot anchors leave more error than the effect (see lap1_ratio)")
+        print("  lap 1 (the start): not measurable")
+        print("    either this build's feed carries no first-lap event, or the 8 s snapshot anchors")
+        print("    leave more error than the effect being measured - see lap1_ratio()")
 
 
 if __name__ == "__main__":
