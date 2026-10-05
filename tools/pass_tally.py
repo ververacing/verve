@@ -132,9 +132,12 @@ def score_feed(feed, gap_m=40.0, edge=0.005):
         return (grids[k] if k >= 0 else {}), (grids[k - 1] if k >= 1 else {})
 
     out = Counter()
+    last_lead_t = None
     for e in events:
         if e.get("type") == "lead_change":
-            out["lead_changes"] += 1
+            if e.get("t") != last_lead_t:      # feeds before 0.16 emitted one per car the new leader jumped in that tick
+                out["lead_changes"] += 1
+            last_lead_t = e.get("t")
         if e.get("type") != "overtake":
             continue
         out["overtakes_all"] += 1

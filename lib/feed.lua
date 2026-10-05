@@ -340,11 +340,16 @@ function F.update(dt, stats)
                         if (gapAhead[i] or 9) < 2.5 or (gapAhead[over] or 9) < 2.5 then
                             event(t, 'overtake', string.format('"car":%d,"over":%d,"pos":%d,"spline":%.4f', i, over, k, running[k].spline))
                         end
-                        if k == 1 then event(t, 'lead_change', string.format('"car":%d,"over":%d', i, over)) end
                     end
                 end
             end
         end
+    end
+    -- (0.16) ONE lead_change per change of leader: the new P1 over the previous P1. It used to fire once for every car the new
+    -- leader jumped in a single tick (10 'lead changes' in one second at Fuji's start, 5 Oct; 177 spurious events in 15 of 85
+    -- feeds), and never when the old leader stopped. Same fields; a lead change by a pit cycle or a retirement now counts too.
+    if prevOrder and order[1] and prevOrder[1] and order[1] ~= prevOrder[1] then
+        event(t, 'lead_change', string.format('"car":%d,"over":%d', order[1], prevOrder[1]))
     end
     prevOrder = order
 
