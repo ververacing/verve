@@ -326,6 +326,59 @@ def feed_ratio(diag_path):
     return round(statistics.median(rs), 3), round(min(rs), 3), len(rs)
 
 
+def sim_clock_ratio(diag_path, feed=None):
+    """{'race', 'lap1', 'worst60', 'rows'} from the feed's OWN two clocks (0.16): sim_ms (AC's session clock) over t (wall),
+    both stamped on every line at the same 1 Hz tick, so there is no diag pairing and no 8 s anchor error. race = race_start
+    (else the first moving state) to the last state; lap1 = race_start to the first first-lap event (the leader's); worst60
+    = the slowest 60 s stretch of state rows. Only the last session counts (sim_ms resets at each session start). None when
+    the feed predates sim_ms."""
+    if feed is None:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import race_card
+        feed = race_card.sibling(diag_path, "feed")
+    if not feed or not os.path.exists(feed):
+        return None
+    lines = []
+    with open(feed, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if "sim_ms" in d and "t" in d and -1e9 < d["sim_ms"] < 1e10:      # (the first 0.16 build wrote -9.2e18 before the session clock ran)
+                lines.append(d)
+    states = [d for d in lines if d.get("type") == "state"]
+    if len(states) < 10:
+        return None
+    cut = 0                                  # the last session: after the last time sim_ms went backwards between states
+    for k in range(1, len(states)):
+        if states[k]["sim_ms"] < states[k - 1]["sim_ms"] - 1000:
+            cut = k
+    t_from = states[cut]["t"]
+    states = states[cut:]
+    lines = [d for d in lines if d["t"] >= t_from]
+    start = next((d for d in lines if d.get("type") == "race_start"), None)
+    if start is None:
+        start = next((d for d in states if d.get("sim_ms", 0) > 0), states[0])
+    end = states[-1]
+    out = {"rows": len(states), "race": None, "lap1": None, "worst60": None}
+    if end["t"] - start["t"] > 30:
+        out["race"] = round((end["sim_ms"] - start["sim_ms"]) / 1000.0 / (end["t"] - start["t"]), 3)
+    first = next((d for d in lines if d.get("type") == "lap" and d.get("first") and d["t"] > start["t"]), None)
+    if first and first["t"] - start["t"] > 10:
+        out["lap1"] = round((first["sim_ms"] - start["sim_ms"]) / 1000.0 / (first["t"] - start["t"]), 3)
+    run = [d for d in states if d["t"] >= start["t"]]
+    worst, j = None, 0
+    for k in range(len(run)):
+        while j < k and run[k]["t"] - run[j]["t"] > 60:
+            j += 1
+        if j < k and run[k]["t"] - run[j]["t"] >= 55:
+            r = (run[k]["sim_ms"] - run[j]["sim_ms"]) / 1000.0 / (run[k]["t"] - run[j]["t"])
+            worst = r if worst is None or r < worst else worst
+    out["worst60"] = round(worst, 3) if worst is not None else None
+    return out
+
+
 def _sibling(diag_path):
     """The race_out AC wrote for this race (race_card already knows how to find it)."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
@@ -352,6 +405,11 @@ def main():
         print(__doc__)
         return
     diag = args[0]
+    sc = sim_clock_ratio(diag)
+    if sc and sc["race"] is not None:
+        print(f"sim clock: real-time ratio {sc['race']:.3f} over the race, worst 60 s {sc['worst60']}, lap 1 {sc['lap1']}"
+              + ("  -- SLOWER THAN REAL TIME" if sc["race"] < SUSPECT else "")
+              + "   (the feed's sim_ms over its wall clock, 1 Hz: the primary figure when present)")
     fr = feed_ratio(diag)
     if fr:
         fmed, fworst, fn_ = fr
