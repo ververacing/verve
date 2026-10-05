@@ -66,8 +66,21 @@ local function flush()
     if wrote then buf = {} else closeFh() end   -- (a failed write keeps the lines for the next try, on a fresh handle)
 end
 
-local function event(t, typ, fields)
-    emit(string.format('{"v":1,"t":%.1f,"type":"%s"%s}', t, typ, fields and (',' .. fields) or ''))
+-- (0.16) "sim_ms" on every line: AC's session clock in ms (sim time, as AC's lap timer counts it; negative before the start,
+-- resets each session). "t" stays wall seconds since the feed started: the two drift apart when the game cannot keep real
+-- time, so sim_ms is what lines an event up with the replay and what a real-time ratio is measured with (dSim / dWall).
+-- Read through pcall: a CSP build without the field leaves it out of the line rather than stopping the feed.
+local function sessionMs(sim) return sim.currentSessionTime end
+local function simNow()
+    local ok, sim = pcall(ac.getSim)
+    if ok and sim then local ok2, v = pcall(sessionMs, sim); if ok2 and type(v) == 'number' then return math.floor(v) end end
+    return nil
+end
+F.simMs = nil                 -- the session clock at the last state tick (the time every event of that tick carries)
+local function simField(sms) return sms and string.format(',"sim_ms":%d', sms) or '' end
+
+local function event(t, typ, fields, sms)    -- sms: a backdated event's own sim time (battle); default the tick's
+    emit(string.format('{"v":1,"t":%.1f,"type":"%s"%s%s}', t, typ, fields and (',' .. fields) or '', simField(sms or F.simMs)))
 end
 
 local function lat01(pos)
@@ -99,8 +112,8 @@ local function newFile(sim)
     end
     local amb, road, laps = 0, 0, 0
     pcall(function() amb = sim.ambientTemperature or 0; road = sim.roadTemperature or 0; laps = sim.raceSessionLaps or sim.sessionLaps or 0 end)
-    emit(string.format('{"v":1,"t":0,"type":"header","track":"%s","layout":"","laps":%d,"ambient":%d,"road":%d,"cars":[%s]}',
-        esc(track), laps, math.floor(amb), math.floor(road), table.concat(cars, ',')))
+    emit(string.format('{"v":1,"t":0,"type":"header","track":"%s","layout":"","laps":%d,"ambient":%d,"road":%d,"cars":[%s]%s}',
+        esc(track), laps, math.floor(amb), math.floor(road), table.concat(cars, ','), simField(simNow())))
 end
 
 F.retSent = {}
@@ -117,6 +130,7 @@ function F.reset()
     lastFlush = -1e9   -- the new file's clock starts at 0: a stale value held a weekend race's writes for as long as the last session ran
     F.startSent = false
     F.startArmed = false   -- race_start needs a standing grid seen by this feed first (see F.update)
+    F.simMs = nil
 end
 
 -- stats: the same table Verve passes to the diagnostics logger (rc = Racecraft.last, recState = Recovery.stateOf)
@@ -142,6 +156,7 @@ function F.update(dt, stats)
     end
     if t < 3.0 then return end   -- a new session's first frames still show the old session's cars (weekend race, 2026-09-26)
     lastState = t
+    do local okT, v = pcall(sessionMs, sim); F.simMs = (okT and type(v) == 'number') and math.floor(v) or nil end
     stats = stats or {}
     if t - namesT >= 5 then namesT = t; pcall(namesEvent, sim, t) end   -- every 5 s, written only when a name changed
     local rc = stats.rc or {}
@@ -202,7 +217,7 @@ function F.update(dt, stats)
             stName, tostring(c.yl), tostring(c.bl), tostring(c.rec), c.wd and (',"wild":"' .. c.wd .. '"') or '')   -- "wild" only on a chaos driver
     end
     local leaderLap = (#running > 0) and running[1].lap or 0
-    emit(string.format('{"v":1,"t":%.1f,"type":"state","leader_lap":%d,"running":%d,"cars":[%s]}', t, leaderLap, #running, table.concat(parts, ',')))
+    emit(string.format('{"v":1,"t":%.1f,"type":"state","leader_lap":%d,"running":%d,"cars":[%s]%s}', t, leaderLap, #running, table.concat(parts, ','), simField(F.simMs)))
 
     -- per-car events
     for _, c in ipairs(cars) do
@@ -218,7 +233,12 @@ function F.update(dt, stats)
                     -- wrong car-lap total on the Brands Hatch comparison (3 Oct). Same field shape so no loader breaks:
                     -- 'first':true marks it, 'best' is false, and it never touches bestLap / overallBest / fastest_lap.
                     -- Consumers wanting lap TIMES must skip first:true; consumers counting laps can now count events.
-                    event(t, 'lap', string.format('"car":%d,"lap":1,"time_s":%.1f,"best":false,"first":true', i, lt))
+                    -- (0.16) It carries AC's own time for that lap, lap_ms, as every later lap does (omitted when AC has none).
+                    -- On a grid that sits before the timing line AC's first 'lap' can be the short run from the grid to it.
+                    local ms1 = 0
+                    pcall(function() local ac_c = ac.getCar(i); ms1 = (ac_c and ac_c.previousLapTimeMs) or 0 end)
+                    event(t, 'lap', string.format('"car":%d,"lap":1,"time_s":%.1f,"best":false,"first":true%s', i, lt,
+                        (type(ms1) == 'number' and ms1 > 0) and string.format(',"lap_ms":%d', ms1) or ''))
                 end
                 if p.lap >= 1 and lt > 20 then
                     local best = lt < (bestLap[i] or 1e9)
@@ -337,9 +357,9 @@ function F.update(dt, stats)
         seen[key] = true
         if g and g < BATTLE_GAP_S and b.spd > 60 then
             local bt = battles[key]
-            if not bt then bt = { t0 = t, n = 0, active = false }; battles[key] = bt end
+            if not bt then bt = { t0 = t, s0 = F.simMs, n = 0, active = false }; battles[key] = bt end
             bt.n = bt.n + 1
-            if bt.n == BATTLE_HOLD then bt.active = true; event(bt.t0, 'battle', string.format('"cars":[%d,%d],"pos":%d,"gap_s":%.2f', a.i, b.i, k - 1, g)) end
+            if bt.n == BATTLE_HOLD then bt.active = true; event(bt.t0, 'battle', string.format('"cars":[%d,%d],"pos":%d,"gap_s":%.2f', a.i, b.i, k - 1, g), bt.s0) end
         elseif battles[key] and (not g or g > 1.5) then
             if battles[key].active then event(t, 'battle_end', string.format('"cars":[%d,%d],"resolved":"%s"', a.i, b.i, 'gap')) end
             battles[key] = nil
@@ -385,12 +405,12 @@ function F.finish()
         for _, r in ipairs(rows) do
             parts[#parts + 1] = string.format('{"pos":%d,"car":%d,"laps":%d,"ret":%s}', r.pos, r.i, r.laps, tostring(r.ret))
         end
-        event(now(), 'race_end', '"results":[' .. table.concat(parts, ',') .. ']')
+        event(now(), 'race_end', '"results":[' .. table.concat(parts, ',') .. ']', simNow())
     end
     flush(); closeFh()
 end
 
 -- other modules' events (lib/fault.lua penalties): typed like the built-in ones, same clock
-function F.event(typ, fields) if F.ENABLED then event(now(), typ, fields) end end
+function F.event(typ, fields) if F.ENABLED then event(now(), typ, fields, simNow()) end end
 
 return F
