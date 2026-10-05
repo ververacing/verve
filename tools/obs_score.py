@@ -24,6 +24,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERVE = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import race_metrics  # noqa: E402
+import pass_tally    # noqa: E402
+import race_card     # noqa: E402
 try:
     import obs_matrix  # noqa: E402
     KNOWN = sorted(obs_matrix.FIELDS, key=len, reverse=True)
@@ -32,6 +34,38 @@ except Exception:
 
 FEEDS = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa", "verve_feed")
 LOGS = os.path.join(HERE, "harness_results", "csp_logs")
+
+
+def interest(diag_path, fp):
+    """The spectator's side (owner 5 Oct: realistic AND interesting): real passes (lap 2+, not over a yielding, lapped or pit-lane
+    car - tools/pass_tally.py), lead changes, battles (the feed's own 'battle' events) and the gaps P1-P2 / P1-P3 at the flag
+    from AC's results (cars on the leader's lap only). Missing pieces are left out, never guessed."""
+    out = {}
+    try:
+        sc = pass_tally.score_feed(fp)
+        if sc:
+            out["real_passes"], out["lead_changes"] = sc["counts"]["passes_real"], sc["counts"]["lead_changes"]
+    except Exception:
+        pass
+    try:
+        out["battles"] = sum(1 for line in open(fp, encoding="utf-8", errors="replace") if '"type":"battle"' in line)
+    except OSError:
+        pass
+    try:
+        ro = race_card.sibling(diag_path, "race_out")
+        if ro:
+            ses = json.load(open(ro, encoding="utf-8", errors="replace"))["sessions"][-1]
+            tot, n = collections.Counter(), collections.Counter()
+            for lp in ses.get("laps", []):
+                tot[lp["car"]] += lp.get("time") or 0
+                n[lp["car"]] += 1
+            order = ses.get("raceResult") or []
+            for k, key in ((1, "finish_gap_s"), (2, "podium_gap_s")):
+                if len(order) > k and n[order[0]] and n[order[k]] == n[order[0]]:
+                    out[key] = round((tot[order[k]] - tot[order[0]]) / 1000.0, 2)
+    except Exception:
+        pass
+    return out
 
 
 def feed_for(stamp):
@@ -104,6 +138,10 @@ def main():
                 if ref and ref.get("top10"):
                     r["best_vs_human_top10_pct"] = round((best / ref["top10"] - 1) * 100, 1)
         r["best_lap_s"], r["median_lap_s"] = best, med
+        if fp:
+            r.update(interest(p, fp))
+            if r.get("real_passes") is not None and r.get("cars") and r.get("leader_laps"):
+                r["passes_per_100_car_laps"] = round(100.0 * r["real_passes"] / (r["cars"] * max(1, r["leader_laps"] - 1)), 1)
         errs = 0
         for lp in glob.glob(os.path.join(LOGS, "*%s*" % label)):
             errs += sum(1 for line in open(lp, encoding="utf-8", errors="replace") if "Verve error" in line)
@@ -136,13 +174,19 @@ def main():
     def mean(v):
         v = [x for x in v if isinstance(x, (int, float))]
         return round(sum(v) / len(v), 2) if v else None
-    print("%-14s %4s %6s %8s %7s %6s %6s %7s %7s %8s" % ("field", "n", "dnf%", "inc/100", "vsReal", "heavy", "lap01", "spread", "vsReal", "vsHuman%"))
+    def med(v):
+        v = [x for x in v if isinstance(x, (int, float))]
+        return round(st.median(v), 2) if v else None
+    print("%-14s %4s %6s %8s %7s %6s %6s %7s %7s %8s | %8s %5s %6s %7s" % ("field", "n", "dnf%", "inc/100", "vsReal", "heavy", "lap01", "spread",
+                                                                      "vsReal", "vsHuman%", "pass/100", "lead", "battle", "P2gap_s"))
     for fld, rs in sorted(by.items(), key=lambda kv: -len(kv[1])):
         print("%-14s %4d %6s %8s %7s %6s %6s %7s %7s %8s" % (
             fld[:14], len(rs), mean([r.get("dnf_pct") for r in rs]), mean([r.get("inc_per_car_100laps") for r in rs]),
             mean([r.get("inc_vs_real") for r in rs]), mean([r.get("heavy80") for r in rs]), mean([r.get("incidents_lap0_1") for r in rs]),
             mean([r.get("spread_pct") for r in rs]), mean([r.get("spread_vs_real") for r in rs]),
-            mean([r.get("best_vs_human_top10_pct") for r in rs])))
+            mean([r.get("best_vs_human_top10_pct") for r in rs])) + " | %8s %5s %6s %7s" % (
+            mean([r.get("passes_per_100_car_laps") for r in rs]), mean([r.get("lead_changes") for r in rs]),
+            mean([r.get("battles") for r in rs]), med([r.get("finish_gap_s") for r in rs])))
     print("\n%d races scored, %d not scorable -> %s" % (sum(len(v) for v in by.values()), sum(1 for r in rows if r.get("error")), a.csv))
     if urgent:
         print("\nURGENT:")
