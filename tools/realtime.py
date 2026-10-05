@@ -80,7 +80,9 @@ def _sim_laps_from_feed(diag_path, car, lap_window=None):
                 continue
             if (d.get("e") or d.get("type")) != "lap" or d.get("car") != car:
                 continue
-            t = d.get("time_s") or d.get("time")
+            # lap_ms is AC's own lap timer (sim time; ms, the > 1000 branch below converts). time_s is a delta of the
+            # feed's os.clock, i.e. WALL time (feed.lua:39) - a fallback only; a ratio built on it is wall over wall.
+            t = d.get("lap_ms") or d.get("time_s") or d.get("time")
             n = d.get("lap") or d.get("n")
             if t and n:
                 t = float(t)
@@ -301,6 +303,29 @@ def lap1_ratio(diag_path):
     return round(lap1[0] / wall, 3)
 
 
+def feed_ratio(diag_path):
+    """(median, worst, n) real-time ratio from the FEED ALONE: AC's lap timer (lap_ms, sim) over the feed's own lap
+    duration (time_s, a delta of os.clock = wall), per lap event, laps 2+. ~1 Hz resolution, no diag pairing, no 8 s
+    anchors. None if the feed or lap_ms is missing (feeds before 0.15 carry no lap_ms)."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import race_card
+    feed = race_card.sibling(diag_path, "feed")
+    if not feed or not os.path.exists(feed):
+        return None
+    rs = []
+    with open(feed, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if d.get("type") == "lap" and d.get("lap_ms") and d.get("time_s") and (d.get("lap") or 0) >= 2                     and not d.get("first") and d["time_s"] > 20:
+                rs.append(d["lap_ms"] / 1000.0 / d["time_s"])
+    if len(rs) < MIN_LAPS:
+        return None
+    return round(statistics.median(rs), 3), round(min(rs), 3), len(rs)
+
+
 def _sibling(diag_path):
     """The race_out AC wrote for this race (race_card already knows how to find it)."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
@@ -327,12 +352,18 @@ def main():
         print(__doc__)
         return
     diag = args[0]
+    fr = feed_ratio(diag)
+    if fr:
+        fmed, fworst, fn_ = fr
+        print(f"feed timer: real-time ratio {fmed:.3f} median over {fn_} laps, worst lap {fworst:.3f}"
+              + ("  -- SLOWER THAN REAL TIME" if fmed < SUSPECT else "")
+              + "   (AC's lap timer over the feed's wall clock: the primary figure)")
     med, worst, n, cars = ratio(diag, args[1] if len(args) > 1 else _sibling(diag))
     l1 = lap1_ratio(diag)
     if med is None:
         print(f"not measurable ({n} usable laps)")
         return
-    print(f"{cars} cars, {n} laps: real-time ratio {med:.3f} (whole race), worst lap {worst:.3f}"
+    print(f"{cars} cars, {n} laps: paired ratio {med:.3f} (whole race), worst lap {worst:.3f}   (diag crossings, +-8 s anchors; secondary)"
           + ("  -- SLOWER THAN REAL TIME, treat this race's timings as suspect" if med < SUSPECT else ""))
     # lap 1 separately: the whole-race figure averages it away and the worst-lap figure excludes it outright,
     # so a start-load spike is invisible in both. None on builds before the feed's first-lap event.
