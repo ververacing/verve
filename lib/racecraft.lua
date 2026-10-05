@@ -180,6 +180,11 @@ R.fastTuckN = 0               -- diag: car-frames tucking in
 R.BG_T = 0                    -- >0: the guard's reach is closing speed x this many seconds (min CV.BG_M) and a much slower car ahead counts as braking (A/B)
 R.BG_RACE = false             -- the brake-zone guard keeps working after the opening lap (A/B with BG_T). 60% of the damaging
                               -- nose-to-tail contacts on open-wheel grids happen from lap 2 on, where the guard is gated off today.
+R.BG_PASS = false             -- (A/B, with BG_RACE) beyond the opening lap the guard leaves a car in the middle of a pass alone: on a
+                              -- road-space run, a manoeuvre, or attacking and already pulled out (last frame's record). BG_RACE cut Monza
+                              -- passes 43% and raised Barcelona's 47% (4-5 Oct): a pass at Monza is a late brake into a chicane behind the
+                              -- car being passed, exactly where the guard brakes early. Lapping a yielder is NOT a pass here.
+R.bgN = 0; R.bgPassN = 0      -- diag: car-frames the race-long guard cut a brake hint / left a passing car its own (session bgN, bgPN)
 R.OL_BRAKEGUARD = true        -- opening lap: brake earlier when the car ahead on my line is already braking inside CV.BG_M (harness A/B)
 R.BG_ALL = 0                  -- >0: every AI car's brake hint x this all race (direction test only; 0 = off)
 -- ROAD SPACE (harness A/B: R.ROADSPACE): "use the whole road". The reactive pass aims a fixed small nudge off the racing
@@ -986,7 +991,7 @@ local evalBody = function()
             end
             local mul = R.BG_ALL > 0 and R.BG_ALL or 1.0
             if wild and R.WILD_BH ~= 1 and R.last[i] and R.last[i].state == 1 then mul = mul * R.WILD_BH end   -- (R.WILD_BH) attacking: his own brake point
-            if ((R.OL_BRAKEGUARD and startX > 0 and (myLap <= 1 or R.BG_RACE) and not (wild and R.WILD_START)) or roomB) and aheadIdx >= 0 and not (Recovery.stateOf(i) or R.NOSTATE).rec then
+            if ((R.OL_BRAKEGUARD and ((startX > 0 and myLap <= 1) or (myLap > 1 and R.BG_RACE)) and not (wild and R.WILD_START)) or roomB) and aheadIdx >= 0 and not (Recovery.stateOf(i) or R.NOSTATE).rec then
                 local gm = gapA * trackLen
                 local reach = CV.BG_M
                 if roomB then reach = reach * (1 + R.ROOM_BG * tightHere) end   -- ROOM_FOLLOW: a longer reach into tight room (the corridor entries, at any speed)
@@ -997,11 +1002,17 @@ local evalBody = function()
                     local aCar = ac.getCar(aheadIdx)
                     if aCar and ((aCar.brake or 0) > CV.BG_BRAKE or (R.BG_T > 0 and spd > 120 and spd - aheadSpd > CV.BG_CLOSE))
                        and math.abs(latOf(aCar.position) - latOf(me.position)) < CV.LAT then
-                        -- LOWER hint = earlier braking (x1.5 field-wide: 18/18 lap-1 contact, 101 repairs, 2026-09-16).
-                        -- The cut scales with how fast I'm closing on a braking car and how close it already is.
-                        local closing = clamp((spd - aheadSpd) / CV.BG_CLOSE, 0, 1)
-                        mul = mul * (1 - CV.BG_HINT * closing * clamp(1 - gm / reach, 0, 1) * ((wild and myLap <= 1) and (1 - R.WILD_OL) or 1))   -- (R.WILD_OL) he takes part of the opening-lap cut
-                        if roomB and myLap > 1 then R.roomAct = (R.roomAct or 0) + 1 end
+                        local Lp = (myLap > 1 and not roomB) and R.last[i]   -- the race-long guard (BG_RACE) is the only reason here
+                        if Lp and R.BG_PASS and (Lp.rs or (Lp.mv or 0) > 0 or (Lp.state == 1 and math.abs(Lp.off or 0) > 0.25)) then
+                            R.bgPassN = R.bgPassN + 1                          -- (R.BG_PASS) mid-pass: he keeps his own brake point
+                        else
+                            -- LOWER hint = earlier braking (x1.5 field-wide: 18/18 lap-1 contact, 101 repairs, 2026-09-16).
+                            -- The cut scales with how fast I'm closing on a braking car and how close it already is.
+                            local closing = clamp((spd - aheadSpd) / CV.BG_CLOSE, 0, 1)
+                            mul = mul * (1 - CV.BG_HINT * closing * clamp(1 - gm / reach, 0, 1) * ((wild and myLap <= 1) and (1 - R.WILD_OL) or 1))   -- (R.WILD_OL) he takes part of the opening-lap cut
+                            if roomB and myLap > 1 then R.roomAct = (R.roomAct or 0) + 1 end
+                            if myLap > 1 and not roomB then R.bgN = R.bgN + 1 end
+                        end
                     end
                 end
             end
@@ -1949,7 +1960,7 @@ function R.reset()
     letbyT, letbyDone, letbyFor = {}, {}, {}
     cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {} }; R.cv2 = cv2
     R.crawlN = 0; R.topV = {}; R.aggV = {}
-    R.roomN = 0; R.roomAct = 0; R.evalN = 0; R.fastTuckN = 0; R.yellowSlowN = 0
+    R.roomN = 0; R.roomAct = 0; R.evalN = 0; R.fastTuckN = 0; R.yellowSlowN = 0; R.bgN = 0; R.bgPassN = 0
     -- AGGR_BASE_FIX: the next session reads each car afresh; this session's capture and Verve's last write carry over for
     -- R.aggrBase's guard (empty while the switch is off: nothing happens)
     for k, b in pairs(R.baseAggr) do
