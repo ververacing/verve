@@ -117,8 +117,22 @@ local function newFile(sim)
 end
 
 F.retSent = {}
+-- (Verve Engineer live test, 5 Oct) the same decision for the same car is not news again for a while: 'attack' re-fired 11 times in
+-- 200 s as one car dropped in and out of range, and the engineer said "lining you up" four times in two minutes. Seconds per
+-- decision; manoeuvres and the rest use DEC_HOLD_MV. The 1 Hz state still carries the live verve.state every tick.
+F.DEC_HOLD = { attack = 60, defend = 60, yield = 30 }
+F.DEC_HOLD_MV = 20
+F.decT = {}
+function F.decision(t, i, d, detail)
+    local k = i .. ':' .. d
+    local last = F.decT[k]
+    if last and t - last < (F.DEC_HOLD[d] or F.DEC_HOLD_MV) then return end
+    F.decT[k] = t
+    event(t, 'verve', string.format('"car":%d,"decision":"%s","detail":"%s"', i, d, detail))
+end
 function F.reset()
     F.retSent = {}
+    F.decT = {}
     feedEvSeen = {}
     F.wildSent = {}
     namesSent, namesT = '', 0
@@ -303,17 +317,17 @@ function F.update(dt, stats)
                 event(t, 'retire', string.format('"car":%d,"lap":%d,"reason":"%s"', i, c.lap, c.park and 'hopeless' or (c.dmg >= 150 and 'damage' or 'ac')))
             end
             -- Verve decisions (edge-triggered; attack/defend only when there's actually a car within reach)
-            if c.st == 2 and p.st ~= 2 then event(t, 'verve', string.format('"car":%d,"decision":"defend","detail":"covering the inside line"', i)) end
-            if c.st == 1 and p.st ~= 1 and (gapAhead[i] or 9) < 1.5 then event(t, 'verve', string.format('"car":%d,"decision":"attack","detail":"closing in, looking for a way past"', i)) end
-            if c.yl and not p.yl then event(t, 'verve', string.format('"car":%d,"decision":"yield","detail":"moving aside for a faster car"', i)) end
+            if c.st == 2 and p.st ~= 2 then F.decision(t, i, 'defend', 'covering the inside line') end
+            if c.st == 1 and p.st ~= 1 and (gapAhead[i] or 9) < 1.5 then F.decision(t, i, 'attack', 'closing in, looking for a way past') end
+            if c.yl and not p.yl then F.decision(t, i, 'yield', 'moving aside for a faster car') end
             if c.mv ~= 0 and c.mv ~= p.mv then
                 local MV = { [1] = { 'switchback', 'wide in, cutting back underneath on the exit' }, [2] = { 'lunge', 'braking late, diving for the inside' },
                              [3] = { 'setup', 'sitting in the tow, setting up the pass' }, [4] = { 'slingshot', 'in the draft, pulling out at the last moment' } }
                 local m = MV[c.mv]
                 if m and c.mv == 2 and c.wd then m = { 'divebomb', 'sending it from way back, braking late' } end   -- a chaos driver's lunge
-                if m then event(t, 'verve', string.format('"car":%d,"decision":"%s","detail":"%s"', i, m[1], m[2])) end
+                if m then F.decision(t, i, m[1], m[2]) end
             end
-            if c.bl and not p.bl then event(t, 'verve', string.format('"car":%d,"decision":"go_around","detail":"swerving around a stopped car"', i)) end
+            if c.bl and not p.bl then F.decision(t, i, 'go_around', 'swerving around a stopped car') end
             if c.wd and not F.wildSent[i] then F.wildSent[i] = true; event(t, 'verve', string.format('"car":%d,"decision":"wild","detail":"races with almost no margin"', i)) end
             if c.wd and p.wd and c.wd ~= p.wd then event(t, 'verve', string.format('"car":%d,"decision":"%s","detail":"%s"', i, c.wd, c.wd == 'tilt' and 'loses his temper - no margin now' or 'settles down')) end
             if c.rec and not p.rec then event(t, 'verve', string.format('"car":%d,"decision":"crash_repair","detail":"Verve is getting the car going again"', i)) end
