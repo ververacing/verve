@@ -338,6 +338,8 @@ function script.update(dt)
                     -- randomised driver profiles, the way a real grid will be run (same as the UI button)
                     if Harness.randomizeDrivers and not Drivers.anyAssigned() then   -- once per weekend, not per session
                         pcall(function()
+                            local seed = tonumber(Harness.driverSeed) or 0       -- (--driver-seed) the same draw for both arms of a pair
+                            Drivers.SEED = seed > 0 and math.floor(seed) or nil
                             Drivers.randomizeGrid()
                             local parts = {}
                             for i = 1, simH.carsCount - 1 do

@@ -437,6 +437,7 @@ def write_harness_lua(arm, ttl_s, ncars=0, laps=0, weekend=False):
         "autopilot": True,
         "label": arm.get("label", "A"),
         "randomizeDrivers": bool(arm.get("drivers") == "random"),
+        "driverSeed": int(arm.get("driver_seed") or 0),   # >0: Randomize draws the same grid every run (pair A/B arms on drivers)
         "profiles": parse_profiles(arm.get("profiles"), ncars),   # fixed grid: {all=key, slots={[i]=key}} (nil = untouched)
         "shutdownAtEnd": True,        # Verve quits AC ~20 s after the flag so the replay autosaves
         # Verve quits once the leader has done N laps. Given explicitly for a heavy sprint; otherwise it is the
@@ -1186,6 +1187,7 @@ def main():
     ap.add_argument("--assists", help="JSON of launcher assists for this run only (cfg/assists.ini [ASSISTS]), e.g. {\"DAMAGE\":0} = damage off")
     ap.add_argument("--fault", help="JSON of Fault module fields (penalties), e.g. {\"ENABLED\":true,\"ENFORCE\":false}")
     ap.add_argument("--drivers", choices=["none", "random"], default="none", help="random: assign Verve driver profiles to the whole grid (the Randomize button)")
+    ap.add_argument("--driver-seed", type=int, default=0, help="with --drivers random: >0 draws the same driver grid every run, so both arms of an A/B pair race the same drivers")
     ap.add_argument("--profiles", help="fixed profiles: 'all=arch_rookie,last=arch_veteran,3=gt_014' (slot 0 = the autopilot player car; 'last' = back of the grid)")
     ap.add_argument("--ab", nargs=2, metavar=("A.json", "B.json"), help="two arm files; runs alternate A,B,A,B...")
     ap.add_argument("--lap-budget-s", type=int, default=150, help="seconds allowed per lap before a run is killed")
@@ -1205,7 +1207,7 @@ def main():
         for i, a in enumerate(arms):
             a.setdefault("label", chr(ord("A") + i))
     else:
-        arms = [{"label": args.label, "settings": json.loads(args.settings) if args.settings else {}, "drivers": args.drivers, "profiles": args.profiles,
+        arms = [{"label": args.label, "settings": json.loads(args.settings) if args.settings else {}, "drivers": args.drivers, "driver_seed": args.driver_seed, "profiles": args.profiles,
                  "recovery": json.loads(args.recovery) if args.recovery else {}, "racecraft": json.loads(args.racecraft) if args.racecraft else {},
                  "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}, "human": json.loads(args.human) if args.human else {}, "strategy": json.loads(args.strategy) if args.strategy else {}, "fuel": args.fuel,
                  "assists": json.loads(args.assists) if args.assists else {}, "stop_laps": args.stop_laps,

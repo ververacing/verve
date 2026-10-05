@@ -639,10 +639,11 @@ function D.counts()
     return real, arch, wild
 end
 
+D.SEED = nil   -- harness only (--driver-seed): >0 = Randomize draws the SAME grid every time, so an A/B pair can share its drivers
 function D.randomizeGrid()
     if D.LOCKED then return end
     pcall(function()
-        math.randomseed(os.time() + math.floor((os.clock() * 1000) % 100000))
+        math.randomseed(D.SEED or (os.time() + math.floor((os.clock() * 1000) % 100000)))
         local sim = ac.getSim(); if not sim then return end
         local usedByBucket = {}
         for i = 1, sim.carsCount - 1 do
