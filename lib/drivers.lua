@@ -495,6 +495,7 @@ do
 end
 
 function D.nameOf(key) local d = BY_KEY[key]; return d and d.name or key end
+function D.rawOf(key) return BY_KEY[key] end   -- the roster row as written (raw pace), whatever ratingV2 hands statsOf's callers
 
 function D.rosterFor(classKey)
     local bucket = CLASS_BUCKET[classKey]

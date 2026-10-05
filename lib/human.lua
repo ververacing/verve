@@ -72,6 +72,9 @@ H.MV_OFF_P = { 0.06, 0.025, 0.010, 0.005 }   -- P(a lock-up or a missed apex bec
 H.MV_SPIN_P = { 0.005, 0, 0, 0 }             -- P(a lift becomes a spin), robust classes only
 H.MV_CR = 0.25             -- consistency and risk against the archetype line at the same pace move the rate by up to this fraction
 H.MV_TOP_FRAC = 0.10       -- the top this fraction of a roster bucket by pace gets the last anchor (15 laps)
+H.MV_TOP_RAW = false       -- (fix, A/B) mvTopOf compares the driver's RAW roster pace with its raw cut-off. With ratingV2 (default since
+                           -- 0.14.9) the profile it is handed carries pace rescaled to 0.86-1.00, above the f1/gt/vintage/rally cut-offs
+                           -- (0.77-0.84): every named driver there counted 'top', pinned at 15 laps per mistake (profile audit, 5 Oct)
 H.MV_ARCH = { { 0.30, 0.60, 0.50 }, { 0.60, 0.35, 0.80 }, { 0.85, 0.20, 0.95 } }   -- pace, risk, cons of the archetypes (the line)
 H.MV_RATE_X = 1.0
 -- (0.15.1 test, owner yes 1 Oct) H.MV_COMP: a mistake drawn while the car is busy in traffic, or armed and dropped for want of a
@@ -457,7 +460,12 @@ function H.mvTopOf(prof)                      -- a named driver in the top MV_TO
         th = ps[math.max(1, math.ceil(H.MV_TOP_FRAC * #ps))] or 9
         H.mvTop[prof.bucket] = th
     end
-    return prof.pace >= th
+    local p = prof.pace
+    if H.MV_TOP_RAW and prof.key and Drivers.rawOf then                -- (H.MV_TOP_RAW) like with like: V2 keeps the order, so same top 10%
+        local d = Drivers.rawOf(prof.key)
+        if d and type(d.pace) == 'number' then p = d.pace end
+    end
+    return p >= th
 end
 -- one car's mistake profile, re-read every 5 s (a profile or a level can change mid-session)
 function H.mvSkill(i, prof, now)
