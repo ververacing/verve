@@ -366,13 +366,14 @@ end
 local function judgeDrops(now)
     local keep = {}
     for _, d in ipairs(drops) do
-        if d.ok == nil then
+        if d.ok == nil and not d.void then
             local c = ac.getCar(d.i)
             local rolled = false
-            if R.DROP_ROLL > 0 and c and d.spl and (c.speedKmh or 0) > R.DROP_ROLL_SPEED then
-                local gained = (c.splinePosition or 0) - d.spl          -- wrapped: a drop before the line, judged after it
-                if gained < -0.5 then gained = gained + 1 elseif gained > 0.5 then gained = gained - 1 end
-                rolled = gained >= R.DROP_ROLL
+            local roll = tonumber(R.DROP_ROLL) or 0                      -- harness JSON may hand us a string or a boolean; a raw
+            if roll > 0 and c and d.spl and (c.speedKmh or 0) > (tonumber(R.DROP_ROLL_SPEED) or 10) then   -- compare would raise inside
+                local gained = (c.splinePosition or 0) - d.spl          -- the pcall and silence the judge for the session (review 2026-10-04)
+                if gained < -0.5 then gained = gained + 1 elseif gained > 0.5 then gained = gained - 1 end   -- wrapped: a drop before the line, judged after it
+                rolled = gained >= roll
             end
             if c and ((c.speedKmh or 0) > DROP_OK_SPEED or rolled) then
                 d.ok = true; R.dropOK = R.dropOK + 1
@@ -388,7 +389,7 @@ local function judgeDrops(now)
                 if not retry and (d.sus or 0) < R.DROP_RATE_SUSP and not R.wildCar[d.i] then R.rateN = R.rateN + 1 end
             end
         end
-        if d.ok == nil or now - d.t < DROP_JUDGE_T + 30 then keep[#keep + 1] = d end   -- (kept a bit longer for the diag trace)
+        if (d.ok == nil and not d.void) or now - d.t < DROP_JUDGE_T + 30 then keep[#keep + 1] = d end   -- (kept a bit longer for the diag trace; a void record leaves at the normal time)
     end
     drops = keep
     local judged = 0
@@ -707,6 +708,8 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
     if okp then
         if retrying then R.gateRetry[i] = false; hopeless[i] = nil end   -- (a hopeless mark from before the grant: the retry is judged instead)
         rejoinUntil[i] = os.clock() + REJOIN_RAMP            -- rejoin gently (see REJOIN_RAMP)
+        for _, od in ipairs(drops) do if od.i == i and od.ok == nil then od.void = true end end   -- (0.16) a new drop supersedes an unjudged
+        -- older one for the same car: from here on that record's "progress" would be this teleport, not driving (review 2026-10-04)
         drops[#drops + 1] = { i = i, t = os.clock(), ok = nil, spl = progress, sus = maxSusp(ac.getCar(i)), tt = temps,
                               gs = gated and reqProgress or nil }   -- judged over the next DROP_JUDGE_T; gs = the stop spot of a gated drop
         pendingDrop[i] = { pos = pos, dir = dir, apiDir = apiDir, t = os.clock(), tries = 0 }   -- verify its heading next frame
