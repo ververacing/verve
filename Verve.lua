@@ -17,7 +17,7 @@ local Watch     = require('lib.watch')        -- read-back watchdog: is anything
 local Contacts  = require('lib.contacts')     -- contacts from CSP's collision state (works with damage off)
 local Fault     = require('lib.fault')        -- who caused each contact, and the time penalty it costs (owner's ask 2026-09-17)
 local Strategy  = require('lib.strategy')     -- planned manoeuvres (racecraft drives it; Verve owns the toggle + status)
-local Drift     = require('lib.drift')        -- (0.16 MVP, Racecraft.DRIFT_AI, default off) drift-class AI cars slide through corners
+local Drift     = nil   -- (0.16 MVP) lib/drift.lua: loaded the first time Racecraft.DRIFT_AI / DRIFT_MEASURE is on, never otherwise
 local Fuel      = require('lib.fuel')         -- timed races: AC's 1.2-lap AI fuel load and its empty-tank pit loop (G.timedFuel)
 Racecraft.penCap = Fault.penCap            -- penalty throttle caps, read by racecraft's throttle setter (shared table)
 Fault.attach(Recovery.recentDrops, Feed.event)
@@ -176,7 +176,7 @@ local function sessionReset(restart)
     pcall(Troublespots.reset)     -- save the old track's learned hot spots, load the new track's
     pcall(Feed.reset)
     pcall(Fuel.reset)
-    pcall(Drift.reset)            -- hands every sliding car back, forgets the track's line and the per-car steering calibration
+    if Drift then pcall(Drift.reset) end   -- hands every sliding car back, forgets the track's line and the per-car steering calibration
     if Diag then pcall(Diag.reset) end
 end
 
@@ -489,7 +489,10 @@ function script.update(dt)
     end
     managed = n
     -- after the car loop: while a car slides, its controls and grip are the drift module's (it lets go the moment it stops)
-    if Racecraft.DRIFT_AI or Racecraft.DRIFT_MEASURE or Drift.busy > 0 then pc('drift', Drift.update, dt, Racecraft.DRIFT, Racecraft.DRIFT_AI, Racecraft.DRIFT_MEASURE) end
+    if Racecraft.DRIFT_AI or Racecraft.DRIFT_MEASURE or (Drift and Drift.busy > 0) then
+        if Drift == nil then local okD, m = pcall(require, 'lib.drift'); Drift = okD and m or false; if not okD then noteErr('drift load', m) end end
+        if Drift then pc('drift', Drift.update, dt, Racecraft.DRIFT, Racecraft.DRIFT_AI, Racecraft.DRIFT_MEASURE, Diag ~= nil) end
+    end
 
     Recovery.ENABLED = G.recovery
     Recovery.CRASH_REPAIR = G.crashRepair
@@ -507,7 +510,7 @@ function script.update(dt)
             roomN = Racecraft.roomN or 0, roomAct = Racecraft.roomAct or 0, bgN = Racecraft.bgN or 0, bgPassN = Racecraft.bgPassN or 0, evalN = Racecraft.evalN or 0, fastTuckN = Racecraft.fastTuckN or 0, yellowSlowN = Racecraft.yellowSlowN or 0,
             hotSpots = Troublespots.hotCount(), crashRisk = Troublespots.crashiness(), isOval = Racecraft.isOval,
             peak = Troublespots.peakHeat(), storeLen = Troublespots.storeLen, saveOk = Troublespots.lastSaveOk,
-            per = diagPer, drift = Drift, rc = Racecraft.last, recState = Recovery.stateOf, cv2 = Racecraft.cv2, episodes = Strategy.episodes,
+            per = diagPer, drift = Drift or nil, rc = Racecraft.last, recState = Recovery.stateOf, cv2 = Racecraft.cv2, episodes = Strategy.episodes,
             recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, dropFailN = Recovery.dropFailN, dropFailClear = Recovery.dropFailClear, boxRescueN = Recovery.boxRescueN, boxSeenN = Recovery.boxSeenN, boxTryN = Recovery.boxTryN, boxOkN = Recovery.boxOkN, dropsOff = Recovery.dropsOff, fuelLoadN = Fuel.loadN, fuelBoxN = Fuel.boxFixN, fuelReN = Fuel.boxReN,
             mvN = Strategy.attempts, mvOK = Strategy.ok, mvT = Strategy.byTypeString(), gateN = Recovery.gateMoves,
             fwdSign = (Recovery.fwdSign and Recovery.fwdSign() or 0), dropFlips = Recovery.dropFlips,

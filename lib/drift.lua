@@ -45,9 +45,10 @@ D.P = {
     holdGear = false,  -- keep the gear through a slide (one upshift on the limiter, one downshift when it bogs); off: AC's gearbox
     trafficS = 0.9,    -- a car within this many seconds of travel (12 m at least), within 25 degrees of our travel: no slide, AC drives
     all = false,       -- every AI car, not only the drift class (testing)
-    trace = true,      -- 5 Hz rows for the diag file
+    trace = nil,       -- 5 Hz rows for the diag file: nil = only when Verve's dev diag logger is there (never in the shipped build)
 }
-D.ON, D.MEASURE, D.busy = false, false, 0
+D.ON, D.MEASURE, D.busy, D.TRACE = false, false, 0, false
+D.cpu = { n = 0, sum = 0, max = 0 }   -- this module's own frame cost while active (ms), reported in the diag block
 D.trace, D.traceDrop = {}, 0
 D.errN, D.lastErr = 0, nil
 
@@ -63,6 +64,8 @@ local trkWait = 0   -- seconds before the next try when the line could not be re
 local atan2, abs, sqrt, floor, min, max = math.atan2, math.abs, math.sqrt, math.floor, math.min, math.max
 local DEG, RAD = 180 / math.pi, math.pi / 180
 local CX, CZ, CN = {}, {}, 0   -- every car's position this frame (traffic check)
+local scanT, anyDrift = 0, false   -- is a drift-class car on the grid at all (rechecked every 10 s): if not, the module sleeps
+local clock = os.preciseClock or os.clock
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
 
 -- signed angle from a to b about the axis u (one convention for everything)
@@ -196,7 +199,7 @@ local function carStep(i, car, dt, P, st)
         if (far > 0 and 1 or -1) * ang * DEG >= 15 then st.cornerSlideT = st.cornerSlideT + dt end
     end
     if not D.ON then                                                  -- measure only: a 2 Hz row in corners
-        if P.trace and abs(far) >= turnIn and v >= P.minKmh then
+        if D.TRACE and abs(far) >= turnIn and v >= P.minKmh then
             s.tr = s.tr + dt
             if s.tr >= 0.5 then
                 s.tr = 0
@@ -294,7 +297,7 @@ local function carStep(i, car, dt, P, st)
         c.requestedGearIndex = 0
     end
     pcall(physics.setExtraAIGrip, i, P.grip)
-    if P.trace then
+    if D.TRACE then
         s.tr = s.tr + dt
         if s.tr >= 0.2 then
             s.tr = 0
@@ -307,20 +310,32 @@ local function carStep(i, car, dt, P, st)
 end
 
 local lastOpts = nil
-function D.update(dt, opts, on, measure)
+function D.update(dt, opts, on, measure, diagOn)
     if type(opts) == 'table' and opts ~= lastOpts then
         for k, v in pairs(opts) do if D.P[k] ~= nil then D.P[k] = v end end
         lastOpts = opts
     end
     D.ON, D.MEASURE = on == true, measure == true
     if not (D.ON or D.MEASURE) then if D.busy > 0 then D.off() end; return end
+    local P = D.P
+    scanT = scanT - dt
+    if scanT <= 0 then                                               -- no drift car on the grid: nothing below runs
+        scanT, anyDrift = 10, P.all == true
+        if not anyDrift then
+            local sim0 = ac.getSim()
+            for j = 0, sim0.carsCount - 1 do if Classes.keyOf(j) == 'drift' then anyDrift = true; break end end
+        end
+    end
+    if not anyDrift then if D.busy > 0 then D.off() end; return end
+    D.TRACE = (P.trace == nil and diagOn == true) or P.trace == true
+    local t0 = clock()
     if not trk then
         trkWait = trkWait - dt
         if trkWait > 0 then return end
         trk = buildTrack()
         if not trk then trkWait = 5; return end
     end
-    local P, st = D.P, D.st
+    local st = D.st
     local sim = ac.getSim()
     CN = sim.carsCount
     for j = 0, CN - 1 do
@@ -344,6 +359,10 @@ function D.update(dt, opts, on, measure)
         end
     end
     D.busy = busy
+    local ms = (clock() - t0) * 1000
+    local cp = D.cpu
+    cp.n, cp.sum = cp.n + 1, cp.sum + ms
+    if ms > cp.max then cp.max = ms end
 end
 
 function D.off()
@@ -353,7 +372,8 @@ end
 
 function D.reset()
     D.off()
-    S, trk, trkWait, lastOpts = {}, nil, 0, nil
+    S, trk, trkWait, lastOpts, scanT, anyDrift = {}, nil, 0, nil, 0, false
+    D.cpu = { n = 0, sum = 0, max = 0 }
     D.st, D.trace, D.traceDrop, D.errN, D.lastErr = newStats(), {}, 0, 0, nil
 end
 
@@ -365,9 +385,11 @@ function D.statsJson()
         if c.wpd then cal[#cal + 1] = string.format('[%d,"%s",%.5f,%d,%d]', i, c.cal or '', c.wpd, c.kIn, c.wn) end
     end
     return string.format('{"on":%s,"meas":%s,"fr":%d,"ini":%d,"hold":%d,"spin":%d,"fail":%d,"exit":%d,"trans":%d,"snap":%d,"slow":%d,"flip":%d,"traffic":%d,' ..
-        '"aMean":%.1f,"aMax":%.1f,"slideT":%.1f,"cornerT":%.1f,"cornerSlideT":%.1f,"offT":%.1f,"noComb":%d,"err":%d,"tDrop":%d,"cal":[%s]}',
+        '"aMean":%.1f,"aMax":%.1f,"slideT":%.1f,"cornerT":%.1f,"cornerSlideT":%.1f,"offT":%.1f,"noComb":%d,"err":%d,"tDrop":%d,' ..
+        '"cpuN":%d,"cpuAvgMs":%.4f,"cpuMaxMs":%.3f,"cars":%s,"cal":[%s]}',
         tostring(D.ON), tostring(D.MEASURE), s.fr, s.ini, s.hold, s.spin, s.fail, s.exit, s.trans, s.snap, s.slow, s.flip, s.traffic,
-        s.aT > 0 and s.aSum / s.aT or 0, s.aMax, s.slideT, s.cornerT, s.cornerSlideT, s.offT, s.noComb, D.errN, D.traceDrop, table.concat(cal, ','))
+        s.aT > 0 and s.aSum / s.aT or 0, s.aMax, s.slideT, s.cornerT, s.cornerSlideT, s.offT, s.noComb, D.errN, D.traceDrop,
+        D.cpu.n, D.cpu.n > 0 and D.cpu.sum / D.cpu.n or 0, D.cpu.max, tostring(anyDrift), table.concat(cal, ','))
 end
 
 function D.flush(buf)
