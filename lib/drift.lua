@@ -24,10 +24,15 @@ D.P = {
     turnIn = 30,       -- degrees of turning in the look-ahead that make a corner worth a drift
     lookS = 1.0,       -- corner look-ahead, seconds of travel (15-45 m)
     nearS = 0.45,      -- ... and the corner must have started within this (6-20 m)
-    flick = 0.20,      -- handbrake pull at the start of a slide, seconds (clutch in so the locked rears don't stall it)
-    flickGas = 0.4,
-    initMax = 0.9,     -- no rotation this long after the flick: the attempt failed, AC drives the corner
-    initSteer = 0.10,  -- front wheels into the corner during the flick, radians (more spins the car before the counter-steer can catch it)
+    -- the start (first live race, 5 Oct: a 0.2 s pull with 6 deg of lock at 90 km/h never broke the rear loose - 157 of 177 failed):
+    flick = 0.5,       -- longest handbrake pull, seconds; it ends as soon as the car has rotated flickEnd degrees
+    flickEnd = 8,
+    flickGas = 1.0,    -- revs up with the clutch in during the pull, so letting the clutch out kicks the rears loose
+    kickT = 0.25,      -- full throttle this long after the pull (the clutch kick), then the throttle cascade
+    initMax = 0.8,     -- no rotation this long after the pull: the attempt failed, AC drives the corner
+    initSteer = 0.35,  -- front wheels into the corner during the pull, fading out over the first 12 degrees of the slide (AC's
+                       -- steering follows a request within a frame, so a strong turn-in can be caught; the mock's slow rack could not)
+    initGrip = 0,      -- >0: extra AI grip during the start only (0 = grip). Every key needs a non-nil default: the harness only sets known keys
     -- throttle, a cascade that adapts to the car's power: the angle error asks for a rotation rate (rateK deg/s per degree,
     -- capped at rateMax), and the throttle integrates toward whatever gives that rate (kir per deg/s per s, kpr per deg/s now)
     rateK = 2.0, rateMax = 60, kpr = 0.004, kir = 0.012, gStart = 0.45,
@@ -48,7 +53,7 @@ D.P = {
     holdGear = false,  -- keep the gear through a slide (one upshift on the limiter, one downshift when it bogs); off: AC's gearbox
     trafficS = 0.9,    -- a car within this many seconds of travel (12 m at least), within 25 degrees of our travel: no slide, AC drives
     all = false,       -- every AI car, not only the drift class (testing)
-    trace = nil,       -- 5 Hz rows for the diag file: nil = only when Verve's dev diag logger is there (never in the shipped build)
+    trace = 'auto',    -- 5 Hz rows for the diag file: 'auto' = only when Verve's dev diag logger is there (never in the shipped build)
 }
 D.ON, D.MEASURE, D.busy, D.TRACE = false, false, 0, false
 D.cpu = { n = 0, sum = 0, max = 0 }   -- this module's own frame cost while active (ms), reported in the diag block
@@ -77,17 +82,28 @@ local function sang(ax, ay, az, bx, by, bz, ux, uy, uz)
     return atan2(cx * ux + cy * uy + cz * uz, ax * bx + ay * by + az * bz)
 end
 
-local function buildTrack()
-    local sim = ac.getSim()
-    local L = sim and sim.trackLengthM or 0
-    if not L or L < 100 then return nil end
-    local N = floor(min(4000, max(300, L / 2)))
-    local px, pz = {}, {}
-    for k = 0, N - 1 do
+-- the AI line, read a slice per frame (in one frame it cost 45 ms on Highlands, 5 Oct): returns the line when done, else nil;
+-- the second value is true when it can't be read (try again later)
+local bld = nil
+local function buildTrack(perFrame)
+    if not bld then
+        local sim = ac.getSim()
+        local L = sim and sim.trackLengthM or 0
+        if not L or L < 100 then return nil, true end
+        bld = { N = floor(min(4000, max(300, L / 2))), L = L, px = {}, pz = {}, k = 0 }
+    end
+    local b = bld
+    local N, px, pz = b.N, b.px, b.pz
+    local stop = min(N, b.k + perFrame)
+    for k = b.k, stop - 1 do
         local p = ac.trackProgressToWorldCoordinate(k / N, false)
-        if not p then return nil end
+        if not p then bld = nil; return nil, true end
         px[k], pz[k] = p.x, p.z
     end
+    b.k = stop
+    if stop < N then return nil, false end
+    bld = nil
+    local L = b.L
     local cum = { [0] = 0 }
     for k = 0, N - 1 do
         local a, c = (k - 1) % N, (k + 1) % N
@@ -264,15 +280,16 @@ local function carStep(i, car, dt, P, st)
             return
         end
     end
-    if s.m == 1 then                                                  -- start: flick, then the hold law catches it
-        if s.flick and s.t < P.flick then
+    if s.m == 1 then                                                  -- start: pull until it rotates, clutch kick, then the hold law
+        if s.flick and s.t < P.flick and aDeg < P.flickEnd then
             hb, clutch, gas, wheel = 1, 0, P.flickGas, P.initSteer
         else
-            gas = D.gasLaw(s, P, aDeg, dt, 0)                         -- no wide cut while the slide builds
-            wheel = -a + steerPath - P.kRate * s.daF
+            if s.flick then s.flick, s.t, s.gI = false, 0, max(s.gI or 0, 0.8) end   -- the pull is over: the power phase's clock
+            gas = s.t < P.kickT and 1 or D.gasLaw(s, P, aDeg, dt, 0)  -- no wide cut while the slide builds
+            wheel = -a + steerPath - P.kRate * s.daF + P.initSteer * clamp(1 - aDeg / 12, 0, 1)
         end
         if aDeg >= 0.35 * P.angle then s.m, s.t = 2, 0; st.hold = st.hold + 1
-        elseif s.t > P.flick + P.initMax then st.fail = st.fail + 1; release(i, s); return end
+        elseif not s.flick and s.t > P.initMax then st.fail = st.fail + 1; release(i, s); return end
     elseif s.m == 2 then                                              -- hold: throttle on the angle, wheels on the line
         gas = D.gasLaw(s, P, aDeg, dt, ePath)
         wheel = -a + steerPath - P.kRate * s.daF
@@ -323,7 +340,7 @@ local function carStep(i, car, dt, P, st)
     else
         c.requestedGearIndex = 0
     end
-    pcall(physics.setExtraAIGrip, i, P.grip)
+    pcall(physics.setExtraAIGrip, i, (s.m == 1 and P.initGrip > 0 and P.initGrip) or P.grip)
     if D.TRACE then
         s.tr = s.tr + dt
         if s.tr >= 0.2 then
@@ -354,13 +371,15 @@ function D.update(dt, opts, on, measure, diagOn)
         end
     end
     if not anyDrift then if D.busy > 0 then D.off() end; return end
-    D.TRACE = (P.trace == nil and diagOn == true) or P.trace == true
+    D.TRACE = (P.trace == 'auto' and diagOn == true) or P.trace == true
     local t0 = clock()
     if not trk then
         trkWait = trkWait - dt
         if trkWait > 0 then return end
-        trk = buildTrack()
-        if not trk then trkWait = 5; return end
+        local t, failed = buildTrack(100)
+        if failed then trkWait = 5; return end
+        if not t then return end                                       -- still reading the line (a slice per frame)
+        trk = t
     end
     local st = D.st
     local sim = ac.getSim()
@@ -399,7 +418,7 @@ end
 
 function D.reset()
     D.off()
-    S, trk, trkWait, lastOpts, scanT, anyDrift = {}, nil, 0, nil, 0, false
+    S, trk, trkWait, lastOpts, scanT, anyDrift, bld = {}, nil, 0, nil, 0, false, nil
     D.cpu = { n = 0, sum = 0, max = 0 }
     D.st, D.trace, D.traceDrop, D.errN, D.lastErr = newStats(), {}, 0, 0, nil
 end
