@@ -52,6 +52,9 @@ D.P = {
     autoFlip = true,   -- a sustained input-sign disagreement inverts the steering input (st.flip counts them either way)
     holdGear = false,  -- keep the gear through a slide (one upshift on the limiter, one downshift when it bogs); off: AC's gearbox
     trafficS = 0.9,    -- a car within this many seconds of travel (12 m at least), within 25 degrees of our travel: no slide, AC drives
+    nearM = 8,         -- no slide STARTS with any car this close in any direction (alongside / right behind)
+    minLap = 1,        -- no slides before this lap (Verve's lap count): the probe's v1 start made 16 of its 26 incidents in the
+                       -- opening-lap pack (stock AI: 4 of 7)
     all = false,       -- every AI car, not only the drift class (testing)
     trace = 'auto',    -- 5 Hz rows for the diag file: 'auto' = only when Verve's dev diag logger is there (never in the shipped build)
 }
@@ -186,14 +189,16 @@ local function tightR(sp)
     return kmax > 1e-4 and 1 / kmax or 1e4
 end
 
--- a car close ahead in our direction of travel (positions from this frame)
-local function trafficAhead(i, pos, vel, spd, P)
+-- a car close ahead in our direction of travel (positions from this frame); with near > 0 also any car that close at all
+local function trafficAhead(i, pos, vel, spd, P, near)
     local reach = max(12, P.trafficS * spd)
+    local n2 = (near or 0) * (near or 0)
     for j = 0, CN - 1 do
         local x = CX[j]
         if j ~= i and x then
             local dx, dz = x - pos.x, CZ[j] - pos.z
             local d2 = dx * dx + dz * dz
+            if d2 < n2 then return true end
             if d2 < reach * reach and d2 > 0.01 and (dx * vel.x + dz * vel.z) > 0.9 * sqrt(d2) * max(spd, 1) then return true end
         end
     end
@@ -239,7 +244,7 @@ local function carStep(i, car, dt, P, st)
     end
     if s.m == 0 then
         if s.wpd and s.cool <= 0 and v >= P.minKmh and abs(far) >= turnIn and abs(near) >= 0.35 * turnIn and far * near > 0
-           and not trafficAhead(i, car.position, vel, spd, P) then
+           and (car.lapCount or 0) >= P.minLap and not trafficAhead(i, car.position, vel, spd, P, P.nearM) then
             s.m, s.t, s.sg = 1, 0, (far > 0 and 1 or -1)
             s.gI = s.gI and (0.5 * s.gI + 0.5 * P.gStart) or P.gStart   -- half of what the last slide settled on
             s.aPrev, s.daF, s.flick, s.u = nil, 0, true, 0
