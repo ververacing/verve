@@ -346,6 +346,36 @@ def build_race_ini(args, base_path):
     return ini, len(cars) + 1
 
 
+def write_result_row(csv_path, m):
+    """Append one race to results.csv as ONE growing file: a race without some columns gets blanks, a race with new columns
+    widens the file (earlier rows get blanks). The old code rotated the file to results_until_<stamp>.csv whenever the column
+    set changed, and dead_terminal_susp exists only in some races - a new file almost every race (owner yes, 6 Oct)."""
+    fields = list(m.keys())
+    header = []
+    if os.path.exists(csv_path):
+        with open(csv_path, encoding="utf-8", newline="") as f:
+            header = next(csv.reader(f), None) or []
+    if not header:
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=fields, restval="")
+            w.writeheader()
+            w.writerow(m)
+        return
+    extra = [k for k in fields if k not in header]
+    if extra:
+        with open(csv_path, encoding="utf-8", newline="") as f:
+            old = list(csv.DictReader(f))
+        header = header + extra
+        tmp = csv_path + ".tmp"
+        with open(tmp, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=header, restval="")
+            w.writeheader()
+            w.writerows(old)
+        os.replace(tmp, csv_path)
+    with open(csv_path, "a", newline="", encoding="utf-8") as f:
+        csv.DictWriter(f, fieldnames=header, restval="").writerow(m)
+
+
 def lua_literal(v):
     if isinstance(v, bool):
         return "true" if v else "false"
@@ -1126,19 +1156,7 @@ def run_once(args, arm, run_idx):
                   "lines: the timed-race fuel loop (Verve's timedFuel setting fixes it)")
     elif m["ai_log_truncated"] and m["ai_race_laps"] == "":
         print("  (AC's log was cut off before the race: no AI fuel counts for this run)")
-    csv_path = os.path.join(RESULTS_DIR, "results.csv")
-    new = not os.path.exists(csv_path)
-    if not new:   # the columns changed (2026-09-13: ai_level + exact lap times): rotate the old file rather than misalign rows
-        with open(csv_path, encoding="utf-8") as f:
-            header = f.readline().strip().split(",")
-        if header != list(m.keys()):
-            os.replace(csv_path, csv_path.replace(".csv", f"_until_{time.strftime('%Y%m%d_%H%M')}.csv"))
-            new = True
-    with open(csv_path, "a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=list(m.keys()))
-        if new:
-            w.writeheader()
-        w.writerow(m)
+    write_result_row(os.path.join(RESULTS_DIR, "results.csv"), m)
     keys = ["leader_laps", "running_at_end", "within_1_lap", "retired_or_parked", "incidents", "incidents_lap0_1",
             "drops", "drops_ok", "frozen_cars", "laptime_median_spread_s"]
     print("  " + "  ".join(f"{k}={m[k]}" for k in keys))
