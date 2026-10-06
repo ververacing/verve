@@ -41,6 +41,9 @@ D.P = {
     exitAngle = 7,     -- hand back once the car is this straight
     exitMax = 1.5,     -- ... or after this long straightening
     cool = 0.5,        -- seconds after a slide before the next may start
+    entryMu = 0,       -- >0: brake to the corner's drift speed sqrt(entryMu * g * R) before the flick (R = tightest radius in the next
+                       -- 40 m of the AI line); 0 = off (AC's own braking only). A slide carries less speed than grip: the MVP runs wide.
+    entryMax = 1.2,    -- longest braking-in, seconds
     autoFlip = true,   -- a sustained input-sign disagreement inverts the steering input (st.flip counts them either way)
     holdGear = false,  -- keep the gear through a slide (one upshift on the limiter, one downshift when it bogs); off: AC's gearbox
     trafficS = 0.9,    -- a car within this many seconds of travel (12 m at least), within 25 degrees of our travel: no slide, AC drives
@@ -157,6 +160,16 @@ local function simT()
     return os.clock()
 end
 
+-- the tightest radius of the AI line in the next 40 m (5 m chunks), metres
+local function tightR(sp)
+    local kmax = 0
+    for c = 0, 7 do
+        local k = abs(turnAhead(sp, 5 * c, 5 * c + 5)) / 5
+        if k > kmax then kmax = k end
+    end
+    return kmax > 1e-4 and 1 / kmax or 1e4
+end
+
 -- a car close ahead in our direction of travel (positions from this frame)
 local function trafficAhead(i, pos, vel, spd, P)
     local reach = max(12, P.trafficS * spd)
@@ -215,6 +228,8 @@ local function carStep(i, car, dt, P, st)
             s.gI = s.gI and (0.5 * s.gI + 0.5 * P.gStart) or P.gStart   -- half of what the last slide settled on
             s.aPrev, s.daF, s.flick, s.u = nil, 0, true, 0
             s.g0, s.gT = (car.gear or 0), 0
+            s.vIn = P.entryMu > 0 and sqrt(P.entryMu * 9.81 * tightR(sp)) or nil   -- m/s to brake down to before the flick
+            s.brk = (s.vIn and spd > s.vIn + 1) and 0 or nil
             st.ini = st.ini + 1
         else
             return
@@ -237,6 +252,18 @@ local function carStep(i, car, dt, P, st)
     local steerPath = clamp(P.kPath * ePath, -P.pathMax, P.pathMax)
     local gas, brake, hb, clutch, wheel = 0, 0, 0, 1, 0
     s.t = s.t + dt
+    if s.m == 1 and s.brk then                                        -- braking in (P.entryMu): AC steers, we brake, no flick yet
+        s.brk = s.brk + dt
+        if spd <= s.vIn + 0.5 or s.brk > P.entryMax then s.brk, s.t = nil, 0
+        else
+            local c = ac.overrideCarControls(i)
+            if not c then release(i, s); return end
+            if not pcall(setComb, c, false) then st.noComb = st.noComb + 1; release(i, s); return end
+            c.steer, c.gas, c.brake, c.handbrake, c.clutch, c.requestedGearIndex = math.huge, 0, clamp((spd - s.vIn) * 0.25, 0.2, 0.9), 0, 1, 0
+            st.brakeIn = (st.brakeIn or 0) + dt
+            return
+        end
+    end
     if s.m == 1 then                                                  -- start: flick, then the hold law catches it
         if s.flick and s.t < P.flick then
             hb, clutch, gas, wheel = 1, 0, P.flickGas, P.initSteer
@@ -386,10 +413,10 @@ function D.statsJson()
     end
     return string.format('{"on":%s,"meas":%s,"fr":%d,"ini":%d,"hold":%d,"spin":%d,"fail":%d,"exit":%d,"trans":%d,"snap":%d,"slow":%d,"flip":%d,"traffic":%d,' ..
         '"aMean":%.1f,"aMax":%.1f,"slideT":%.1f,"cornerT":%.1f,"cornerSlideT":%.1f,"offT":%.1f,"noComb":%d,"err":%d,"tDrop":%d,' ..
-        '"cpuN":%d,"cpuAvgMs":%.4f,"cpuMaxMs":%.3f,"cars":%s,"cal":[%s]}',
+        '"brakeIn":%.1f,"cpuN":%d,"cpuAvgMs":%.4f,"cpuMaxMs":%.3f,"cars":%s,"cal":[%s]}',
         tostring(D.ON), tostring(D.MEASURE), s.fr, s.ini, s.hold, s.spin, s.fail, s.exit, s.trans, s.snap, s.slow, s.flip, s.traffic,
         s.aT > 0 and s.aSum / s.aT or 0, s.aMax, s.slideT, s.cornerT, s.cornerSlideT, s.offT, s.noComb, D.errN, D.traceDrop,
-        D.cpu.n, D.cpu.n > 0 and D.cpu.sum / D.cpu.n or 0, D.cpu.max, tostring(anyDrift), table.concat(cal, ','))
+        s.brakeIn or 0, D.cpu.n, D.cpu.n > 0 and D.cpu.sum / D.cpu.n or 0, D.cpu.max, tostring(anyDrift), table.concat(cal, ','))
 end
 
 function D.flush(buf)
