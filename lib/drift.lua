@@ -55,6 +55,11 @@ D.P = {
     nearM = 8,         -- no slide STARTS with any car this close in any direction (alongside / right behind)
     minLap = 1,        -- no slides before this lap (Verve's lap count): the probe's v1 start made 16 of its 26 incidents in the
                        -- opening-lap pack (stock AI: 4 of 7)
+    noAssist = true,   -- drift cars race without AI stability control and TC while the switch is on (per car, physics.setAssists;
+                       -- CSP 0.3.0-p440 turns the AI stability assist on exactly when a car slides). Never car 0 (= the player's global
+                       -- assists). There is no per-car getter, so the originals are not restored until the session ends.
+    preGrip = true,    -- grip goes to P.grip about a second BEFORE the corner (CSP smooths the AI grip multiplier: v1 dropped it
+                       -- only once sliding, so its starts ran on 1.2)
     all = false,       -- every AI car, not only the drift class (testing)
     trace = 'auto',    -- 5 Hz rows for the diag file: 'auto' = only when Verve's dev diag logger is there (never in the shipped build)
 }
@@ -228,6 +233,13 @@ local function carStep(i, car, dt, P, st)
     local far = turnAhead(sp, 0, clamp(spd * P.lookS, 15, 45))
     local near = turnAhead(sp, 0, clamp(spd * P.nearS, 6, 20))
     if (car.wheelsOutside or 0) >= 3 then st.offT = st.offT + dt end
+    if D.ON and P.noAssist and not s.ast and i > 0 then              -- once per car per session
+        s.ast = true
+        if pcall(physics.setAssists, { stability = 0, tractionControl = 'off' }, i) then st.noAst = (st.noAst or 0) + 1 end
+    end
+    if D.ON and P.preGrip and s.m == 0 and v >= P.minKmh and abs(far) >= 0.5 * turnIn then   -- a corner is coming: real grip now
+        pcall(physics.setExtraAIGrip, i, P.grip); s.pre = true
+    elseif s.pre and s.m == 0 then s.pre = nil end
     if abs(far) >= turnIn and v >= P.minKmh then                     -- cornering time, both arms
         st.cornerT = st.cornerT + dt
         if (far > 0 and 1 or -1) * ang * DEG >= 15 then st.cornerSlideT = st.cornerSlideT + dt end
@@ -352,8 +364,9 @@ local function carStep(i, car, dt, P, st)
             s.tr = 0
             local w0 = car.wheels[0].look
             local wm = sg * sang(lk.x, lk.y, lk.z, w0.x, w0.y, w0.z, up.x, up.y, up.z) * DEG
-            addTrace(string.format('{"ev":"drift","ts":%.2f,"car":%d,"m":%d,"a":%.1f,"da":%.0f,"g":%.2f,"hb":%d,"u":%.2f,"st":%.0f,"w":%.1f,"wt":%.1f,"e":%.1f,"v":%.0f,"gear":%d,"rpm":%.0f,"sp":%.4f,"cal":"%s","kin":%d}',
-                simT(), i, s.m, aDeg, s.daF * DEG, gas, hb, u, car.steer or 0, wm, wheel * DEG, ePath * DEG, v, car.gear or 0, car.rpm or 0, sp, s.cal or '', s.kIn))
+            addTrace(string.format('{"ev":"drift","ts":%.2f,"car":%d,"m":%d,"a":%.1f,"da":%.0f,"g":%.2f,"hb":%d,"u":%.2f,"st":%.0f,"w":%.1f,"wt":%.1f,"e":%.1f,"v":%.0f,"gear":%d,"rpm":%.0f,"sp":%.4f,"cal":"%s","kin":%d,"ag":%.2f,"ahb":%.2f,"acl":%.2f}',
+                simT(), i, s.m, aDeg, s.daF * DEG, gas, hb, u, car.steer or 0, wm, wheel * DEG, ePath * DEG, v, car.gear or 0, car.rpm or 0, sp, s.cal or '', s.kIn,
+                car.gas or -1, car.handbrake or -1, car.clutch or -1))   -- what AC actually applied (CSP smooths AI inputs)
         end
     end
 end
@@ -437,10 +450,10 @@ function D.statsJson()
     end
     return string.format('{"on":%s,"meas":%s,"fr":%d,"ini":%d,"hold":%d,"spin":%d,"fail":%d,"exit":%d,"trans":%d,"snap":%d,"slow":%d,"flip":%d,"traffic":%d,' ..
         '"aMean":%.1f,"aMax":%.1f,"slideT":%.1f,"cornerT":%.1f,"cornerSlideT":%.1f,"offT":%.1f,"noComb":%d,"err":%d,"tDrop":%d,' ..
-        '"brakeIn":%.1f,"cpuN":%d,"cpuAvgMs":%.4f,"cpuMaxMs":%.3f,"cars":%s,"cal":[%s]}',
+        '"brakeIn":%.1f,"noAst":%d,"cpuN":%d,"cpuAvgMs":%.4f,"cpuMaxMs":%.3f,"cars":%s,"cal":[%s]}',
         tostring(D.ON), tostring(D.MEASURE), s.fr, s.ini, s.hold, s.spin, s.fail, s.exit, s.trans, s.snap, s.slow, s.flip, s.traffic,
         s.aT > 0 and s.aSum / s.aT or 0, s.aMax, s.slideT, s.cornerT, s.cornerSlideT, s.offT, s.noComb, D.errN, D.traceDrop,
-        s.brakeIn or 0, D.cpu.n, D.cpu.n > 0 and D.cpu.sum / D.cpu.n or 0, D.cpu.max, tostring(anyDrift), table.concat(cal, ','))
+        s.brakeIn or 0, s.noAst or 0, D.cpu.n, D.cpu.n > 0 and D.cpu.sum / D.cpu.n or 0, D.cpu.max, tostring(anyDrift), table.concat(cal, ','))
 end
 
 function D.flush(buf)
