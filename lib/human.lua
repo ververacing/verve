@@ -72,7 +72,7 @@ H.MV_OFF_P = { 0.06, 0.025, 0.010, 0.005 }   -- P(a lock-up or a missed apex bec
 H.MV_SPIN_P = { 0.005, 0, 0, 0 }             -- P(a lift becomes a spin), robust classes only
 H.MV_CR = 0.25             -- consistency and risk against the archetype line at the same pace move the rate by up to this fraction
 H.MV_TOP_FRAC = 0.10       -- the top this fraction of a roster bucket by pace gets the last anchor (15 laps)
-H.MV_TOP_RAW = false       -- (fix, A/B) mvTopOf compares the driver's RAW roster pace with its raw cut-off. With ratingV2 (default since
+H.MV_TOP_RAW = true        -- DEFAULT 0.16 (owner yes 6 Oct; A/B 6 v 6: mistakes 5.2 -> 10.0 per 100 car-laps, incidents level). (fix) mvTopOf compares the driver's RAW roster pace with its raw cut-off. With ratingV2 (default since
                            -- 0.14.9) the profile it is handed carries pace rescaled to 0.86-1.00, above the f1/gt/vintage/rally cut-offs
                            -- (0.77-0.84): every named driver there counted 'top', pinned at 15 laps per mistake (profile audit, 5 Oct)
 H.MV_ARCH = { { 0.30, 0.60, 0.50 }, { 0.60, 0.35, 0.80 }, { 0.85, 0.20, 0.95 } }   -- pace, risk, cons of the archetypes (the line)

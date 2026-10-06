@@ -134,7 +134,7 @@ local CV = { END = 0.45, GAP = 0.006, LAT = 0.35, MARGIN = 6.0,          -- v1: 
              RS_EDGE = 0.80, RS_MARGIN_M = 0.8, RS_CARW_M = 1.9, RS_BACK_M = 12.0, RS_FWD_M = 10.0, RS_REAREND = 0.35, RS_ADV = 0.5,
              ISO_REACH_M = 300.0, LONE_M = 50.0,
              LANE_OFF = 0.45, LANE_APEX_M = 40.0, LANE_SCAN_M = 20.0, LANE_MAX_M = 900.0, LANE_LOCAL_M = 12.0, LANE_COL_GAP_M = 1.5 }   -- turn-1 lanes: offset, hold this far past the apex, corner-scan step, give up looking this far out   -- alone-on-track: a car ahead within this is 'catchable' for a top-tier driver; nobody within this either way = lone   -- road space: usable edge (track units), margin + fallback car width (m), scan window behind me / past the car ahead (m), rear-end ease left while pulling out, run needed (x the aggression-scaled minimum)
-local cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, crossed = {}, mvThr = {}, mvBg = {} }      -- v2 state: lights-out clock, distance behind the front car, cars we throttled, guard applied, base brake hints
+local cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, crossed = {}, mvThr = {}, mvBg = {}, yb = {} }      -- v2 state: lights-out clock, distance behind the front car, cars we throttled, guard applied, base brake hints
 R.cv2 = cv2                                                               -- (read by diag's contact trace)
 -- CONVOY v2 (harness A/B: R.CONVOY2_ON): throttle, never a speed cap. A follower closing on the car ahead on the
 -- same line loses throttle in proportion to the gap; the field is released from the lights row by row.
@@ -475,6 +475,16 @@ K.YELLOW_LAT = 1.3   -- a stopped car this far from the centre line still counts
 -- the stopped-car cap (a crawler passed at its speed + 40) on its own, and the tighter of that and the stopped-car yellow
 -- applies: a slow car queueing in front of a wreck must never hide the wreck and lift the cap.
 R.YELLOW_SLOW = 0             -- fraction of the road's typical speed, 0 = off (no map, nothing changes); 0.35 = a car under 35% of it is a yellow (Baku kink 2026-09-26)
+R.YELLOW_LAT = K.YELLOW_LAT   -- (harness A/B, owner yes 6 Oct) how far off the centre line a stopped car still makes a yellow (half-widths). F1 cars
+                              -- stopped at 1.5-1.7 after a crash at Lesmo 2 were outside 1.3 and the next car arrived flat out (5 Oct analysis)
+R.YELLOW_BRAKE = 0            -- (harness A/B, owner yes 6 Oct) km/h over the yellow cap at which Verve ADDS brake (never less than AC's own) and
+                              -- cuts the throttle; 0 = off. The cap alone is a top speed: F1 cars reached stopped cars 55-82 km/h over it, slowing
+                              -- at 1.1-1.7 g, and hit them at 96-144 km/h closing (Monza 5 Oct). 20 = brake once 20 over, ramping to full at +70.
+R.ybN = 0                     -- diag: car-frames braking for a yellow
+R.YIELD_STRAIGHT = false      -- (harness A/B, owner yes 6 Oct) a car moving aside (blue flag or nursing damage) does it on a straight only: in a
+                              -- bend, or with one within ~1 s, it holds the line with the yield lift and moves over after. Yielding SF70Hs went
+                              -- off 45% of the time at Lesmo 2 (2.6% in cruise; GT3 yielding 7%), 5 Oct analysis.
+R.ysN = 0                     -- diag: car-frames holding the line in a bend instead of moving aside
 CV.YS_M = 20.0                -- m per bin of the typical-speed map (bin count = track length / this, 50..1000)
 CV.YS_MIN = 10                -- crossings before a bin is trusted (a running mean until then); 10+ cars trust the lap during lap 1
 CV.YS_UP = 0.20; CV.YS_DN = 0.05   -- EMA rates once trusted: quick up, slow down, so cars slowed through a yellow zone do not teach the map the zone is slow
@@ -589,6 +599,24 @@ local function cornerAhead(prog)
         insideSign = (latInside >= latHere) and 1 or -1               -- track frame: +1 = right
     end)
     return isCorner, insideSign
+end
+
+-- (R.YIELD_STRAIGHT) a bend here or within ~1 s at this speed
+function R.bendNear(sp, spd, trackLen)
+    return cornerAhead(sp) or cornerAhead((sp + (spd / 3.6) * 1.0 / math.max(trackLen, 1)) % 1)
+end
+
+-- (R.YELLOW_BRAKE) brake for a yellow on top of AC's own braking (the override combines by max), throttle cut by the caller;
+-- let go the frame it no longer applies. over = km/h above the cap.
+function R.yellowBrake(i, on, over)
+    local c = ac.overrideCarControls(i)
+    if not c then cv2.yb[i] = nil; return end
+    if on then
+        c.brake = math.min(1, math.max(0.25, (over - R.YELLOW_BRAKE) / 50 + 0.25))
+        cv2.yb[i] = true; R.ybN = R.ybN + 1
+    else
+        c.brake = 0; cv2.yb[i] = nil
+    end
 end
 
 -- ROOM MAP accessor (R.ROOM): 0 = wide or fast road, 1 = a slow corridor. tight = slow x max(narrow, ROOM_WFLOOR): narrow ramps
@@ -826,7 +854,7 @@ local evalBody = function()
                     end
                     -- a stopped (or crawling) car ON the road ahead is a yellow flag, not a rival
                     local hazard = ocSpd < K.BLOCK_SPEED
-                    if not hazard and R.OL_SPINYELLOW and myLap == 0 and d > 0 and d < yellowRange and math.abs(ocLat) < K.YELLOW_LAT then
+                    if not hazard and R.OL_SPINYELLOW and myLap == 0 and d > 0 and d < yellowRange and math.abs(ocLat) < R.YELLOW_LAT then
                         -- lap 0: a car ahead going sideways, or far slower than me, is about to be hit by the next arrivals
                         if ocSpd < spd * CV.SPIN_FRAC and spd > 60 then hazard = true
                         else
@@ -839,7 +867,7 @@ local evalBody = function()
                     end
                     -- SLOW-CAR YELLOW (R.YELLOW_SLOW): far under the speed its own bit of road is normally driven at (cv2.ys, beginFrame).
                     -- Capped on its own (ysCap), never as the nearest hazard: in front of a wreck it would hide the wreck and lift the cap.
-                    if not hazard and cv2.ys and d > 0 and d < yellowRange and math.abs(ocLat) < K.YELLOW_LAT and not oc.isInPitlane then   -- (cv2.ys exists only while the switch is on)
+                    if not hazard and cv2.ys and d > 0 and d < yellowRange and math.abs(ocLat) < R.YELLOW_LAT and not oc.isInPitlane then   -- (cv2.ys exists only while the switch is on)
                         local ys = cv2.ys
                         local nb = ys.nb
                         local ob = math.floor(oc.splinePosition * nb) % nb
@@ -864,7 +892,7 @@ local evalBody = function()
                             end
                         end
                     end
-                    if d > 0 and d < yellowRange and hazard and math.abs(ocLat) < K.YELLOW_LAT and d < yellowD then
+                    if d > 0 and d < yellowRange and hazard and math.abs(ocLat) < R.YELLOW_LAT and d < yellowD then
                         yellowD = d; yellowSpd = ocSpd
                     end
                     -- stopped or off-track cars aren't rivals to attack/defend against (the blockage scan and
@@ -942,8 +970,10 @@ local evalBody = function()
         end
         pcall(function() cap = math.min(cap, Recovery.rampCap(i)) end)
         pcall(function() physics.setAITopSpeed(i, cap) end)
+        local ybOn = R.YELLOW_BRAKE > 0 and cap < 1e8 and spd > cap + R.YELLOW_BRAKE and not (Recovery.stateOf(i) or R.NOSTATE).rec
+        if ybOn or cv2.yb[i] then pcall(R.yellowBrake, i, ybOn, spd - cap) end
         -- CONVOY v2: throttle only (see the constants). Left alone for a car recovery is driving (its own throttle ramp).
-        local thr = 1.0
+        local thr = ybOn and 0 or 1.0                       -- (R.YELLOW_BRAKE) off the throttle while braking for a yellow
         if R.CONVOY2_ON and (myLap == 0 or roomF) and crowd >= 1 and not (Recovery.stateOf(i) or R.NOSTATE).rec then
             if myLap == 0 and cv2.clock and cv2.back[i] then
                 local tl0 = os.clock() - cv2.clock
@@ -1505,6 +1535,8 @@ local evalBody = function()
             end
             if not nearestToLapper then
                 yielding = false
+            elseif sideClear and R.YIELD_STRAIGHT and R.bendNear(mySpline, spd, trackLen) then
+                R.ysN = R.ysN + 1                                -- (R.YIELD_STRAIGHT) hold the line through the bend, lift (below), move over after
             elseif sideClear then
                 target = side * K.YIELD_OFFSET * speedDamp
                 holdSign[i] = side; holdUntil[i] = os.clock() + K.SIDE_HOLD   -- commit to the move-aside
@@ -1567,8 +1599,12 @@ local evalBody = function()
                 -- one the first time, or if the current side is against an edge.
                 local side = holdSign[i] or ((hash01(i * 5 + 7) < 0.5) and -1 or 1)
                 if (side > 0 and myLat > K.EDGE_SOFT) or (side < 0 and myLat < -K.EDGE_SOFT) then side = -side end
-                target = side * K.YIELD_OFFSET * speedDamp
-                holdSign[i] = side; holdUntil[i] = os.clock() + K.DAMAGE_YIELD_HOLD   -- long hold: pick a side and STAY
+                if R.YIELD_STRAIGHT and R.bendNear(mySpline, spd, trackLen) then
+                    R.ysN = R.ysN + 1                            -- (R.YIELD_STRAIGHT) nurse it on the line through the bend
+                else
+                    target = side * K.YIELD_OFFSET * speedDamp
+                    holdSign[i] = side; holdUntil[i] = os.clock() + K.DAMAGE_YIELD_HOLD   -- long hold: pick a side and STAY
+                end
             end
         end
 
@@ -1961,7 +1997,9 @@ function R.reset()
     R.hurtSeen, R.hurtLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     letbyT, letbyDone, letbyFor = {}, {}, {}
-    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {} }; R.cv2 = cv2
+    for j in pairs(cv2.yb or {}) do pcall(R.yellowBrake, j, false, 0) end   -- (R.YELLOW_BRAKE) no brake left on across a reset
+    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {}, yb = {} }; R.cv2 = cv2
+    R.ybN, R.ysN = 0, 0
     R.crawlN = 0; R.topV = {}; R.aggV = {}
     R.roomN = 0; R.roomAct = 0; R.evalN = 0; R.fastTuckN = 0; R.yellowSlowN = 0; R.bgN = 0; R.bgPassN = 0
     -- AGGR_BASE_FIX: the next session reads each car afresh; this session's capture and Verve's last write carry over for

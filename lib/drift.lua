@@ -33,6 +33,12 @@ D.P = {
     initSteer = 0.35,  -- front wheels into the corner during the pull, fading out over the first 12 degrees of the slide (AC's
                        -- steering follows a request within a frame, so a strong turn-in can be caught; the mock's slow rack could not)
     initGrip = 0,      -- >0: extra AI grip during the start only (0 = grip). Every key needs a non-nil default: the harness only sets known keys
+    kick = 0,          -- >0: a yaw couple during the pull, N per kg of the car each axle (front pushed in, rear out; physics.addForce),
+                       -- until the car has rotated flickEnd or kickT_max; works whatever AC's assists do (owner yes 6 Oct; it invalidates the
+                       -- AI's lap). 0 = off. v3 (5 Oct): the pull scrubbed 77 -> 45 km/h and the car barely yawed.
+    kickMax = 0.3,     -- longest kick, seconds
+    lostAngle = 5, lostT = 0.5,   -- a held slide under lostAngle degrees for lostT s is LOST: hand the car straight back to AC (v3 kept
+                       -- steering a car that had straightened as if it were sliding: 30-60 deg off its line, 23-29 incidents v stock 7)
     -- throttle, a cascade that adapts to the car's power: the angle error asks for a rotation rate (rateK deg/s per degree,
     -- capped at rateMax), and the throttle integrates toward whatever gives that rate (kir per deg/s per s, kpr per deg/s now)
     rateK = 2.0, rateMax = 60, kpr = 0.004, kir = 0.012, gStart = 0.45,
@@ -69,7 +75,7 @@ D.trace, D.traceDrop = {}, 0
 D.errN, D.lastErr = 0, nil
 
 local function newStats()
-    return { fr = 0, ini = 0, hold = 0, spin = 0, fail = 0, exit = 0, trans = 0, snap = 0, slow = 0, flip = 0, traffic = 0, aSum = 0, aT = 0, aMax = 0,
+    return { fr = 0, ini = 0, hold = 0, spin = 0, fail = 0, exit = 0, trans = 0, snap = 0, slow = 0, flip = 0, traffic = 0, lost = 0, kickT = 0, aSum = 0, aT = 0, aMax = 0,
              slideT = 0, cornerT = 0, cornerSlideT = 0, offT = 0, noComb = 0 }
 end
 D.st = newStats()
@@ -219,6 +225,18 @@ function D.gasLaw(s, P, aDeg, dt, ePath)
     return clamp(s.gI + P.kpr * err, 0, 1) * (1 - P.wideCut * wide)
 end
 
+-- (P.kick) a yaw couple: the front axle pushed toward the inside of the corner, the rear axle toward the outside, F newtons each,
+-- in world coordinates. inside = sg x (up x look): +90 degrees from the nose in the corner's own sense (the sang convention).
+function D.kick(i, car, sg, F)
+    local up, lk, w = car.up, car.look, car.wheels
+    local ix = sg * (up.y * lk.z - up.z * lk.y)
+    local iy = sg * (up.z * lk.x - up.x * lk.z)
+    local iz = sg * (up.x * lk.y - up.y * lk.x)
+    local f0, f1, r0, r1 = w[0].position, w[1].position, w[2].position, w[3].position
+    physics.addForce(i, vec3((f0.x + f1.x) * 0.5, (f0.y + f1.y) * 0.5, (f0.z + f1.z) * 0.5), false, vec3(ix * F, iy * F, iz * F), false)
+    physics.addForce(i, vec3((r0.x + r1.x) * 0.5, (r0.y + r1.y) * 0.5, (r0.z + r1.z) * 0.5), false, vec3(-ix * F, -iy * F, -iz * F), false)
+end
+
 local function carStep(i, car, dt, P, st)
     local s = S[i]
     if not s then s = newCar(); S[i] = s end
@@ -300,6 +318,7 @@ local function carStep(i, car, dt, P, st)
     if s.m == 1 then                                                  -- start: pull until it rotates, clutch kick, then the hold law
         if s.flick and s.t < P.flick and aDeg < P.flickEnd then
             hb, clutch, gas, wheel = 1, 0, P.flickGas, P.initSteer
+            if P.kick > 0 and s.t < P.kickMax then pcall(D.kick, i, car, sg, P.kick * (car.mass or 1200)); st.kickT = st.kickT + dt end
         else
             if s.flick then s.flick, s.t, s.gI = false, 0, max(s.gI or 0, 0.8) end   -- the pull is over: the power phase's clock
             gas = s.t < P.kickT and 1 or D.gasLaw(s, P, aDeg, dt, 0)  -- no wide cut while the slide builds
@@ -312,6 +331,8 @@ local function carStep(i, car, dt, P, st)
         wheel = -a + steerPath - P.kRate * s.daF
         if aDeg > P.angleMax then gas, wheel = 0, -a - 0.15 end
         st.aSum, st.aT, st.aMax = st.aSum + aDeg * dt, st.aT + dt, max(st.aMax, aDeg)
+        if abs(aDeg) < P.lostAngle then s.lostT = (s.lostT or 0) + dt else s.lostT = 0 end
+        if s.lostT > P.lostT then s.lostT = 0; st.lost = st.lost + 1; release(i, s); return end   -- the slide is gone: AC drives
         local rem = sg * turnAhead(sp, 0, clamp(spd * 0.7, 10, 30))
         if rem < P.exitTurn * RAD then s.m, s.t = 3, 0 end
     else                                                              -- straighten: ease the throttle, wheels along the travel
@@ -450,10 +471,10 @@ function D.statsJson()
     end
     return string.format('{"on":%s,"meas":%s,"fr":%d,"ini":%d,"hold":%d,"spin":%d,"fail":%d,"exit":%d,"trans":%d,"snap":%d,"slow":%d,"flip":%d,"traffic":%d,' ..
         '"aMean":%.1f,"aMax":%.1f,"slideT":%.1f,"cornerT":%.1f,"cornerSlideT":%.1f,"offT":%.1f,"noComb":%d,"err":%d,"tDrop":%d,' ..
-        '"brakeIn":%.1f,"noAst":%d,"cpuN":%d,"cpuAvgMs":%.4f,"cpuMaxMs":%.3f,"cars":%s,"cal":[%s]}',
+        '"brakeIn":%.1f,"noAst":%d,"lost":%d,"kickT":%.1f,"cpuN":%d,"cpuAvgMs":%.4f,"cpuMaxMs":%.3f,"cars":%s,"cal":[%s]}',
         tostring(D.ON), tostring(D.MEASURE), s.fr, s.ini, s.hold, s.spin, s.fail, s.exit, s.trans, s.snap, s.slow, s.flip, s.traffic,
         s.aT > 0 and s.aSum / s.aT or 0, s.aMax, s.slideT, s.cornerT, s.cornerSlideT, s.offT, s.noComb, D.errN, D.traceDrop,
-        s.brakeIn or 0, s.noAst or 0, D.cpu.n, D.cpu.n > 0 and D.cpu.sum / D.cpu.n or 0, D.cpu.max, tostring(anyDrift), table.concat(cal, ','))
+        s.brakeIn or 0, s.noAst or 0, s.lost or 0, s.kickT or 0, D.cpu.n, D.cpu.n > 0 and D.cpu.sum / D.cpu.n or 0, D.cpu.max, tostring(anyDrift), table.concat(cal, ','))
 end
 
 function D.flush(buf)
