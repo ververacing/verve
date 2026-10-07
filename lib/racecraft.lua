@@ -484,7 +484,8 @@ R.ybN = 0                     -- diag: car-frames braking for a yellow
 R.YIELD_STRAIGHT = false      -- (harness A/B, owner yes 6 Oct) a car moving aside (blue flag or nursing damage) does it on a straight only: in a
                               -- bend, or with one within ~1 s, it holds the line with the yield lift and moves over after. Yielding SF70Hs went
                               -- off 45% of the time at Lesmo 2 (2.6% in cruise; GT3 yielding 7%), 5 Oct analysis.
-R.ysN = 0                     -- diag: car-frames holding the line in a bend instead of moving aside
+R.ystN = 0                    -- diag (ystN): car-frames holding the line in a bend instead of moving aside. NOT ysN - that name is
+                              -- already the slow-car yellow's counter (R.yellowSlowN) in diag's session line.
 CV.YS_M = 20.0                -- m per bin of the typical-speed map (bin count = track length / this, 50..1000)
 CV.YS_MIN = 10                -- crossings before a bin is trusted (a running mean until then); 10+ cars trust the lap during lap 1
 CV.YS_UP = 0.20; CV.YS_DN = 0.05   -- EMA rates once trusted: quick up, slow down, so cars slowed through a yellow zone do not teach the map the zone is slow
@@ -1536,7 +1537,7 @@ local evalBody = function()
             if not nearestToLapper then
                 yielding = false
             elseif sideClear and R.YIELD_STRAIGHT and R.bendNear(mySpline, spd, trackLen) then
-                R.ysN = R.ysN + 1                                -- (R.YIELD_STRAIGHT) hold the line through the bend, lift (below), move over after
+                R.ystN = R.ystN + 1                                -- (R.YIELD_STRAIGHT) hold the line through the bend, lift (below), move over after
             elseif sideClear then
                 target = side * K.YIELD_OFFSET * speedDamp
                 holdSign[i] = side; holdUntil[i] = os.clock() + K.SIDE_HOLD   -- commit to the move-aside
@@ -1600,7 +1601,7 @@ local evalBody = function()
                 local side = holdSign[i] or ((hash01(i * 5 + 7) < 0.5) and -1 or 1)
                 if (side > 0 and myLat > K.EDGE_SOFT) or (side < 0 and myLat < -K.EDGE_SOFT) then side = -side end
                 if R.YIELD_STRAIGHT and R.bendNear(mySpline, spd, trackLen) then
-                    R.ysN = R.ysN + 1                            -- (R.YIELD_STRAIGHT) nurse it on the line through the bend
+                    R.ystN = R.ystN + 1                            -- (R.YIELD_STRAIGHT) nurse it on the line through the bend
                 else
                     target = side * K.YIELD_OFFSET * speedDamp
                     holdSign[i] = side; holdUntil[i] = os.clock() + K.DAMAGE_YIELD_HOLD   -- long hold: pick a side and STAY
@@ -1999,7 +2000,7 @@ function R.reset()
     letbyT, letbyDone, letbyFor = {}, {}, {}
     for j in pairs(cv2.yb or {}) do pcall(R.yellowBrake, j, false, 0) end   -- (R.YELLOW_BRAKE) no brake left on across a reset
     cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {}, yb = {} }; R.cv2 = cv2
-    R.ybN, R.ysN = 0, 0
+    R.ybN, R.ystN = 0, 0
     R.crawlN = 0; R.topV = {}; R.aggV = {}
     R.roomN = 0; R.roomAct = 0; R.evalN = 0; R.fastTuckN = 0; R.yellowSlowN = 0; R.bgN = 0; R.bgPassN = 0
     -- AGGR_BASE_FIX: the next session reads each car afresh; this session's capture and Verve's last write carry over for
