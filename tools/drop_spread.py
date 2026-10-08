@@ -37,24 +37,48 @@ VERVE = os.path.dirname(HERE)
 
 CO_SPLINE = 3       # units of spline/1000 (~15 m on imola) - "the same spot" for a co-landing
 CO_SECONDS = 10     # within this long of each other
-# imola; only used to print metres alongside spline units. Pass --track-len for another track.
-DEFAULT_TRACK_LEN = 4909.0
+
+# Spline is a LAP FRACTION, so turning it into metres needs the track's length. Getting this wrong is silent: an
+# earlier version assumed imola for every track and printed Spa ranges 30 % short. Unknown track -> units only,
+# and the header says so, rather than a confident wrong number. (Lengths from each track's ui_track.json.)
+TRACK_LEN = {
+    "imola": 4909.0, "spa": 7004.0, "monza": 5793.0, "ks_barcelona": 4655.0,
+    "ks_highlands": 2443.0,      # layout_short
+    "ks_brands_hatch": 3908.0,   # gp; indy is 1944
+    "magione": 2507.0, "ks_nordschleife": 20832.0, "ghoults_horsma": 4402.0,
+    "monaco_2019_CHQ": 3337.0, "madrid_street_circuit_2026": 5474.0,
+}
+DEFAULT_TRACK_LEN = None
+
+
+def _landing(cur):
+    """The landing row of one episode, tagged with how long the drop stayed unjudged.
+
+    diag logs a drop row only while the verdict is pending, so the LAST age in an episode is how long the car took
+    to satisfy the judge (reach DROP_OK_SPEED) - i.e. how long it took to get going again. That is the number the
+    standard regression suite does not measure: a change that widens the yellow reach can pass on contact, heavy
+    hits, DNFs and pace while still leaving rejoining cars standing around longer.
+    """
+    land = min(cur, key=lambda x: x.get("age", 0))
+    land = dict(land)
+    land["_clear_s"] = max(x.get("age", 0) for x in cur)
+    return land
 
 
 def episodes(rows):
-    """Split one car's drop rows into episodes; yield the row with the smallest age in each (the landing)."""
+    """Split one car's drop rows into episodes; yield the landing row of each."""
     cur = []
     prev_age = None
     for r in rows:
         age = r.get("age", 0)
         if prev_age is not None and age < prev_age:   # age reset -> a new drop
             if cur:
-                yield min(cur, key=lambda x: x.get("age", 0))
+                yield _landing(cur)
             cur = []
         cur.append(r)
         prev_age = age
     if cur:
-        yield min(cur, key=lambda x: x.get("age", 0))
+        yield _landing(cur)
 
 
 def read_race(path):
@@ -77,10 +101,17 @@ def read_race(path):
             landings.append(land)
     landings.sort(key=lambda r: r.get("t", 0))
     base = os.path.basename(path)
-    label = base.replace("diag_race_", "").replace(".jsonl", "")
-    parts = label.split("_")
-    label = "_".join(parts[3:]) if len(parts) > 3 else label   # drop stamp (date_time) and track
-    return label, landings
+    stem = base.replace("diag_race_", "").replace(".jsonl", "")
+    parts = stem.split("_")
+    label = "_".join(parts[3:]) if len(parts) > 3 else stem   # drop stamp (date_time) and track
+    # longest known track name that appears in the stem; "" when none does. A positional split cannot work:
+    # ks_barcelona and ks_highlands both contain underscores and would come out as "ks".
+    track = ""
+    for t in sorted(TRACK_LEN, key=len, reverse=True):
+        if t in stem:
+            track = t
+            break
+    return label, landings, track
 
 
 def co_landings(landings):
@@ -122,9 +153,9 @@ def summarise(name, races, track_len, gated=None):
     near = [l["near"] for l in landings if l.get("near") is not None]
     spl = [l["spline"] for l in landings if l.get("spline") is not None]
     co = sum(len(co_landings(ls)) for _, ls in races)
-    m_per_unit = track_len / 1000.0
+    m_per_unit = (track_len / 1000.0) if track_len else None
     # how far the gate MOVED each car: |landed - requested|, only where both are known
-    moved = [abs(l["spline"] - l["gs"]) * m_per_unit
+    moved = [abs(l["spline"] - l["gs"]) * (m_per_unit or 1.0)
              for l in landings if l.get("gs", -1) >= 0 and l.get("spline") is not None]
     row = {
         "races": len(races), "landings": len(landings),
@@ -137,12 +168,16 @@ def summarise(name, races, track_len, gated=None):
         "co": co,
     }
     row["gate_moved_med"] = statistics.median(moved) if moved else float("nan")
+    clear = [l["_clear_s"] for l in landings if "_clear_s" in l]
+    row["clear_med"] = statistics.median(clear) if clear else float("nan")
+    row["clear_max"] = max(clear) if clear else float("nan")
     print("  %-22s races %d  landings %3d | near: med %4.0f m  min %3.0f m  <10 m %2d (%2.0f%%) | "
-          "spots %3d  range %3d u (%4.0f m)  sd %4.1f u | co-landings %d%s"
+          "spots %3d  range %3d u%s  sd %4.1f u | co-land %d | to-get-going: med %3.0f s  worst %3.0f s%s"
           % (name, row["races"], row["landings"], row["near_med"], row["near_min"], row["near_lt10"],
              100.0 * row["near_lt10"] / max(1, len(near)), row["spots"], row["spl_range"],
-             row["spl_range"] * m_per_unit, row["spl_sd"], row["co"],
-             ("  | gate moved med %4.0f m" % row["gate_moved_med"]) if moved else ""))
+             (" (%4.0f m)" % (row["spl_range"] * m_per_unit)) if m_per_unit else "",
+             row["spl_sd"], row["co"], row["clear_med"], row["clear_max"],
+             ("  | gate moved med %4.0f %s" % (row["gate_moved_med"], "m" if m_per_unit else "u")) if moved else ""))
     return row
 
 
@@ -163,11 +198,27 @@ def main():
         print("no diag files matched", file=sys.stderr)
         return 1
 
-    races = []
+    races, tracks = [], set()
     for f in files:
-        label, landings = read_race(f)
+        label, landings, track = read_race(f)
         if landings:
             races.append((label, landings))
+            tracks.add(track)
+    # one track -> metres are meaningful; several -> spline units only, said out loud
+    tlen = a.track_len
+    if tlen is None:
+        known = {t: TRACK_LEN[t] for t in tracks if t in TRACK_LEN}
+        if len(tracks) == 1 and known:
+            tlen = list(known.values())[0]
+        elif len(tracks) > 1:
+            print("NOTE: %d different tracks in this selection (%s), so spline->metres would be wrong per race."
+                  % (len(tracks), ", ".join(sorted(t for t in tracks if t))))
+            print("      Reporting spline units only. near and to-get-going are direct readings and unaffected.")
+            print("")
+        elif tracks:
+            print("NOTE: track %r has no length on file - reporting spline units only (add it to TRACK_LEN)."
+                  % sorted(tracks)[0])
+            print("")
     if not races:
         print("no drop windows in %d file(s) - nothing was repositioned" % len(files))
         return 0
@@ -181,15 +232,15 @@ def main():
         rows = {}
         for arm in arms:
             sel = [(lab, ls) for lab, ls in races if lab.startswith(arm)]
-            rows[arm] = summarise(arm, sel, a.track_len, gated=True)
+            rows[arm] = summarise(arm, sel, tlen, gated=True)
         print("\nARMS - ungated drops (should be UNCHANGED by the switch; this is the control)")
         for arm in arms:
             sel = [(lab, ls) for lab, ls in races if lab.startswith(arm)]
-            summarise(arm, sel, a.track_len, gated=False)
+            summarise(arm, sel, tlen, gated=False)
         print("\nARMS - all drops pooled (for continuity with earlier notes)")
         for arm in arms:
             sel = [(lab, ls) for lab, ls in races if lab.startswith(arm)]
-            summarise(arm, sel, a.track_len)
+            summarise(arm, sel, tlen)
         if len(arms) == 2 and all(rows.values()):
             x, y = rows[arms[0]], rows[arms[1]]
             print("\nDELTA (%s -> %s): near med %+.0f m | near <10 m %+.0f pp | distinct spots %+d | "
@@ -197,7 +248,7 @@ def main():
                   % (arms[0], arms[1], y["near_med"] - x["near_med"],
                      100.0 * (y["near_lt10"] / max(1, y["landings"]) - x["near_lt10"] / max(1, x["landings"])),
                      y["spots"] - x["spots"],
-                     (y["spl_range"] - x["spl_range"]) * a.track_len / 1000.0,
+                     (y["spl_range"] - x["spl_range"]) * ((tlen or 0) / 1000.0),
                      y["co"] - x["co"]))
             print("Read: the fix should RAISE near med, LOWER near <10 %, RAISE distinct spots, and LOWER co-landings.")
         print()
@@ -205,7 +256,7 @@ def main():
     if a.per_race or not a.labels:
         print("PER RACE")
         for lab, ls in sorted(races):
-            summarise(lab, [(lab, ls)], a.track_len)
+            summarise(lab, [(lab, ls)], tlen)
     return 0
 
 
