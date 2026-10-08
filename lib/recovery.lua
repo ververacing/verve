@@ -246,6 +246,13 @@ R.GATE_FIRST_CAP = false   -- false = 0.14.5. true: a landing in the LAST sector
                            -- for up to GATE_FIRST_M + walk + stagger of road; left there it keeps the road and likely loses the lap (last
                            -- sector 0/80); unmeasured either way. Fires only where last split - split 1 < GATE_FIRST_M: at 500 m none of the
                            -- 12 raced layouts (shortest Portland l1, ~650 m); at 1000-1500 m Portland, Mosport DDT, Brands GP (2026-09-26)
+R.GATE_STAG_ALL = false    -- TEST SWITCH (off = today's behaviour). The per-car 0-45 m stagger is applied only on the GATE-FIRST
+                           -- path (`first`), which needs GATE_FIRST_M > 0, a grid before the timing line AND a landing near split 1.
+                           -- On the ORDINARY gate path stag stays 0 and the straight-walk below is deterministic, so EVERY gated car
+                           -- lands on the SAME spline: PC #2 put 3 cars on spline 0.305 at lat +0.20 in one instant (8 Oct) and every
+                           -- imola reposition landed at 0.299-0.311 wherever the car had stopped. The walk's own comment already names
+                           -- the hazard ("one spot for a knot stacks them"); it was just never wired into the non-first path.
+                           -- true = stagger every gated drop. A/B first; default only if it wins.
 R.GATE_WALK_V2 = true      -- DEFAULT 0.14.6; false = 0.14.5. true: a gate-first drop starts its walk back for a straight at (margin + this car's 0-45 m
                            -- stagger), so the straightness test and the stop-at-the-line guard judge the real landing spot; 0.14.5 walks
                            -- from the margin and subtracts the stagger afterwards, unchecked: it can land in a corner exit (review 2026-09-26).
@@ -299,7 +306,7 @@ local function gateSafe(sim, progress, i)
     -- the nearest straight-ish spot before the split (so the dropped car isn't set down mid-corner in the path of
     -- the next arrival): walk back from the margin in small steps, take the first that's straight and clear
     local stag = 0     -- (R.GATE_WALK_V2) this car's gate-first stagger, walked from instead of subtracted after the walk
-    if first and i and R.GATE_WALK_V2 then
+    if i and R.GATE_WALK_V2 and (first or R.GATE_STAG_ALL) then   -- (R.GATE_STAG_ALL) ...or on every gated drop, not just gate-first
         stag = hash01(i * 17) * STAGGER_RANGE
         if lastGate - GATE_MARGIN - stag < 0 then stag = 0 end   -- split 1 nearer the line than margin + stagger: no stagger, never behind the line
     end
@@ -319,7 +326,7 @@ local function gateSafe(sim, progress, i)
         end)
         if straight then best = pr; break end
     end
-    if first and i and not R.GATE_WALK_V2 then best = (best - hash01(i * 17) * STAGGER_RANGE) % 1 end   -- per-car 0-45 m further back: one spot for a knot stacks them (wrapped: never before 0)
+    if i and not R.GATE_WALK_V2 and (first or R.GATE_STAG_ALL) then best = (best - hash01(i * 17) * STAGGER_RANGE) % 1 end   -- per-car 0-45 m further back: one spot for a knot stacks them (wrapped: never before 0)
     return best, true
 end
 
