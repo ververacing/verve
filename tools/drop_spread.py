@@ -51,27 +51,41 @@ TRACK_LEN = {
 DEFAULT_TRACK_LEN = None
 
 
-def _landing(cur):
-    """The landing row of one episode, tagged with how long the drop stayed unjudged.
+DROP_OK_SPEED = 60          # km/h: recovery's own bar for "rejoined" (lib/recovery.lua)
+JUDGE_T = 30                # s: DROP_JUDGE_T, and the length of diag's drop trace
+UNRESOLVED_AGE = JUDGE_T - 1   # a window this long never resolved; it does not mean the car took that long
 
-    diag logs a drop row only while the verdict is pending, so the LAST age in an episode is how long the car took
-    to satisfy the judge (reach DROP_OK_SPEED) - i.e. how long it took to get going again. That is the number the
-    standard regression suite does not measure: a change that widens the yellow reach can pass on contact, heavy
-    hits, DNFs and pace while still leaving rejoining cars standing around longer.
+
+def _landing(cur):
+    """The landing row of one record, with how long the car took to get going - or None if that is unknowable.
+
+    Clear time is the window length: once the car passes DROP_OK_SPEED the judge resolves the record and diag stops
+    logging, so the last age IS the time to rejoin, to within the 1 Hz sampling. ("First row above 60 km/h" cannot
+    work - that row is never written.)
+
+    BUT a window that runs to the 30 s cap tells us nothing. diag logs while `d.ok == nil` whereas the judge skips
+    VOIDED records (`d.ok == nil and not d.void`), so a record superseded by a later drop is traced for the full 30 s
+    however well the car is going. Barcelona car 14 was dropped TWICE in one second: the second record was judged at
+    age 3, the first was voided and traced to 30 s, and reading that as a "30 s rejoin" nearly put a false alarm about
+    the yellow default in front of the owner - the car was accelerating to 283 km/h. Two records created in the same
+    second cannot be told apart by t - age either, so windows at the cap are reported as unresolved and excluded from
+    the timing, not averaged in as a large number. Nothing real is lost: a car that genuinely needed 30 s has FAILED
+    its drop, and the harness counts those as drops_ok misses.
     """
-    land = min(cur, key=lambda x: x.get("age", 0))
-    land = dict(land)
-    land["_clear_s"] = max(x.get("age", 0) for x in cur)
+    land = dict(min(cur, key=lambda x: x.get("age", 0)))
+    w = max(x.get("age", 0) for x in cur)
+    land["_clear_s"] = None if w >= UNRESOLVED_AGE else w
+    land["_unresolved"] = w >= UNRESOLVED_AGE
     return land
 
 
 def episodes(rows):
-    """Split one car's drop rows into episodes; yield the landing row of each."""
+    """Split one car's drop rows into records; yield the landing of each. A new record starts when age stops rising."""
     cur = []
     prev_age = None
     for r in rows:
         age = r.get("age", 0)
-        if prev_age is not None and age < prev_age:   # age reset -> a new drop
+        if prev_age is not None and age < prev_age:
             if cur:
                 yield _landing(cur)
             cur = []
@@ -103,7 +117,21 @@ def read_race(path):
     base = os.path.basename(path)
     stem = base.replace("diag_race_", "").replace(".jsonl", "")
     parts = stem.split("_")
-    label = "_".join(parts[3:]) if len(parts) > 3 else stem   # drop stamp (date_time) and track
+    # The label is what came after the stamp and the track. Taking parts[3:] does NOT work: the track may be
+    # several tokens ("ks_barcelona_layout_gp"), which silently produced labels like
+    # "barcelona_layout_gp_suiteylat_bcn_1" - so --labels suiteylat_bcn matched nothing and every arm read
+    # "no landings". Strip the stamp, then the matched track name, then a layout suffix if one follows.
+    rest = "_".join(parts[2:]) if len(parts) > 2 else stem
+    for t in sorted(TRACK_LEN, key=len, reverse=True):
+        if rest.startswith(t + "_"):
+            rest = rest[len(t) + 1:]
+            break
+    else:
+        rest = "_".join(parts[3:]) if len(parts) > 3 else stem   # unknown track: fall back to the old guess
+    if rest.startswith("layout_"):                               # ks_barcelona/layout_gp -> "layout_gp_<label>"
+        bits = rest.split("_", 2)
+        rest = bits[2] if len(bits) > 2 else rest
+    label = rest
     # longest known track name that appears in the stem; "" when none does. A positional split cannot work:
     # ks_barcelona and ks_highlands both contain underscores and would come out as "ks".
     track = ""
@@ -168,15 +196,16 @@ def summarise(name, races, track_len, gated=None):
         "co": co,
     }
     row["gate_moved_med"] = statistics.median(moved) if moved else float("nan")
-    clear = [l["_clear_s"] for l in landings if "_clear_s" in l]
+    clear = [l["_clear_s"] for l in landings if l.get("_clear_s") is not None]
+    row["never"] = sum(1 for l in landings if l.get("_unresolved"))
     row["clear_med"] = statistics.median(clear) if clear else float("nan")
     row["clear_max"] = max(clear) if clear else float("nan")
     print("  %-22s races %d  landings %3d | near: med %4.0f m  min %3.0f m  <10 m %2d (%2.0f%%) | "
-          "spots %3d  range %3d u%s  sd %4.1f u | co-land %d | to-get-going: med %3.0f s  worst %3.0f s%s"
+          "spots %3d  range %3d u%s  sd %4.1f u | co-land %d | to-get-going: med %3.0f s  worst %3.0f s  unresolved %d%s"
           % (name, row["races"], row["landings"], row["near_med"], row["near_min"], row["near_lt10"],
              100.0 * row["near_lt10"] / max(1, len(near)), row["spots"], row["spl_range"],
              (" (%4.0f m)" % (row["spl_range"] * m_per_unit)) if m_per_unit else "",
-             row["spl_sd"], row["co"], row["clear_med"], row["clear_max"],
+             row["spl_sd"], row["co"], row["clear_med"], row["clear_max"], row["never"],
              ("  | gate moved med %4.0f %s" % (row["gate_moved_med"], "m" if m_per_unit else "u")) if moved else ""))
     return row
 
