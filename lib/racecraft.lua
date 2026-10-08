@@ -187,9 +187,6 @@ R.BG_PASS = false             -- (A/B, with BG_RACE) beyond the opening lap the 
 R.bgN = 0; R.bgPassN = 0      -- diag: car-frames the race-long guard cut a brake hint / left a passing car its own (session bgN, bgPN)
 R.OL_BRAKEGUARD = true        -- opening lap: brake earlier when the car ahead on my line is already braking inside CV.BG_M (harness A/B)
 R.BG_ALL = 0                  -- >0: every AI car's brake hint x this all race (direction test only; 0 = off)
-R.DRIFT_AI = false            -- (0.16 MVP, harness A/B) drift-class AI cars drift the corners: lib/drift.lua takes their pedals and wheel
-                              -- from turn-in to exit. R.DRIFT = { key = value } tunes it (keys of Drift.P), e.g. {"angle":35}.
-R.DRIFT_MEASURE = false       -- the same drift-angle measurements with nobody's controls touched (the A/B's baseline arm)
 -- ROAD SPACE (harness A/B: R.ROADSPACE): "use the whole road". The reactive pass aims a fixed small nudge off the racing
 -- line (ATTACK_OFFSET x class), and the intensity, crowd and opening-lap multipliers plus the deadzone then shrink it to
 -- nothing: a star behind a slow car ORBITS it instead of shooting the open side (kart grid 2026-09-16: 71% of attacking
