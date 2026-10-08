@@ -1062,9 +1062,11 @@ def run_once(args, arm, run_idx):
                     f.writelines(keep)
     except OSError as e:
         print("  (csp log not kept:", e, ")")
-    # keep the replay: AC's autosave only retains the last two race replays, and the broadcast pipeline
-    # needs them later (Documents/Assetto Corsa/replay/temp -> tools/harness_results/replays/<label>.acreplay)
+    # keep the replay ONLY if asked (--keep-replay). The broadcast initiative is dropped (owner, 8 Oct 2026), so nothing
+    # consumes these any more and they cost ~250 MB a race: 1,800 files and 253 GB had built up on D: by then.
     try:
+        if not getattr(args, "keep_replay", False):
+            raise StopIteration     # skip the copy; caught below, so the rest of the run is untouched
         rdir = os.path.join(DOCS, "replay", "temp")
         cands = [os.path.join(rdir, f) for f in os.listdir(rdir) if f.endswith(".acreplay") and os.path.getmtime(os.path.join(rdir, f)) >= t_launch]
         if cands:
@@ -1077,6 +1079,8 @@ def run_once(args, arm, run_idx):
                 dst = os.path.join(keep, f"{time.strftime('%Y%m%d_%H%M')}_{label}{sfx}.acreplay")
                 shutil.copy2(src, dst)
                 print(f"  replay kept: {os.path.basename(dst)} ({os.path.getsize(dst) / 1e6:.0f} MB)")
+    except StopIteration:
+        pass
     except OSError as e:
         print("  (replay not kept:", e, ")")
     # keep AC's own log per run (log.txt is overwritten by the next launch; an early exit's cause was lost, 2026-09-21)
@@ -1184,6 +1188,8 @@ def main():
     ap.add_argument("--condition", action="append",
                     help="override a pinned race.ini value, e.g. --condition DYNAMIC_TRACK.SESSION_START=0 (repeatable)")
     ap.add_argument("--skin-match", help="cycle per slot through the model's skins matching this regex, e.g. '^[0-9]+_pse_'")
+    ap.add_argument("--keep-replay", action="store_true",
+                    help="copy AC's race replay to the replay folder (~250 MB each). Off since the broadcast initiative was dropped")
     ap.add_argument("--keep-video", action="store_true",
                     help="do not swap AC's video settings to the lean harness profile for this run")
     ap.add_argument("--weather", help="CSP weather type by name (clear, clouds, overcast, fog, mist, drizzle, lightrain, rain, heavyrain, storm, hot, cold, windy) or number; Pure must be the weather controller")
