@@ -413,6 +413,17 @@ R.WILD_REACH = 1.5            -- lunge from further back: the strategy layer's c
 R.WILD_DIVE0 = false          -- harness arm: lunges on lap 0 and in packs
 R.WILD_BH = 1.0               -- harness arm: brake-hint multiplier while attacking; above 1 = later braking (1 = off)
 R.WILD_BLUE = 0               -- harness arm: chance per lapper per lap that he ignores a blue flag (0 = always obeys)
+R.BLUE_REC_EXEMPT = false     -- TEST SWITCH (off = today). A car still inside its RECOVERY window does not obey a blue flag.
+                              -- Traced 8 Oct (PC #2, pc2_rep3_imola22_1 car 6): stuck at spline 0.587, gated back to 0.314 so
+                              -- a lap down, and the moment it was set back on the road a lapping car came by. It conceded and
+                              -- lifted - 30 km/h on 17-24 % throttle for 14 s, the slowest clear of 89 drops that day, letting
+                              -- go only once the lapper was beyond 60 m. Its damage was NOT the cause (effective damage 0: it
+                              -- had just been repaired), and the convoy cap was not either (that floors throttle at 0.35).
+                              -- It was the blue flag, with rec = 1 the whole time.
+                              -- Convoy v2, the room-follow test and the fast-tuck all already exempt a car in recovery; this
+                              -- rule never did - the same shape as the gateSafe stagger that only ran on the gate-first path.
+                              -- On the merits a car accelerating from a standstill after a rescue cannot meaningfully concede
+                              -- anything: it is far off the pace and the lapper passes it regardless. All it does is crawl.
 R.WILD_NOLEARN = true         -- his own incidents don't feed trouble-spot heat or crashiness; his drops don't count toward the reposition switch-off
 R.WILD_TILT = false           -- harness arm (night 2): after losing a place or an 8 km/h hit, 14-26 s of caution -0.30 more and lunge chance x1.5
 R.WILD_TILT_T = 20            -- (WILD_TILT) mean tilt length, s (x0.7-1.3 per tilt)
@@ -1473,6 +1484,10 @@ local evalBody = function()
         -- blue-flag yield -- a car on a higher lap is coming through: concede the line and lift,
         -- rather than racing the leader. Overrides attack/defend; edge-safety below keeps it honest.
         if wild and lapperIdx >= 0 and R.WILD_BLUE > 0 and hash01(i * 31 + lapperIdx * 17 + myLap * 7) < R.WILD_BLUE then lapperIdx = -1 end   -- (R.WILD_BLUE) not this lap
+        -- (R.BLUE_REC_EXEMPT) ...and a car that recovery still holds is not asked to concede: it is getting back up to speed.
+        -- Zeroed here rather than at the detection above so only the yield changes; lapperIdx is not read in between,
+        -- and the line below then clears the yield bookkeeping for us.
+        if R.BLUE_REC_EXEMPT and lapperIdx >= 0 and (Recovery.stateOf(i) or R.NOSTATE).rec then lapperIdx = -1 end
         if lapperIdx < 0 then yieldT[i] = 0; letbyDone[i] = nil; letbyFor[i] = nil; letbyT[i] = nil end
         if lapperIdx >= 0 and letbyFor[i] ~= lapperIdx then letbyFor[i] = lapperIdx; letbyDone[i] = nil; letbyT[i] = nil; yieldT[i] = 0 end
         if lapperIdx >= 0 then
