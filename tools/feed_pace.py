@@ -17,7 +17,9 @@ import os
 import statistics
 
 FEED_DIR = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa", "verve_feed")
-ARCHIVE = "D:/verve_archive/verve_feed"
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import paths   # the archive moves; a missing one is reported, not silently skipped
 
 
 def laps(path):
@@ -74,7 +76,7 @@ def main():
     a = ap.parse_args()
     paths = list(a.feeds)
     if a.glob:
-        for d in (FEED_DIR, ARCHIVE):
+        for d in paths.feed_dirs():
             paths += sorted(glob.glob(os.path.join(d, f"*{a.glob}*.jsonl")))
     if not paths:
         print(f"no feeds found (looked in {FEED_DIR})")

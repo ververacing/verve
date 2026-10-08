@@ -27,7 +27,10 @@ import statistics
 from collections import Counter, defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FEED_DIRS = [os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa", "verve_feed"), "D:/verve_archive/verve_feed"]
+import sys as _sys
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths   # the archive moves; a missing one is reported, not silently skipped
+FEED_DIRS = paths.feed_dirs()
 TIERS = ["rookie", "midfield", "veteran", "top", "wild", "?"]
 KINDS = ["lockup", "missed_apex", "lift", "spin"]
 

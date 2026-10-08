@@ -56,13 +56,14 @@ RACE_OUT = os.path.join(DOCS, "out", "race_out.json")
 VERVE = os.path.join(AC_DIR, "apps", "lua", "Verve")
 HARNESS_LUA = os.path.join(VERVE, "harness.lua")
 RESULTS_DIR = os.path.join(VERVE, "tools", "harness_results")
-# kept replays live on D: when it exists (C: was down to 20 GB with 33 GB of replays, 2026-09-18); the old folder is the fallback
-REPLAY_DIR = "D:/Verve/harness_replays" if os.path.isdir("D:/") else os.path.join(RESULTS_DIR, "replays")
+# only written with --keep-replay now (the broadcast initiative is dropped). D: when that drive is there, else alongside the results.
+REPLAY_DIR = "D:/Verve/harness_replays" if os.path.isdir("D:/Verve") else os.path.join(RESULTS_DIR, "replays")
 
 sys.path.insert(0, os.path.join(VERVE, "tools"))
 from race_metrics import metrics
 import realtime  # noqa: E402
 import video_profile  # noqa: E402
+import paths  # noqa: E402
 
 
 class Ini(configparser.RawConfigParser):
@@ -680,7 +681,7 @@ def apply_csp_overrides(spec):
 
 
 
-ARCHIVE_DIR = "D:/verve_archive" if os.path.isdir("D:/") else None
+ARCHIVE_DIR = paths.archive_dir_for_housekeeping()   # D: today, a local folder if that drive is gone (tools/paths.py)
 
 KEEP_DAYS = 2.0          # diag files and race feeds older than this are moved to the archive drive
 

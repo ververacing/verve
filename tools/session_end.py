@@ -20,7 +20,9 @@ import json
 import os
 
 FEED_DIR = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa", "verve_feed")
-ARCHIVE = "D:/verve_archive/verve_feed"
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import paths   # the archive moves; a missing one is reported, not silently skipped
 BOXED_FRAC = 0.8          # this share of the field in the pits at once = AC closed the session
 
 
@@ -63,7 +65,7 @@ def main():
     a = ap.parse_args()
     paths = list(a.feeds)
     if not paths:
-        for d in (FEED_DIR, ARCHIVE):
+        for d in paths.feed_dirs():
             paths += sorted(glob.glob(os.path.join(d, f"*{a.glob}*.jsonl")))
     ended = over = 0
     print(f"{'feed':<36} {'cars':>4} {'leader':>7} {'max boxed':>10}  verdict")

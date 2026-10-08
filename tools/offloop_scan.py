@@ -2,14 +2,17 @@
 
     python tools/offloop_scan.py [since YYYYMMDD] [--all]
 
-Reads the race feeds (verve_feed in Documents, then D:/verve_archive/verve_feed). An off counts when a reposition of the same
+Reads the race feeds (verve_feed in Documents, then the archive - see tools/paths.py). An off counts when a reposition of the same
 car follows within 40 s. Prints one line per looping car (stamp, track, car, model, offs, spline, seconds from first to
 last, how its race ended) and a per-track tally. --all lists every race scanned, looping or not.
 """
 import glob, json, os, sys
 from collections import Counter, defaultdict
 
-DIRS = [os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa", "verve_feed"), "D:/verve_archive/verve_feed"]
+import sys as _sys
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths   # the archive moves; a missing one is reported, not silently skipped
+DIRS = paths.feed_dirs()
 
 
 def loops_in(path):

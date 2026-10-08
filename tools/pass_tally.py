@@ -32,7 +32,10 @@ import re
 import statistics
 from collections import Counter, defaultdict
 
-FEED_DIRS = [os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa", "verve_feed"), "D:/verve_archive/verve_feed"]
+import sys as _sys
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths   # the archive moves; a missing one is reported, not silently skipped
+FEED_DIRS = paths.feed_dirs()
 TRACK_M = {"spa": 7004, "monza": 5793, "ks_barcelona": 4655, "ks_silverstone": 5891, "ks_brands_hatch": 3908,
            "ks_zandvoort": 4252, "ks_nurburgring": 5148}
 PLANS = {"switchback", "lunge", "setup", "slingshot", "divebomb"}   # feed `verve` decisions that announce a plan (lib/feed.lua MV)
