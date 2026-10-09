@@ -246,7 +246,10 @@ R.GATE_FIRST_CAP = false   -- false = 0.14.5. true: a landing in the LAST sector
                            -- for up to GATE_FIRST_M + walk + stagger of road; left there it keeps the road and likely loses the lap (last
                            -- sector 0/80); unmeasured either way. Fires only where last split - split 1 < GATE_FIRST_M: at 500 m none of the
                            -- 12 raced layouts (shortest Portland l1, ~650 m); at 1000-1500 m Portland, Mosport DDT, Brands GP (2026-09-26)
-R.GATE_STAG_ALL = false    -- TEST SWITCH (off = today's behaviour). The per-car 0-45 m stagger is applied only on the GATE-FIRST
+R.GATE_STAG_ALL = 0        -- TEST SWITCH, a MODE. 0 = today. 1 = stagger the WALK'S START (tested 8 Oct: it does not
+                           -- work - landings still converged to 303-305 of 1000, ~10 m, because the walk then finds the
+                           -- SAME straight spot whatever point it starts from). 2 = offset AFTER the walk has chosen the
+                           -- spot, which is what the pre-V2 code did and what actually separates cars. Original note: The per-car 0-45 m stagger is applied only on the GATE-FIRST
                            -- path (`first`), which needs GATE_FIRST_M > 0, a grid before the timing line AND a landing near split 1.
                            -- On the ORDINARY gate path stag stays 0 and the straight-walk below is deterministic, so EVERY gated car
                            -- lands on the SAME spline: PC #2 put 3 cars on spline 0.305 at lat +0.20 in one instant (8 Oct) and every
@@ -309,7 +312,8 @@ local function gateSafe(sim, progress, i)
     -- the nearest straight-ish spot before the split (so the dropped car isn't set down mid-corner in the path of
     -- the next arrival): walk back from the margin in small steps, take the first that's straight and clear
     local stag = 0     -- (R.GATE_WALK_V2) this car's gate-first stagger, walked from instead of subtracted after the walk
-    if i and R.GATE_WALK_V2 and (first or R.GATE_STAG_ALL) then   -- (R.GATE_STAG_ALL) ...or on every gated drop, not just gate-first
+    local stagM = tonumber(R.GATE_STAG_ALL) or (R.GATE_STAG_ALL == true and 1 or 0)
+    if i and R.GATE_WALK_V2 and (first or stagM == 1) then   -- (R.GATE_STAG_ALL 1) ...or on every gated drop, not just gate-first
         stag = hash01(i * 17) * STAGGER_RANGE
         if lastGate - GATE_MARGIN - stag < 0 then stag = 0 end   -- split 1 nearer the line than margin + stagger: no stagger, never behind the line
     end
@@ -329,7 +333,7 @@ local function gateSafe(sim, progress, i)
         end)
         if straight then best = pr; break end
     end
-    if i and not R.GATE_WALK_V2 and (first or R.GATE_STAG_ALL) then best = (best - hash01(i * 17) * STAGGER_RANGE) % 1 end   -- per-car 0-45 m further back: one spot for a knot stacks them (wrapped: never before 0)
+    if i and (stagM == 2 or (not R.GATE_WALK_V2 and first)) then best = (best - hash01(i * 17) * STAGGER_RANGE) % 1 end   -- (mode 2) after the walk   -- per-car 0-45 m further back: one spot for a knot stacks them (wrapped: never before 0)
     return best, true
 end
 
