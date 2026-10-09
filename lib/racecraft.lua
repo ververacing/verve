@@ -413,7 +413,14 @@ R.WILD_REACH = 1.5            -- lunge from further back: the strategy layer's c
 R.WILD_DIVE0 = false          -- harness arm: lunges on lap 0 and in packs
 R.WILD_BH = 1.0               -- harness arm: brake-hint multiplier while attacking; above 1 = later braking (1 = off)
 R.WILD_BLUE = 0               -- harness arm: chance per lapper per lap that he ignores a blue flag (0 = always obeys)
-R.BLUE_REC_EXEMPT = false     -- TEST SWITCH (off = today). A car still inside its RECOVERY window does not obey a blue flag.
+R.BLUE_REC_EXEMPT = 0         -- TEST SWITCH, a MODE (0 = today). 1 = a car recovery holds (.rec) skips the blue-flag yield entirely.
+                              -- 2 = while .rec OR its reposition is unjudged (stateOf().dropPending), the car still MOVES ASIDE for
+                              -- a lapper but does NOT LIFT. Mode 2 is the proposal: mode 1 missed car 14 (PC #2 8 Oct, mixed-era
+                              -- grid) whose .rec was already 0 at age 4 while it crawled for lappers on 0-3 % gas - recovery clears
+                              -- recT at a successful teleport - and mode 1 also stops a rescued car moving off the line for a
+                              -- leader arriving at full speed. The yield's own comment says a lapped car should 'EASE aside and keep
+                              -- rolling, NOT crawl'; mode 2 is exactly that, for the one car that most needs to keep rolling.
+                              -- Original note (mode 1), kept for the record: A car still inside its RECOVERY window does not obey a blue flag.
                               -- Traced 8 Oct (PC #2, pc2_rep3_imola22_1 car 6): stuck at spline 0.587, gated back to 0.314 so
                               -- a lap down, and the moment it was set back on the road a lapping car came by. It conceded and
                               -- lifted - 30 km/h on 17-24 % throttle for 14 s, the slowest clear of 89 drops that day, letting
@@ -1487,7 +1494,10 @@ local evalBody = function()
         -- (R.BLUE_REC_EXEMPT) ...and a car that recovery still holds is not asked to concede: it is getting back up to speed.
         -- Zeroed here rather than at the detection above so only the yield changes; lapperIdx is not read in between,
         -- and the line below then clears the yield bookkeeping for us.
-        if R.BLUE_REC_EXEMPT and lapperIdx >= 0 and (Recovery.stateOf(i) or R.NOSTATE).rec then lapperIdx = -1 end
+        local bm = tonumber(R.BLUE_REC_EXEMPT) or (R.BLUE_REC_EXEMPT == true and 1 or 0)   -- (harness JSON may hand us a boolean)
+        local stB = bm > 0 and lapperIdx >= 0 and (Recovery.stateOf(i) or R.NOSTATE) or nil
+        if bm == 1 and stB and stB.rec then lapperIdx = -1 end   -- mode 1: no yield at all while recovery holds the car
+        local noLift = bm >= 2 and stB ~= nil and (stB.rec or stB.dropPending) or false   -- mode 2: move aside, no lift
         if lapperIdx < 0 then yieldT[i] = 0; letbyDone[i] = nil; letbyFor[i] = nil; letbyT[i] = nil end
         if lapperIdx >= 0 and letbyFor[i] ~= lapperIdx then letbyFor[i] = lapperIdx; letbyDone[i] = nil; letbyT[i] = nil; yieldT[i] = 0 end
         if lapperIdx >= 0 then
@@ -1542,14 +1552,15 @@ local evalBody = function()
             -- stop -- that's what makes traffic pile up and rear-end a car being lapped. Lift a touch more
             -- only as the faster car draws right alongside, to wave it by.
             local lift = (lapperGap < K.YIELD_LIFT_GAP) and K.YIELD_CAUT * clamp(1 - lapperGap / K.YIELD_LIFT_GAP, 0, 1) or 0
+            if noLift then lift = 0 end   -- (R.BLUE_REC_EXEMPT 2) a rescued car eases aside but keeps accelerating
             -- the proper lift: yielded long enough, lapper still on the tail, on a straight, not done yet for this lapper
-            if yielding and not letbyDone[i] and (yieldT[i] or 0) > K.LETBY_AFTER_T and lapperGap < K.YIELD_GAP then
+            if yielding and not noLift and not letbyDone[i] and (yieldT[i] or 0) > K.LETBY_AFTER_T and lapperGap < K.YIELD_GAP then
                 if letbyT[i] == nil then
                     local isCornerY = cornerAhead(mySpline)
                     if not isCornerY then letbyT[i] = os.clock() end
                 end
             end
-            if letbyT[i] then
+            if letbyT[i] and not noLift then
                 if os.clock() - letbyT[i] < K.LETBY_T then lift = lift + K.LETBY_CAUT
                 else letbyDone[i] = true; letbyT[i] = nil end
             end

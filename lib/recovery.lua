@@ -262,6 +262,9 @@ R.GATE_FAIL_RETRY = true   -- DEFAULT 0.14.8. (owner's 30-lap Baku race 2026-09-
                            -- drops; its next drop goes back where it originally stopped, ungated - it loses the lap, not the race.
                            -- Baku's split 1 is the castle entry: 27 of 35 drops landed there, one failed drop set dropFailed and
                            -- the car's next stop parked it 'hopeless' (7 cars). One retry per car; a second failure is final.
+R.dropPend = {}            -- [i] = os.clock() of this car's reposition while the judge has not ruled on it (nil once it has).
+                           -- Read by racecraft through stateOf().dropPending: a car whose reposition has not proven itself yet
+                           -- is still getting back up to speed, even though recT (and so .rec) is already 0 after the teleport.
 R.gateRetry = {}           -- [i] = where the car stopped before its failed gated drop (number); false once the retry is spent
 R.gateRetryT = {}          -- [i] = when that retry was granted: it is for the car's NEXT stop, not one laps later
 R.GATE_RETRY_S = 90        -- seconds a granted retry stays valid (review 2026-09-28: an unused one sent a later stop back to an old spot)
@@ -397,10 +400,10 @@ local function judgeDrops(now)
                 rolled = gained >= roll
             end
             if c and ((c.speedKmh or 0) > DROP_OK_SPEED or rolled) then
-                d.ok = true; R.dropOK = R.dropOK + 1
+                d.ok = true; R.dropOK = R.dropOK + 1; R.dropPend[d.i] = nil
                 if (d.sus or 0) < R.DROP_RATE_SUSP and not R.wildCar[d.i] then R.rateN = R.rateN + 1; R.rateOK = R.rateOK + 1 end
             elseif now - d.t > DROP_JUDGE_T or (c and c.isRetired) then
-                d.ok = false
+                d.ok = false; R.dropPend[d.i] = nil
                 local retry = R.GATE_FAIL_RETRY and d.gs and R.gateRetry[d.i] == nil and not (c and c.isRetired)   -- (a parked car: parkInPits set false)
                 if retry then R.gateRetry[d.i] = d.gs; R.gateRetryT[d.i] = now   -- one ungated retry where it stopped
                 elseif not (R.gateRetryT[d.i] and d.t < R.gateRetryT[d.i]) then R.dropFailN = R.dropFailN + (dropFailed[d.i] and 0 or 1); dropFailed[d.i] = true end   -- (a drop made BEFORE the
@@ -734,6 +737,7 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
         -- older one for the same car: from here on that record's "progress" would be this teleport, not driving (review 2026-10-04)
         drops[#drops + 1] = { i = i, t = os.clock(), ok = nil, spl = progress, sus = maxSusp(ac.getCar(i)), tt = temps,
                               gs = gated and reqProgress or nil }   -- judged over the next DROP_JUDGE_T; gs = the stop spot of a gated drop
+        R.dropPend[i] = os.clock()                     -- pending until judgeDrops rules (a later drop of this car re-stamps it)
         pendingDrop[i] = { pos = pos, dir = dir, apiDir = apiDir, t = os.clock(), tries = 0 }   -- verify its heading next frame
         R.dropN = R.dropN + 1
         dropCount[i] = (dropCount[i] or 0) + 1
@@ -1324,7 +1328,7 @@ function R.reset()
     lastRepairT = {}
     for i in pairs(overriding) do releaseControls(i) end   -- hand every car's controls back at a session change
     overridesCleared = false     -- and release every throttle / top-speed / stop-counter hold on the next update (they persist across sessions)
-    drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}; R.gateRetry = {}; R.gateRetryT = {}
+    drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}; R.gateRetry = {}; R.gateRetryT = {}; R.dropPend = {}
     dropCount, dropSpots, escapeLogged = {}, {}, {}
     R.stallEngT, R.stallRestarts = {}, {}; R.stallRestartN = 0
     R.wetHint = {}
@@ -1372,6 +1376,7 @@ function R.stateOf(i)
         parked = parked[i] == true, dmgBase = dmgBase[i] or 0, episodeT = episodeT[i] or 0,
         rescueN = rescueN[i] or 0, ramp = rampLimit(i), dropFailed = dropFailed[i] == true,
         parkWhy = R.parkWhy[i], parkDmg = R.parkDmg[i] or 0, parkSusp = R.parkSusp[i] or 0, parkLap = R.parkLap[i] or 0,
+        dropPending = R.dropPend[i] ~= nil and os.clock() - R.dropPend[i] < 30,   -- (30 = DROP_JUDGE_T: bounded even if the judge never runs)
     }
 end
 
