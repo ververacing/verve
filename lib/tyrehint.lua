@@ -1,8 +1,9 @@
 -- AI tyre hint on cold tyres (2026-10-10). AC's AI brakes and corners as if its tyres were at operating temperature.
--- On the opening lap, an out-lap after a stop, and after a reposition (AC resets a teleported car's tyres to ambient,
--- see recovery.lua) they are not. PC #2 measured it on the released build: every F2004 that left the track at
--- Imola's Tosa on lap 0 had tyres 32-56 C below optimum (64-83 C against 115-120 C), with Verve on AND off - a
--- reviewer's "half the grid goes off at turn 6, no matter the aggression". Not an Imola rule: it is the tyres.
+-- On the opening lap and on an out-lap after a stop they are not. (A repositioned car keeps its temperatures: AC
+-- resets a teleported car's tyres to ambient, but recovery.lua's applyTemps puts the saved ones back.) PC #2 measured
+-- it on the released build: every F2004 that left the track at Imola's Tosa on lap 0 had tyres 32-56 C below optimum
+-- (64-83 C against 115-120 C), with Verve on AND off - a reviewer's "half the grid goes off at turn 6, no matter the
+-- aggression". Not an Imola rule: it is the tyres.
 --
 -- CSP exposes the grip the AI assumes, per car and live:
 --   physics.setAITyresHint(car, value)     the car's ai.ini [TYRES] HINT
