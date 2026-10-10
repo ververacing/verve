@@ -242,6 +242,12 @@ R.GATE_FIRST_M = 10000     -- DEFAULT 0.14.7 (0.14.6: 1000, 0.14.5: 500): every 
                            -- back, else don't gate. AC credits the lap only if the car passes split 1 after its last teleport:
                            -- sector-1 landings 1039/1052 counted, sector 2 (the 'back' gate) 19/1865, last sector 0/80 (2026-09-26).
 R.GATE_FIRST_CAP = false   -- false = 0.14.5. true: a landing in the LAST sector (at or past the last intermediate split) is never gated back
+R.JAM_AHEAD_M = 0          -- >0 (m): a landing is NOT safe while R.JAM_N+ cars crawl (< R.JAM_KMH) on the road within this far AHEAD of it.
+                           -- Singapore 2026-10-10: a lap-0 crash jammed Stamford Road; the gate dropped each jammed car ~420 m upstream
+                           -- and dropSafe (blind to a slow car AHEAD) let it go, so they re-entered the jam at ~150 km/h - 82 contacts with
+                           -- Verve on v 24 off. Blocked here, the car HOLDS (the existing traffic wait, capped by RESCUE_FORCE_T) instead.
+R.JAM_N = 2                -- with JAM_AHEAD_M: this many crawling cars ahead make a jam
+R.JAM_KMH = 40             -- with JAM_AHEAD_M: below this a car on the road ahead counts as jammed
                            -- to split 1, however big GATE_FIRST_M. A trade, not a fix: gated, it becomes a sector-1 landing (1039/1052 credited)
                            -- for up to GATE_FIRST_M + walk + stagger of road; left there it keeps the road and likely loses the lap (last
                            -- sector 0/80); unmeasured either way. Fires only where last split - split 1 < GATE_FIRST_M: at 500 m none of the
@@ -589,6 +595,7 @@ end
 -- or a slow/distant one, doesn't block -- so this succeeds far more often than a blanket "spot clear",
 -- which is why beached cars used to never actually get repositioned.
 local function dropSafe(sim, i, prog)
+    local jamN = 0
     for j = 0, sim.carsCount - 1 do
         if j ~= i then
             local oc = ac.getCar(j)
@@ -600,10 +607,12 @@ local function dropSafe(sim, i, prog)
                 if g < 0 and ag < DROP_BEHIND and (oc.speedKmh or 0) > DANGER_SPEED then return false end  -- fast car closing from behind
                 if R.DROP_SAFE_T > 0 and g < 0 and (oc.speedKmh or 0) > DANGER_SPEED and not oc.isInPitlane
                    and ag * trackLen < (oc.speedKmh / 3.6) * R.DROP_SAFE_T then return false end   -- ...or within DROP_SAFE_T s at its speed
+                if R.JAM_AHEAD_M > 0 and g > 0 and g * trackLen < R.JAM_AHEAD_M and (oc.speedKmh or 0) < R.JAM_KMH
+                   and not oc.isInPitlane then jamN = jamN + 1 end                                 -- (R.JAM_AHEAD_M) crawling on the road ahead
             end
         end
     end
-    return true
+    return not (R.JAM_AHEAD_M > 0 and jamN >= R.JAM_N)                                            -- a jam ahead: hold, don't launch into it
 end
 
 -- Put an OFF-TRACK (beached) car back on the racing line at its own progress, facing forward, just
