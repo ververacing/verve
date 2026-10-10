@@ -32,7 +32,11 @@ PAIR_S = 2          # drop records of one car this close together are one reposi
 SETTLE_S = 10       # after the next line crossing, wait this long for AC's count to catch up before reading it
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERVE = os.path.dirname(HERE)
-TRACK_LEN = {"imola": 4909.0, "spa": 7004.0, "monza": 5793.0, "ks_barcelona": 4655.0}
+TRACK_LEN = {"imola": 4909.0, "spa": 7004.0, "monza": 5793.0, "ks_barcelona": 4655.0,
+             # added 2026-10-10: without a track here, label_of() cannot strip it and NO label matches
+             # (Singapore scored "0 repositions" while 12 had happened). Lengths from each ui_track.json.
+             "singapore_2020": 5063.0, "monaco_2019_CHQ": 3337.0, "monaco_2020": 3337.0,
+             "miami_f1": 5410.0, "lasvegas23": 6200.0}
 
 
 def label_of(path):
