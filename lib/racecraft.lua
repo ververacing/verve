@@ -187,6 +187,7 @@ R.BG_PASS = false             -- (A/B, with BG_RACE) beyond the opening lap the 
 R.bgN = 0; R.bgPassN = 0      -- diag: car-frames the race-long guard cut a brake hint / left a passing car its own (session bgN, bgPN)
 R.OL_BRAKEGUARD = true        -- opening lap: brake earlier when the car ahead on my line is already braking inside CV.BG_M (harness A/B)
 R.BG_ALL = 0                  -- >0: every AI car's brake hint x this all race (direction test only; 0 = off)
+R.BG_ALL_GATE = false         -- with BG_ALL: hold it off lap 0-1, where a raised hint fights OL_BRAKEGUARD (harness A/B; default off)
 -- ROAD SPACE (harness A/B: R.ROADSPACE): "use the whole road". The reactive pass aims a fixed small nudge off the racing
 -- line (ATTACK_OFFSET x class), and the intensity, crowd and opening-lap multipliers plus the deadzone then shrink it to
 -- nothing: a star behind a slow car ORBITS it instead of shooting the open side (kart grid 2026-09-16: 71% of attacking
@@ -1013,7 +1014,13 @@ local evalBody = function()
                 cv2.base[i] = 1.0
                 pcall(function() cv2.base[i] = ac.INIConfig.carData(i, 'ai.ini'):get('PEDALS', 'BRAKE_HINT', 1.0) end)
             end
-            local mul = R.BG_ALL > 0 and R.BG_ALL or 1.0
+            -- R.BG_ALL_GATE: hold BG_ALL off the opening lap. Ungated it raises the hint (LATER braking) from
+            -- the standing start, directly against the brake-zone guard below, which LOWERS it to brake EARLIER
+            -- in a packed field - and the note there records what a field-wide x1.5 did on 2026-09-16: 18/18
+            -- lap-1 contact, 101 repairs. The 2026-10-10 ladder repeated it in miniature: 2 of 3 races at the
+            -- higher settings took first-lap pile-ups, 0 of 8 at the lower ones. Default off, so released
+            -- racing is untouched until this has been through the regression suite.
+            local mul = (R.BG_ALL > 0 and not (R.BG_ALL_GATE and myLap <= 1)) and R.BG_ALL or 1.0
             if wild and R.WILD_BH ~= 1 and R.last[i] and R.last[i].state == 1 then mul = mul * R.WILD_BH end   -- (R.WILD_BH) attacking: his own brake point
             if ((R.OL_BRAKEGUARD and ((startX > 0 and myLap <= 1) or (myLap > 1 and R.BG_RACE)) and not (wild and R.WILD_START)) or roomB) and aheadIdx >= 0 and not (Recovery.stateOf(i) or R.NOSTATE).rec then
                 local gm = gapA * trackLen

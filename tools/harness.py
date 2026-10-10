@@ -41,6 +41,9 @@ DOCS = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa")
 CFG = os.path.join(DOCS, "cfg")
 RACE_INI = os.path.join(CFG, "race.ini")
 DEFAULT_AMBIENT, DEFAULT_ROAD = 26, 34   # AC's usual conditions, and what PC #2 runs: keep the machines comparable
+# The weather state this machine has silently been racing on since before the archive begins. PINNED rather than
+# cleared so the 77 races scored on 2026-10-09/10 stay comparable; --weather stock is the stock-install arm.
+DEFAULT_WEATHER_TYPE, DEFAULT_WEATHER_CONTROLLER = 15, "pureCtrl"
 # Everything else that decides how a car goes round. It was all whatever Content Manager last left in race.ini,
 # differing silently between machines and between one batch and the next; DYNAMIC_TRACK is the one that matters as
 # much as temperature, because it decides how much rubber is down. Overridable per run with --condition.
@@ -308,7 +311,24 @@ def build_race_ini(args, base_path):
     # (written here until 0.14.6, to no effect). AC fuels from [SESSION_n] LAPS - see set_sessions (its log, 2026-09-26)
     ini.set("RACE", "RACE_LAPS", str(args.laps))
     set_sessions(ini, args)
-    if args.weather:
+    # ALWAYS write the weather state, for exactly the reason the temperature below is always written: until
+    # 2026-10-10 the two __CM_WEATHER_* keys were set ONLY when --weather was passed, and never reset, so
+    # whatever Content Manager or the last --weather run left in race.ini persisted into every race after it.
+    # This machine ran every race in the archive - and every race of the 2026-10-09/10 pace work - on
+    # __CM_WEATHER_TYPE=15 (broken clouds) under pureCtrl, which is NOT what a stock install does: PC #2 has
+    # neither key and no extension/weather-controllers folder at all, so CSP uses its built-in weather there.
+    # The fix PINS the leftover rather than clearing it. Clearing looks tidier and is wrong twice over: on a
+    # machine with Pure installed CSP just falls back to cfg/extension/weather_fx.ini [BASIC] CONTROLLER (here
+    # 'pureCtrl static', a DIFFERENT Pure mode), so the race would not be stock anyway; and it would silently
+    # make every future race incomparable with the 77 already scored. Pinning makes the variable explicit and
+    # controlled, and changing it is then a deliberate A/B instead of a leak.
+    # --weather stock removes both keys, for the arm that matches a stock install. On a machine with Pure
+    # installed that still needs --csp {"weather_fx": {"BASIC": {"CONTROLLER": ""}}} to beat the fallback.
+    if args.weather == "stock":
+        if ini.has_section("LIGHTING"):
+            ini.remove_option("LIGHTING", "__CM_WEATHER_TYPE")
+            ini.remove_option("LIGHTING", "__CM_WEATHER_CONTROLLER")
+    elif args.weather:
         # CSP weather type (Pure/Sol controllers read __CM_WEATHER_TYPE): 12 clear, 13 few clouds, 15 broken clouds, 16 overcast,
         # 17 fog, 18 mist, 3 light drizzle, 6 light rain, 7 rain, 8 heavy rain, 1 thunderstorm, 27 hot, 26 cold, 28 windy
         WT = {"clear": 12, "clouds": 15, "overcast": 16, "fog": 17, "mist": 18, "drizzle": 3, "lightrain": 6, "rain": 7,
@@ -323,6 +343,11 @@ def build_race_ini(args, base_path):
         ini.set("LIGHTING", "__CM_WEATHER_TYPE", str(wt))
         args.weather_type = wt
         ini.set("LIGHTING", "__CM_WEATHER_CONTROLLER", "pureCtrl")
+    else:
+        if not ini.has_section("LIGHTING"):
+            ini.add_section("LIGHTING")
+        ini.set("LIGHTING", "__CM_WEATHER_TYPE", str(DEFAULT_WEATHER_TYPE))
+        ini.set("LIGHTING", "__CM_WEATHER_CONTROLLER", DEFAULT_WEATHER_CONTROLLER)
     # ALWAYS write the temperature. It used to be written only when --ambient/--road were passed, so whatever
     # Content Manager last left in race.ini persisted into every race: this machine sat at 11 C ambient / 16 C road
     # for 60 races while PC #2 ran 26/34, which is most of the 2.3 s a lap between them (2026-09-24). Cold tyres are
@@ -1193,7 +1218,7 @@ def main():
                     help="copy AC's race replay to the replay folder (~250 MB each). Off since the broadcast initiative was dropped")
     ap.add_argument("--keep-video", action="store_true",
                     help="do not swap AC's video settings to the lean harness profile for this run")
-    ap.add_argument("--weather", help="CSP weather type by name (clear, clouds, overcast, fog, mist, drizzle, lightrain, rain, heavyrain, storm, hot, cold, windy) or number; Pure must be the weather controller")
+    ap.add_argument("--weather", help="CSP weather type by name (clear, clouds, overcast, fog, mist, drizzle, lightrain, rain, heavyrain, storm, hot, cold, windy) or number; Pure must be the weather controller. 'stock' instead REMOVES the weather keys, matching an install with no weather controller (PC #2)")
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--label", default="A")
     ap.add_argument("--ai-aggression", type=int, default=0, help="race.ini AI_AGGRESSION for every AI car (0-100, default 0)")

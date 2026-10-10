@@ -180,6 +180,17 @@ function T.buildReport(sim, ctx, completed, abortReason)
         stype = (tt == ac.SessionType.Race and 'race') or (tt == ac.SessionType.Qualify and 'qualify') or (tt == ac.SessionType.Practice and 'practice') or (tt == ac.SessionType.Hotlap and 'hotlap') or 'other'
     end)
     local wet = false; pcall(function() wet = (sim.rainIntensity or 0) > 0.05 end)
+    -- Which weather system this race actually ran under. Pure and Sol change how a car goes round, so a pace
+    -- figure from a Pure machine is not a pace figure from a stock one - and until now we could not see which
+    -- our OWN reports came from, let alone a player's (2026-10-10). Reads the session's race.ini, which is what
+    -- CSP itself keys on; an empty controller means CSP's built-in weather, as on a stock install.
+    local wCtrl, wType = nil, nil
+    pcall(function()
+        local c = ac.INIConfig.raceConfig()
+        wCtrl = c:get('LIGHTING', '__CM_WEATHER_CONTROLLER', '')
+        wType = tonumber(c:get('LIGHTING', '__CM_WEATHER_TYPE', ''))
+        if wCtrl == '' then wCtrl = nil end
+    end)
     local fields = {
         '"install_id":' .. jstr(S.installId),
         '"verve_version":' .. jstr(T.VERSION),
@@ -194,6 +205,7 @@ function T.buildReport(sim, ctx, completed, abortReason)
         '"car_models":[' .. table.concat(models, ',') .. ']',
         '"player_car":' .. jstr(ctx.playerModel), '"player_class":' .. jstr(mCls[0] or (ctx.classOf and ctx.classOf(0)) or nil),
         '"is_wet":' .. jbool(wet),
+        '"weather_controller":' .. jstr(wCtrl), '"weather_type":' .. jint(wType),
         '"ambient_c":' .. jint(sim.ambientTemperature), '"road_c":' .. jint(sim.roadTemperature),
         '"time_of_day":' .. jstr(sim.timeHours and string.format('%02d:00', sim.timeHours) or nil),
         '"ai_level":' .. jint(ctx.meter),
