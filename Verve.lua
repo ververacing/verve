@@ -18,6 +18,7 @@ local Contacts  = require('lib.contacts')     -- contacts from CSP's collision s
 local Fault     = require('lib.fault')        -- who caused each contact, and the time penalty it costs (owner's ask 2026-09-17)
 local Strategy  = require('lib.strategy')     -- planned manoeuvres (racecraft drives it; Verve owns the toggle + status)
 local Fuel      = require('lib.fuel')         -- timed races: AC's 1.2-lap AI fuel load and its empty-tank pit loop (G.timedFuel)
+local Ers       = require('lib.ers')          -- AI battery deployment, MGU-K (R.ERS_MODE; default 'off' = AC decides)
 Racecraft.penCap = Fault.penCap            -- penalty throttle caps, read by racecraft's throttle setter (shared table)
 Fault.attach(Recovery.recentDrops, Feed.event)
 Racecraft.humanMv = Human.mv               -- (lib/human.lua H.MISTAKE_V2) a visible mistake's levers, applied by racecraft (shared table)
@@ -494,6 +495,7 @@ function script.update(dt)
     if G.timedFuel then pc('fuel', Fuel.update, sim, dt) else pcall(Fuel.offTick) end   -- timed races: green fuel load + pit-box guard (lib/fuel.lua)
     Troublespots.ENABLED = G.troubleSpots
     Troublespots.update(dt)
+    pc('ers', Ers.update, sim, dt)   -- AI battery deployment (lib/ers.lua); returns at once while R.ERS_MODE is 'off'
 
     if Diag then pcall(function()
         Diag.update(dt, {
