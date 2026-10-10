@@ -187,7 +187,10 @@ R.BG_PASS = false             -- (A/B, with BG_RACE) beyond the opening lap the 
 R.bgN = 0; R.bgPassN = 0      -- diag: car-frames the race-long guard cut a brake hint / left a passing car its own (session bgN, bgPN)
 R.OL_BRAKEGUARD = true        -- opening lap: brake earlier when the car ahead on my line is already braking inside CV.BG_M (harness A/B)
 R.BG_ALL = 0                  -- >0: every AI car's brake hint x this all race (direction test only; 0 = off)
-R.BG_ALL_GATE = false         -- with BG_ALL: hold it off lap 0-1, where a raised hint fights OL_BRAKEGUARD (harness A/B; default off)
+R.BG_ALL_GATE = false         -- with BG_ALL: hold it off while the brake-zone guard is ACTIVE on this car (harness A/B; default off).
+                              -- Ungated, BG_ALL raises the hint on the same frames the guard cuts it: x1.5 field-wide gave 18/18 lap-1
+                              -- contact and 101 repairs (2026-09-16); the 2026-10-10 ladder put 2 of 3 higher-setting races into
+                              -- lap-1 pile-ups against 0 of 8 lower. Keyed on the guard's own predicate (cv2.gOn), not a lap test.
 -- ROAD SPACE (harness A/B: R.ROADSPACE): "use the whole road". The reactive pass aims a fixed small nudge off the racing
 -- line (ATTACK_OFFSET x class), and the intensity, crowd and opening-lap multipliers plus the deadzone then shrink it to
 -- nothing: a star behind a slow car ORBITS it instead of shooting the open side (kart grid 2026-09-16: 71% of attacking
@@ -1014,15 +1017,13 @@ local evalBody = function()
                 cv2.base[i] = 1.0
                 pcall(function() cv2.base[i] = ac.INIConfig.carData(i, 'ai.ini'):get('PEDALS', 'BRAKE_HINT', 1.0) end)
             end
-            -- R.BG_ALL_GATE: hold BG_ALL off the opening lap. Ungated it raises the hint (LATER braking) from
-            -- the standing start, directly against the brake-zone guard below, which LOWERS it to brake EARLIER
-            -- in a packed field - and the note there records what a field-wide x1.5 did on 2026-09-16: 18/18
-            -- lap-1 contact, 101 repairs. The 2026-10-10 ladder repeated it in miniature: 2 of 3 races at the
-            -- higher settings took first-lap pile-ups, 0 of 8 at the lower ones. Default off, so released
-            -- racing is untouched until this has been through the regression suite.
-            local mul = (R.BG_ALL > 0 and not (R.BG_ALL_GATE and myLap <= 1)) and R.BG_ALL or 1.0
+            -- ONE predicate for "the brake-zone guard is active on this car", used by the guard itself and by the
+            -- BG_ALL gate (R.BG_ALL_GATE, see its declaration), so the two can never disagree on startX / BG_RACE /
+            -- WILD_START / roomB. Kept in cv2 rather than a new local: the evaluator is near LuaJIT's limits.
+            cv2.gOn = ((R.OL_BRAKEGUARD and ((startX > 0 and myLap <= 1) or (myLap > 1 and R.BG_RACE)) and not (wild and R.WILD_START)) or roomB) and aheadIdx >= 0 and not (Recovery.stateOf(i) or R.NOSTATE).rec
+            local mul = (R.BG_ALL > 0 and not (R.BG_ALL_GATE and cv2.gOn)) and R.BG_ALL or 1.0
             if wild and R.WILD_BH ~= 1 and R.last[i] and R.last[i].state == 1 then mul = mul * R.WILD_BH end   -- (R.WILD_BH) attacking: his own brake point
-            if ((R.OL_BRAKEGUARD and ((startX > 0 and myLap <= 1) or (myLap > 1 and R.BG_RACE)) and not (wild and R.WILD_START)) or roomB) and aheadIdx >= 0 and not (Recovery.stateOf(i) or R.NOSTATE).rec then
+            if cv2.gOn then
                 local gm = gapA * trackLen
                 local reach = CV.BG_M
                 if roomB then reach = reach * (1 + R.ROOM_BG * tightHere) end   -- ROOM_FOLLOW: a longer reach into tight room (the corridor entries, at any speed)

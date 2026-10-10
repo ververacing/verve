@@ -41,8 +41,8 @@ DOCS = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa")
 CFG = os.path.join(DOCS, "cfg")
 RACE_INI = os.path.join(CFG, "race.ini")
 DEFAULT_AMBIENT, DEFAULT_ROAD = 26, 34   # AC's usual conditions, and what PC #2 runs: keep the machines comparable
-# The weather state this machine has silently been racing on since before the archive begins. PINNED rather than
-# cleared so the 77 races scored on 2026-10-09/10 stay comparable; --weather stock is the stock-install arm.
+# The weather state this machine races on: CSP type 15 = Clear (ac.WeatherType) under pureCtrl. Pinned only where
+# that controller is installed; why, and the stock arm, are explained at the weather block in build_race_ini.
 DEFAULT_WEATHER_TYPE, DEFAULT_WEATHER_CONTROLLER = 15, "pureCtrl"
 # Everything else that decides how a car goes round. It was all whatever Content Manager last left in race.ini,
 # differing silently between machines and between one batch and the next; DYNAMIC_TRACK is the one that matters as
@@ -315,39 +315,52 @@ def build_race_ini(args, base_path):
     # 2026-10-10 the two __CM_WEATHER_* keys were set ONLY when --weather was passed, and never reset, so
     # whatever Content Manager or the last --weather run left in race.ini persisted into every race after it.
     # This machine ran every race in the archive - and every race of the 2026-10-09/10 pace work - on
-    # __CM_WEATHER_TYPE=15 (broken clouds) under pureCtrl, which is NOT what a stock install does: PC #2 has
+    # __CM_WEATHER_TYPE=15 (CLEAR by CSP's enum; the old name table mislabelled it) under pureCtrl, which is NOT what a stock install does: PC #2 has
     # neither key and no extension/weather-controllers folder at all, so CSP uses its built-in weather there.
     # The fix PINS the leftover rather than clearing it. Clearing looks tidier and is wrong twice over: on a
     # machine with Pure installed CSP just falls back to cfg/extension/weather_fx.ini [BASIC] CONTROLLER (here
     # 'pureCtrl static', a DIFFERENT Pure mode), so the race would not be stock anyway; and it would silently
     # make every future race incomparable with the 77 already scored. Pinning makes the variable explicit and
     # controlled, and changing it is then a deliberate A/B instead of a leak.
-    # --weather stock removes both keys, for the arm that matches a stock install. On a machine with Pure
-    # installed that still needs --csp {"weather_fx": {"BASIC": {"CONTROLLER": ""}}} to beat the fallback.
-    if args.weather == "stock":
+    # --weather stock removes both keys. That is a STOCK race only on a machine with no weather controller
+    # installed: with Pure installed CSP falls back to cfg/extension/weather_fx.ini (CONTROLLER and IMPLEMENTATION),
+    # rewrites that file at startup, and NO --csp override survives it - two probe races proved that on
+    # 2026-10-10. Here 'stock' therefore means "Pure static with the stock type"; the telemetry row reports the
+    # engine that ran, and results.csv records the request as 'stock' so the two can be told apart later.
+    if (args.weather or "").lower() == "stock":
         if ini.has_section("LIGHTING"):
             ini.remove_option("LIGHTING", "__CM_WEATHER_TYPE")
             ini.remove_option("LIGHTING", "__CM_WEATHER_CONTROLLER")
     elif args.weather:
-        # CSP weather type (Pure/Sol controllers read __CM_WEATHER_TYPE): 12 clear, 13 few clouds, 15 broken clouds, 16 overcast,
-        # 17 fog, 18 mist, 3 light drizzle, 6 light rain, 7 rain, 8 heavy rain, 1 thunderstorm, 27 hot, 26 cold, 28 windy
-        WT = {"clear": 12, "clouds": 15, "overcast": 16, "fog": 17, "mist": 18, "drizzle": 3, "lightrain": 6, "rain": 7,
-              "heavyrain": 8, "storm": 1, "hot": 27, "cold": 26, "windy": 28}
+        # CSP weather type (Pure/Sol controllers read __CM_WEATHER_TYPE), from CSP's own ac.WeatherType enum
+        # (extension/internal/lua-sdk/ac_apps/lib.lua): 15 Clear, 16 FewClouds, 17 ScatteredClouds, 18 BrokenClouds,
+        # 19 OvercastClouds, 20 Fog, 21 Mist, 3 LightDrizzle, 6 LightRain, 7 Rain, 8 HeavyRain, 1 Thunderstorm,
+        # 29 Cold, 30 Hot, 31 Windy. Until 2026-10-10 this table was hand-typed and offset ("clear" was 12 =
+        # LightSleet, "clouds" 15 = Clear, "hot" 27 = Tornado, "windy" 28 = Hurricane); only the rain rows were right.
+        WT = {"clear": 15, "fewclouds": 16, "scattered": 17, "clouds": 18, "overcast": 19, "fog": 20, "mist": 21,
+              "drizzle": 3, "lightrain": 6, "rain": 7, "heavyrain": 8, "storm": 1, "hot": 30, "cold": 29, "windy": 31}
         wt = WT.get(args.weather.lower(), None)
         if wt is None and args.weather.isdigit():
             wt = int(args.weather)
         if wt is None:
-            raise SystemExit("unknown --weather %r (use one of %s or a CSP type number)" % (args.weather, ", ".join(WT)))
+            raise SystemExit("unknown --weather %r (use one of %s, stock, or a CSP type number)" % (args.weather, ", ".join(WT)))
         if not ini.has_section("LIGHTING"):
             ini.add_section("LIGHTING")
         ini.set("LIGHTING", "__CM_WEATHER_TYPE", str(wt))
         args.weather_type = wt
-        ini.set("LIGHTING", "__CM_WEATHER_CONTROLLER", "pureCtrl")
-    else:
+        ini.set("LIGHTING", "__CM_WEATHER_CONTROLLER", DEFAULT_WEATHER_CONTROLLER)
+    elif os.path.isdir(os.path.join(AC_DIR, "extension", "weather-controllers", DEFAULT_WEATHER_CONTROLLER)):
+        # Pin ONLY where the controller is installed (this machine). A stock install has no weather-controllers
+        # folder at all (PC #2); pinning there would ask CSP for a controller that does not exist and make the
+        # telemetry row claim Pure for a race that cannot have run it (review 2026-10-10, finding 1).
         if not ini.has_section("LIGHTING"):
             ini.add_section("LIGHTING")
         ini.set("LIGHTING", "__CM_WEATHER_TYPE", str(DEFAULT_WEATHER_TYPE))
         ini.set("LIGHTING", "__CM_WEATHER_CONTROLLER", DEFAULT_WEATHER_CONTROLLER)
+    elif ini.has_section("LIGHTING"):
+        # no controller installed: keyless IS the stock state, and the only honest one to leave
+        ini.remove_option("LIGHTING", "__CM_WEATHER_TYPE")
+        ini.remove_option("LIGHTING", "__CM_WEATHER_CONTROLLER")
     # ALWAYS write the temperature. It used to be written only when --ambient/--road were passed, so whatever
     # Content Manager last left in race.ini persisted into every race: this machine sat at 11 C ambient / 16 C road
     # for 60 races while PC #2 ran 26/34, which is most of the 2.3 s a lap between them (2026-09-24). Cold tyres are
@@ -779,12 +792,14 @@ def housekeeping():
 
 
 PURE_SETTINGS = os.path.join(AC_DIR, "extension", "weather-controllers", "pureCtrl", "settings.ini")
-RAINY = {3, 4, 5, 6, 7, 8, 0, 1, 2, 9, 10, 11, 29}   # CSP types that should start on a wet track
+RAINY = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 32}   # CSP types that should start on a wet track (ac.WeatherType: storms, drizzle, rain, snow, sleet, hail)
 
 
 PURE_PLANS = os.path.join(AC_DIR, "extension", "config-ext", "PurePlanner", "Plans")
 # Pure weather-slot index (the "index" a plan container carries) per CSP weather type; rain fields per type
-PURE_INDEX = {12: 2, 13: 3, 14: 4, 15: 5, 16: 6, 17: 17, 18: 18, 3: 8, 6: 8, 7: 8, 8: 8, 1: 8, 27: 2, 26: 2, 28: 2}
+# re-keyed 2026-10-10 with the name table: the same NAME reaches the same Pure slot it always did (clear -> 2,
+# clouds -> 5, overcast -> 6, fog -> 17, mist -> 18, hot/cold/windy -> 2), now under its correct CSP number
+PURE_INDEX = {15: 2, 16: 3, 17: 4, 18: 5, 19: 6, 20: 17, 21: 18, 3: 8, 6: 8, 7: 8, 8: 8, 1: 8, 30: 2, 29: 2, 31: 2}
 # rain slot 8 is the one that actually rains here (the owner's hand-made "rain heavy" plan, 2026-09-22); the amount
 # scales the intensity within it. amount, wetness, water:
 PURE_RAIN = {3: (0.15, 0.25, 0.30), 6: (0.30, 0.40, 0.60), 7: (0.45, 0.50, 0.80), 8: (0.60, 0.60, 1.0), 1: (0.85, 0.75, 1.0)}
@@ -1169,7 +1184,11 @@ def run_once(args, arm, run_idx):
         print(f"  !! the sim ran at {rt_med:.2f}x real time over {rt_laps} laps (CPU occupancy): "
               f"treat this race's timings as suspect")
     m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots", "fault", "csp", "human", "strategy", "fuel")}, sort_keys=True)
-    m["weather"] = args.weather or ""
+    # the EFFECTIVE state, not the request: "" used to cover a pinned 15/pureCtrl, a leaky leftover, a keyless stock
+    # machine and a career run alike, and the one file every scorer reads could not tell them apart (review 2026-10-10)
+    m["weather"] = args.weather or (("pinned:%s/%s" % (ini.get("LIGHTING", "__CM_WEATHER_TYPE", fallback=""),
+                                                        ini.get("LIGHTING", "__CM_WEATHER_CONTROLLER", fallback="")))
+                                    if ini.has_option("LIGHTING", "__CM_WEATHER_TYPE") else "stock")
     m["ambient_c"] = args.ambient if args.ambient is not None else DEFAULT_AMBIENT
     m["road_c"] = args.road if args.road is not None else DEFAULT_ROAD
     # AC's own fuel record (appended columns): tanks it emptied at a stop, AI stops it began, laps it fuelled the field
@@ -1218,7 +1237,7 @@ def main():
                     help="copy AC's race replay to the replay folder (~250 MB each). Off since the broadcast initiative was dropped")
     ap.add_argument("--keep-video", action="store_true",
                     help="do not swap AC's video settings to the lean harness profile for this run")
-    ap.add_argument("--weather", help="CSP weather type by name (clear, clouds, overcast, fog, mist, drizzle, lightrain, rain, heavyrain, storm, hot, cold, windy) or number; Pure must be the weather controller. 'stock' instead REMOVES the weather keys, matching an install with no weather controller (PC #2)")
+    ap.add_argument("--weather", help="CSP weather type by name (clear, clouds, overcast, fog, mist, drizzle, lightrain, rain, heavyrain, storm, hot, cold, windy) or number; Pure must be the weather controller. 'stock' instead REMOVES the weather keys - a stock race only on a machine with no weather controller installed; with Pure installed the engine stays Pure and only the label says stock")
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--label", default="A")
     ap.add_argument("--ai-aggression", type=int, default=0, help="race.ini AI_AGGRESSION for every AI car (0-100, default 0)")
@@ -1249,6 +1268,9 @@ def main():
     global SKIN_MATCH, AI_AGGRESSION
     SKIN_MATCH = getattr(args, "skin_match", None)
     AI_AGGRESSION = str(max(0, min(100, int(getattr(args, "ai_aggression", 0) or 0))))
+    if args.career and args.weather:
+        raise SystemExit("--weather is not applied to --career events: the career race.ini is built from the template and never "
+                         "pinned (build_race_ini returns before the weather block), so the row would be mislabelled. Drop one.")
     if not args.laps and not args.career:
         args.laps = 6
 

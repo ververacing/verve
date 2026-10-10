@@ -180,10 +180,10 @@ function T.buildReport(sim, ctx, completed, abortReason)
         stype = (tt == ac.SessionType.Race and 'race') or (tt == ac.SessionType.Qualify and 'qualify') or (tt == ac.SessionType.Practice and 'practice') or (tt == ac.SessionType.Hotlap and 'hotlap') or 'other'
     end)
     local wet = false; pcall(function() wet = (sim.rainIntensity or 0) > 0.05 end)
-    -- Which weather system this race actually ran under. Pure and Sol change how a car goes round, so a pace
-    -- figure from a Pure machine is not a pace figure from a stock one - and until now we could not see which
-    -- our OWN reports came from, let alone a player's (2026-10-10). Reads the session's race.ini, which is what
-    -- CSP itself keys on; an empty controller means CSP's built-in weather, as on a stock install.
+    -- Which weather system this race ACTUALLY ran under (Pure and Sol change how a car goes round). First the
+    -- session's race.ini request, which is what CSP keys on; with no key there, CSP uses its WeatherFX module
+    -- config, so report THAT - on a Pure install a missing key still means Pure, and a null here was being read
+    -- as "stock" (review 2026-10-10). The type falls back to the sim's own, set by the controller that ran.
     local wCtrl, wType = nil, nil
     pcall(function()
         local c = ac.INIConfig.raceConfig()
@@ -191,6 +191,16 @@ function T.buildReport(sim, ctx, completed, abortReason)
         wType = tonumber(c:get('LIGHTING', '__CM_WEATHER_TYPE', ''))
         if wCtrl == '' then wCtrl = nil end
     end)
+    if wCtrl == nil then
+        pcall(function()
+            local cfg = ac.INIConfig.cspModule(ac.CSPModuleID.WeatherFX)
+            local ctrl = cfg and tostring(cfg:get('BASIC', 'CONTROLLER', '')) or ''
+            local impl = cfg and tostring(cfg:get('BASIC', 'IMPLEMENTATION', '')) or ''
+            if ctrl ~= '' then wCtrl = ctrl .. ' (config)'
+            elseif impl ~= '' and impl ~= 'base' then wCtrl = impl .. ' (implementation)' end
+        end)
+    end
+    if wType == nil then pcall(function() wType = tonumber(sim.weatherType) end) end
     local fields = {
         '"install_id":' .. jstr(S.installId),
         '"verve_version":' .. jstr(T.VERSION),

@@ -209,14 +209,20 @@ function script.update(dt)
     if Harness then
         if not harnessApplied then
             harnessApplied = true
-            if type(Harness.settings) == 'table' then
-                for k, v in pairs(Harness.settings) do if DEFAULTS[k] ~= nil then G[k] = v end end   -- session only, never saved
+            -- a JSON number landing on a BOOLEAN switch is coerced (0 -> false, else true): Lua treats 0 as true, so
+            -- a queue row written in the numeric "0 = off" convention of the sibling switches was turning booleans
+            -- ON (review 2026-10-10, R.BG_ALL_GATE). Numbers onto numbers, strings onto strings pass through as before.
+            local function hv(dst, k, v)
+                if type(dst[k]) == 'boolean' and type(v) == 'number' then dst[k] = (v ~= 0) else dst[k] = v end
             end
-            if type(Harness.recovery) == 'table' then for k, v in pairs(Harness.recovery) do Recovery[k] = v end end
-            if type(Harness.racecraft) == 'table' then for k, v in pairs(Harness.racecraft) do Racecraft[k] = v end end
-            if type(Harness.fault) == 'table' then for k, v in pairs(Harness.fault) do Fault[k] = v end end
-            if type(Harness.human) == 'table' then for k, v in pairs(Harness.human) do Human[k] = v end end
-            if type(Harness.strategy) == 'table' then for k, v in pairs(Harness.strategy) do Strategy[k] = v end end
+            if type(Harness.settings) == 'table' then
+                for k, v in pairs(Harness.settings) do if DEFAULTS[k] ~= nil then hv(G, k, v) end end   -- session only, never saved
+            end
+            if type(Harness.recovery) == 'table' then for k, v in pairs(Harness.recovery) do hv(Recovery, k, v) end end
+            if type(Harness.racecraft) == 'table' then for k, v in pairs(Harness.racecraft) do hv(Racecraft, k, v) end end
+            if type(Harness.fault) == 'table' then for k, v in pairs(Harness.fault) do hv(Fault, k, v) end end
+            if type(Harness.human) == 'table' then for k, v in pairs(Harness.human) do hv(Human, k, v) end end
+            if type(Harness.strategy) == 'table' then for k, v in pairs(Harness.strategy) do hv(Strategy, k, v) end end
             if Diag and Harness.label then Diag.label = tostring(Harness.label) end
         end
         -- AC loads to a pre-session screen and waits for the Drive button; nothing (not even the AI grid)
