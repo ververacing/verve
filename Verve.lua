@@ -19,6 +19,7 @@ local Fault     = require('lib.fault')        -- who caused each contact, and th
 local Strategy  = require('lib.strategy')     -- planned manoeuvres (racecraft drives it; Verve owns the toggle + status)
 local Fuel      = require('lib.fuel')         -- timed races: AC's 1.2-lap AI fuel load and its empty-tank pit loop (G.timedFuel)
 local Ers       = require('lib.ers')          -- AI battery deployment, MGU-K (R.ERS_MODE; default 'off' = AC decides)
+local TyreHint  = require('lib.tyrehint')     -- cold-tyre AI tyre hint (R.COLD_TYRE; default 0 = AC's own)
 Racecraft.penCap = Fault.penCap            -- penalty throttle caps, read by racecraft's throttle setter (shared table)
 Fault.attach(Recovery.recentDrops, Feed.event)
 Racecraft.humanMv = Human.mv               -- (lib/human.lua H.MISTAKE_V2) a visible mistake's levers, applied by racecraft (shared table)
@@ -496,6 +497,7 @@ function script.update(dt)
     Troublespots.ENABLED = G.troubleSpots
     Troublespots.update(dt)
     pc('ers', Ers.update, sim, dt)   -- AI battery deployment (lib/ers.lua); returns at once while R.ERS_MODE is 'off'
+    pc('tyrehint', TyreHint.update, sim, dt)   -- cold-tyre AI tyre hint (lib/tyrehint.lua); returns at once while R.COLD_TYRE is 0
 
     if Diag then pcall(function()
         Diag.update(dt, {
