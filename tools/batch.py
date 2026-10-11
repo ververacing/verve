@@ -62,7 +62,18 @@ log_path = os.path.splitext(spec)[0] + ".log"
 lines = [l.strip() for l in open(spec, encoding="utf-8") if l.strip() and not l.strip().startswith("#")]
 with open(log_path, "a", encoding="utf-8") as log:
     log.write(f"=== batch start {time.strftime('%H:%M:%S')} ({len(lines)} steps)\n"); log.flush()
+    try:
+        import watchdog_ensure   # the temperature log + safety stop runs ALL the time (owner 2026-10-10); one stat per race
+    except Exception:  # noqa: BLE001
+        watchdog_ensure = None
     for n, args in enumerate(lines, 1):
+        if watchdog_ensure:
+            try:
+                st = watchdog_ensure.ensure()
+                if st != "running":
+                    log.write(f"=== {time.strftime('%H:%M:%S')}: temperature watchdog {st}\n"); log.flush()
+            except Exception:  # noqa: BLE001
+                pass
         # cool-down break: don't start the next run while the GPU hot spot is above COOL_C
         waited = 0
         while waited < 600:
