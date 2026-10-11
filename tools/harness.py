@@ -44,6 +44,10 @@ DEFAULT_AMBIENT, DEFAULT_ROAD = 26, 34   # AC's usual conditions, and what PC #2
 # The weather state this machine races on: CSP type 15 = Clear (ac.WeatherType) under pureCtrl. Pinned only where
 # that controller is installed; why, and the stock arm, are explained at the weather block in build_race_ini.
 DEFAULT_WEATHER_TYPE, DEFAULT_WEATHER_CONTROLLER = 15, "pureCtrl"
+# The launcher assists that change how a race runs, pinned every run (owner 2026-10-11): PC #2's cfg/assists.ini had FUEL_RATE=0
+# for weeks, so every PC #2 race ran at constant fuel weight and no car could run dry, and nobody saw it. A row's --assists still
+# wins key by key; the effective set goes to results.csv.
+PINNED_ASSISTS = {"FUEL_RATE": 1, "TYRE_WEAR": 1, "DAMAGE": 100}
 # Everything else that decides how a car goes round. It was all whatever Content Manager last left in race.ini,
 # differing silently between machines and between one batch and the next; DYNAMIC_TRACK is the one that matters as
 # much as temperature, because it decides how much rubber is down. Overridable per run with --condition.
@@ -980,7 +984,9 @@ def run_once(args, arm, run_idx):
     print(f"[{label} #{run_idx}] {ini.get('RACE', 'TRACK')} x{args.laps} laps, {ncars} cars, budget {budget:.0f}s")
 
     csp_restore = apply_csp_overrides(arm.get("csp") or {})
-    assists_bak = apply_assists(arm.get("assists") or {})
+    assists_eff = dict(PINNED_ASSISTS)
+    assists_eff.update(arm.get("assists") or {})
+    assists_bak = apply_assists(assists_eff)
     pure_bak = apply_pure_for_weather(getattr(args, "weather_type", None))
     t_launch = time.time()
     proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
@@ -1158,6 +1164,7 @@ def run_once(args, arm, run_idx):
         m = {"file": os.path.basename(diag), **{k: "" for k in keys}, "error": m["error"]}
     m["label"] = label
     m["run"] = run_idx
+    m["assists"] = json.dumps(assists_eff, sort_keys=True)
     m["finished"] = finished
     # exact lap times from AC itself (only when AC exited cleanly): AI best / median-of-best, player best
     best = best_laps_from_race_out(t_launch)
