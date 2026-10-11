@@ -71,13 +71,30 @@ def cpu_load():
         return -1
 
 
+def ours_running():
+    """Is one of OUR unattended runs alive? The owner's own race is not ours to kill - this stop path taskkills acs.exe, and on
+    2026-10-11 he was racing on this machine while the watchdog ran. Unknown -> treat as ours, i.e. behave as before."""
+    ps = ("Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' -and ($_.CommandLine -like '*batch.py*' "
+          "-or $_.CommandLine -like '*harness.py*' -or $_.CommandLine -like '*queue.py*') } | Measure-Object | "
+          "ForEach-Object { $_.Count }")
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=40).stdout
+        return int(out.strip().splitlines()[0]) > 0
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def stop_batch(reason):
+    ours = ours_running()
     with open(STOP, "w", encoding="utf-8") as f:
         f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {reason}\n")
+    if not ours:
+        return False   # nothing of ours is racing: log it, leave the machine alone
     ps = ("Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' -and ($_.CommandLine -like '*batch.py*' "
           "-or $_.CommandLine -like '*harness.py*' -or $_.CommandLine -like '*queue.py*') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }")
     subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True)
     subprocess.run(["taskkill", "/IM", "acs.exe", "/F"], capture_output=True)
+    return True
 
 
 def main():
@@ -103,8 +120,9 @@ def main():
         hot = hot + 1 if over else 0
         if hot >= HOT_SAMPLES and not stopped:
             stopped = True
-            line += f"  >> GPU hot spot {hot_c:.0f}C / CPU {cpu_c}C over limit for {HOT_SAMPLES} samples: STOPPING BATCH"
-            stop_batch(f"GPU hot {hot_c:.0f}C CPU {cpu_c}C")
+            killed = stop_batch(f"GPU hot {hot_c:.0f}C CPU {cpu_c}C")
+            line += (f"  >> GPU hot spot {hot_c:.0f}C / CPU {cpu_c}C over limit for {HOT_SAMPLES} samples: "
+                     + ("STOPPED THE BATCH" if killed else "CRITICAL - but no batch of ours is running, so nothing was killed"))
         with open(LOG, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
         time.sleep(INTERVAL)
