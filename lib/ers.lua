@@ -34,6 +34,10 @@ R.ERS_LO = 0.20      -- 'smart': below this battery fraction, drop to the most c
 R.ERS_HOLD = 2.0     -- s: minimum time between program changes on one car
 R.ERS_REC = -1       -- >= 0: force MGU-K recovery 0-10 on every AI hybrid (-1 = leave the car's own)
 R.ERS_SPLIT = 0      -- 1: only ODD-indexed AI cars get ERS_MODE; even ones keep AC's program as a same-race control
+R.ERS_AUTO_HI = 0.70 -- 'auto': a car whose battery averaged at least this on AC's own program through lap 1 deploys more
+                     -- (the 'smart' logic) from lap 2; below it the car keeps AC's program. Split races 2026-10-10: VRC 2026
+                     -- left ~83 % unused and gained 1.2 s/lap deploying more; the SF70H's own program already drains it
+                     -- (10-65 %) and gained nothing; RSS 2020 sat at 92-95 % and gained little either way.
                      -- (race-to-race noise is ~0.4 s at the front, larger than the effect being looked for)
 
 local info = {}      -- [car] = false (no programs to choose) | { id, n, hi, lo, def, t, byName }
@@ -86,7 +90,7 @@ end
 
 function E.update(sim, dt)
     local mode = R.ERS_MODE
-    local deliver = (mode == 'max' or mode == 'smart' or mode == 'race')
+    local deliver = (mode == 'max' or mode == 'smart' or mode == 'race' or mode == 'auto')
     local rl = tonumber(R.ERS_REC) or -1
     if not deliver and rl < 0 then return end
     acc = acc + (dt or 0)
@@ -106,6 +110,23 @@ function E.update(sim, dt)
                         want = f.top
                     elseif mode == 'race' then
                         want = f.race
+                    elseif mode == 'auto' then
+                        -- the per-car rule (owner yes 2026-10-11): watch the battery on AC's own program through lap 1,
+                        -- decide once at lap 2 - deploy more only where the car's program leaves the battery unused
+                        local lap = c.lapCount or 0
+                        if f.auto == nil then
+                            if lap >= 2 then
+                                f.auto = (f.kcN or 0) > 0 and (f.kcSum / f.kcN) >= (tonumber(R.ERS_AUTO_HI) or 0.7)
+                            elseif lap >= 1 then
+                                f.kcSum = (f.kcSum or 0) + (c.kersCharge or 0); f.kcN = (f.kcN or 0) + 1
+                            end
+                        end
+                        if f.auto then
+                            local st = (R.last and R.last[i] and R.last[i].state) or 0
+                            if (c.kersCharge or 1) < (tonumber(R.ERS_LO) or 0.2) then want = f.lo
+                            elseif st == 1 or st == 2 then want = f.atk
+                            else want = f.race end
+                        end   -- undecided, or decided 'keep': want stays f.def, AC's own program
                     else
                         local st = (R.last and R.last[i] and R.last[i].state) or 0
                         if (c.kersCharge or 1) < (tonumber(R.ERS_LO) or 0.2) then want = f.lo
@@ -131,6 +152,13 @@ end
 function E.target(i)
     local f = info[i]
     return (f and f.set) or -1
+end
+
+-- 'auto' decision for car i: true = deploys more, false = keeps AC's program, nil = not decided yet (or not a hybrid)
+function E.autoOf(i)
+    local f = info[i]
+    if f then return f.auto end
+    return nil
 end
 
 return E
