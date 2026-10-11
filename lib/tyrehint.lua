@@ -16,8 +16,12 @@ local R = require('lib.racecraft')
 local T = {}
 R.COLD_TYRE = 0      -- 0 = off. 0.15 = up to 15 % less assumed tyre grip at full coldness (harness A/B)
 R.COLD_SPAN = 40     -- degrees C below optimum for the full effect
+R.COLD_LAPS = 2      -- the cut applies only on a session's first COLD_LAPS laps and on an out-lap: tyres cold BY CIRCUMSTANCE.
+                     -- Against the data optimum all race it never ended where tyres never reach it - GT3 at Monza runs 72-80 C
+                     -- v 85-95 C, so the AI lost ~4 % grip all race (suite rc16a 2026-10-10: top-3 +3.0 s/lap)
 
-local base, cur = {}, {}   -- per car: its own ai.ini HINT, and what we last set (only cars we changed)
+local base, cur, outLap = {}, {}, {}   -- per car: its own ai.ini HINT, what we last set (only cars we changed), and the
+                                       -- lap count it left the pit lane on (its out-lap runs until the next line crossing)
 local acc = 0
 
 function T.update(sim, dt)
@@ -40,6 +44,11 @@ function T.update(sim, dt)
                 base[i] = 1.0
                 pcall(function() base[i] = ac.INIConfig.carData(i, 'ai.ini'):get('TYRES', 'HINT', 1.0) end)
             end
+            -- (R.COLD_LAPS) the window: the opening laps, or an out-lap (set every tick in the pit lane, so it holds the lap
+            -- count the car rejoins on; a count that went backwards is a new session and clears it)
+            local lapN = c.lapCount or 0
+            if c.isInPitlane then outLap[i] = lapN elseif outLap[i] and (lapN > outLap[i] or lapN < outLap[i] - 1) then outLap[i] = nil end
+            local inWindow = lapN < (tonumber(R.COLD_LAPS) or 2) or outLap[i] ~= nil
             local t, n, opt = 0, 0, 0
             for w = 0, 3 do
                 local wh = c.wheels[w]
@@ -49,7 +58,7 @@ function T.update(sim, dt)
                 end
             end
             if n > 0 and opt > 0 then
-                local cold = math.max(0, math.min(1, (opt - t / n) / span))
+                local cold = inWindow and math.max(0, math.min(1, (opt - t / n) / span)) or 0   -- outside it: the car's own hint
                 local want = base[i] * (1 - k * cold)
                 if math.abs(want - (cur[i] or base[i])) > 0.004 then
                     pcall(physics.setAITyresHint, i, want); cur[i] = want
