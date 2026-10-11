@@ -115,14 +115,22 @@ function E.update(sim, dt)
                     local rec = false
                     pcall(function() rec = (Recovery.stateOf(i) or {}).rec end)
                     if rec then want = f.def end           -- a car Verve is recovering keeps its own program
-                    if want ~= c.mgukDelivery and now - f.t >= (tonumber(R.ERS_HOLD) or 2) then
-                        pcall(physics.setMGUKDelivery, i, want); f.t = now
+                    -- compare with Verve's OWN last write: car.mgukDelivery does not follow physics.setMGUKDelivery
+                    -- (it keeps reading the starting program), so against it a hand-back to that program never fired
+                    if want ~= (f.set or c.mgukDelivery) and now - f.t >= (tonumber(R.ERS_HOLD) or 2) then
+                        pcall(physics.setMGUKDelivery, i, want); f.t = now; f.set = want
                     end
                 end
                 if rl >= 0 and c.mgukRecovery ~= math.floor(rl) then pcall(physics.setMGUKRecovery, i, math.floor(rl)) end
             end
         end
     end
+end
+
+-- the program Verve last set on car i (-1 = none yet / not a hybrid): what diag logs, since AC's own field never changes
+function E.target(i)
+    local f = info[i]
+    return (f and f.set) or -1
 end
 
 return E
