@@ -48,6 +48,40 @@ DEFAULT_WEATHER_TYPE, DEFAULT_WEATHER_CONTROLLER = 15, "pureCtrl"
 # for weeks, so every PC #2 race ran at constant fuel weight and no car could run dry, and nobody saw it. A row's --assists still
 # wins key by key; the effective set goes to results.csv.
 PINNED_ASSISTS = {"FUEL_RATE": 1, "TYRE_WEAR": 1, "DAMAGE": 100}
+
+# The CSP build and the AI-behaviour keys that shape how the AI drives, recorded in every row (owner 2026-10-11). On
+# 2026-10-11 two keys that exist on build 4169 and NOT on 3465 - NEW_LATERAL_GRIP_ESTIMATION and FIX_GRIP_MULT - halved
+# Imola repositions (52 -> 25) and moved the Monza star from median P10 to P1.5 on IDENTICAL Verve code, and nothing in
+# results.csv said which build a row came from. 29 of ~56 reporting community installs are on 3465, 5 on 4169, so the
+# build is not a detail: it decides whether a measurement describes what players get.
+AI_KEYS = ("NEW_LATERAL_GRIP_ESTIMATION", "FIX_GRIP_MULT", "FIX_UPSHIFT_THRESHOLD", "ACT_IMPATIENT", "CAUTIOUS_STEERING",
+           "REDUCE_STABILIZATION", "TRAJECTORIES_FOR_DUMMIES", "STOP_TELEPORTING_STUCK")
+
+
+def csp_stamp():
+    """-> (build, "KEY=value,..." for AI_KEYS as the race will actually see them: the CSP default, with any user override
+    on top). A missing key is reported as 'absent', which is what an older build looks like."""
+    build = ""
+    try:
+        # NOT configparser: data_manifest.ini has duplicate keys and a strict parser raises on it (tested 2026-10-11)
+        txt = open(os.path.join(AC_DIR, "extension", "config", "data_manifest.ini"), encoding="utf-8", errors="replace").read()
+        mb = re.search(r"^SHADERS_PATCH_BUILD\s*=\s*(\S+)", txt, re.M)
+        mv = re.search(r"^SHADERS_PATCH\s*=\s*(\S+)", txt, re.M)
+        build = "%s/%s" % (mb.group(1) if mb else "?", mv.group(1) if mv else "?")
+    except Exception:  # noqa: BLE001
+        pass
+    vals = {}
+    for path in (os.path.join(AC_DIR, "extension", "config", "new_behaviour.ini"),
+                 os.path.join(CSP_USER_CFG, "new_behaviour.ini")):      # the user file wins, as CSP reads it last
+        try:
+            ini = configparser.RawConfigParser(strict=False); ini.optionxform = str; ini.read(path, encoding="utf-8")
+            for k in AI_KEYS:
+                v = ini.get("AI_TWEAKS", k, fallback=None)
+                if v is not None:
+                    vals[k] = v.split(";")[0].strip()
+        except Exception:  # noqa: BLE001
+            pass
+    return build, ",".join("%s=%s" % (k, vals.get(k, "absent")) for k in AI_KEYS)
 # Everything else that decides how a car goes round. It was all whatever Content Manager last left in race.ini,
 # differing silently between machines and between one batch and the next; DYNAMIC_TRACK is the one that matters as
 # much as temperature, because it decides how much rubber is down. Overridable per run with --condition.
@@ -1165,6 +1199,7 @@ def run_once(args, arm, run_idx):
     m["label"] = label
     m["run"] = run_idx
     m["assists"] = json.dumps(assists_eff, sort_keys=True)
+    m["csp_build"], m["csp_ai"] = csp_stamp()
     m["finished"] = finished
     # exact lap times from AC itself (only when AC exited cleanly): AI best / median-of-best, player best
     best = best_laps_from_race_out(t_launch)
