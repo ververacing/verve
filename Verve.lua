@@ -268,7 +268,21 @@ function script.update(dt)
                 -- diag snapshot have not been written yet, so every tool that counts laps from them would
                 -- under-read the race by one (second test PC, 2026-09-24). The diag writes every 8 s, so clear that.
                 if harnessStopT == 0 then harnessStopT = os.clock() end
-                if os.clock() - harnessStopT >= 10 then
+                -- (STOP_WAIT, harness A/B) quit only once every car still racing has taken the flag, plus 3 s, at most
+                -- STOP_WAIT s after the leader's. A flat 10 s quit lands while the field is crossing the line: when a car
+                -- crosses at the moment AC shuts down, AC loses it (-1 in race_out's raceResult) and writes NO laps at all
+                -- (every -1 file has 0 laps, 18 of 1583; 20 % of stop-at-lap quits v 5 % when AC ends the race itself).
+                local waitMax, pending = tonumber(Racecraft.STOP_WAIT) or 0, false
+                if waitMax > 0 then
+                    for k = 0, simH.carsCount - 1 do
+                        local ck = ac.getCar(k)
+                        if ck and not ck.isRaceFinished and (ck.lapCount or 0) < Harness.stopAtLap and not ck.isRetired and not ck.isInPitlane
+                           and (ck.speedKmh or 0) > 5 then pending = true; break end   -- (a --stop-laps sprint: done = reached the stop lap)
+                    end
+                    if pending then Harness.doneT = nil elseif not Harness.doneT then Harness.doneT = os.clock() end
+                end
+                local held = os.clock() - harnessStopT
+                if held >= 10 and (waitMax <= 0 or held >= waitMax or (Harness.doneT and os.clock() - Harness.doneT >= 3)) then
                     harnessQuit = true
                     pcall(function() ac.log('Verve harness: stop-at-lap reached, shutting AC down (replay autosave)'); ac.shutdownAssettoCorsa() end)
                 end
