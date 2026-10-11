@@ -249,18 +249,22 @@ function F.update(dt, stats)
                     -- Consumers wanting lap TIMES must skip first:true; consumers counting laps can now count events.
                     -- (0.16) It carries AC's own time for that lap, lap_ms, as every later lap does (omitted when AC has none).
                     -- On a grid that sits before the timing line AC's first 'lap' can be the short run from the grid to it.
-                    local ms1 = 0
-                    pcall(function() local ac_c = ac.getCar(i); ms1 = (ac_c and ac_c.previousLapTimeMs) or 0 end)
-                    event(t, 'lap', string.format('"car":%d,"lap":1,"time_s":%.1f,"best":false,"first":true%s', i, lt,
-                        (type(ms1) == 'number' and ms1 > 0) and string.format(',"lap_ms":%d', ms1) or ''))
+                    local ms1, cuts1 = 0, -1
+                    pcall(function() local ac_c = ac.getCar(i); ms1 = (ac_c and ac_c.previousLapTimeMs) or 0; cuts1 = (ac_c and ac_c.lastLapCutsCount) or -1 end)
+                    event(t, 'lap', string.format('"car":%d,"lap":1,"time_s":%.1f,"best":false,"first":true%s%s', i, lt,
+                        (type(ms1) == 'number' and ms1 > 0) and string.format(',"lap_ms":%d', ms1) or '',
+                        (type(cuts1) == 'number' and cuts1 >= 0) and string.format(',"cuts":%d', cuts1) or ''))
                 end
                 if p.lap >= 1 and lt > 20 then
                     local best = lt < (bestLap[i] or 1e9)
                     if best then bestLap[i] = lt end
-                    local ms = 0   -- (0.15) AC's own lap time: time_s is the 1 Hz tick difference (x.1 s resolution)
-                    pcall(function() local ac_c = ac.getCar(i); ms = (ac_c and ac_c.previousLapTimeMs) or 0 end)
-                    event(t, 'lap', string.format('"car":%d,"lap":%d,"time_s":%.1f,"best":%s%s', i, p.lap + 1, lt, tostring(best),
-                        (type(ms) == 'number' and ms > 0) and string.format(',"lap_ms":%d', ms) or ''))
+                    local ms, cuts = 0, -1   -- (0.15) AC's own lap time: time_s is the 1 Hz tick difference (x.1 s resolution)
+                    -- (0.16) and AC's cut count for that lap: AC writes race_out with NO laps in 10-40 % of harness races, and
+                    -- then this event is the only lap record left - without the count a cut lap reads as a clean one.
+                    pcall(function() local ac_c = ac.getCar(i); ms = (ac_c and ac_c.previousLapTimeMs) or 0; cuts = (ac_c and ac_c.lastLapCutsCount) or -1 end)
+                    event(t, 'lap', string.format('"car":%d,"lap":%d,"time_s":%.1f,"best":%s%s%s', i, p.lap + 1, lt, tostring(best),
+                        (type(ms) == 'number' and ms > 0) and string.format(',"lap_ms":%d', ms) or '',
+                        (type(cuts) == 'number' and cuts >= 0) and string.format(',"cuts":%d', cuts) or ''))
                     if not overallBest or lt < overallBest then
                         overallBest = lt
                         if p.lap >= 2 then event(t, 'fastest_lap', string.format('"car":%d,"lap":%d,"time_s":%.1f', i, p.lap + 1, lt)) end
