@@ -47,7 +47,9 @@ def rules():
                 out.append((f"a barred term (.identity_deny line {n + 1})", re.compile(re.escape(t), re.I)))
                 n += 1
     # the public identity is allowed, so drop any rule that would match it
-    allowed = ("tcverve", "ververacing", "tc verve")
+    # the public identity is allowed, and so is the mandated commit attribution: a checker that flags every
+    # single commit message gets ignored, which is worse than no checker (caught on the first real push)
+    allowed = ("tcverve", "ververacing", "tc verve", "noreply@anthropic.com")
     keep = []
     for name, rx in out:
         if any(rx.search(a) for a in allowed):
@@ -85,6 +87,8 @@ def main():
         try:
             with open(f, encoding="utf-8", errors="replace") as fh:
                 for i, line in enumerate(fh, 1):
+                    if "noreply@anthropic.com" in line or line.lstrip().lower().startswith("co-authored-by:"):
+                        continue          # the required attribution, not an identity leak
                     for name, rx in rs:
                         if rx.search(line):
                             # never echo the match itself - say where and which rule
