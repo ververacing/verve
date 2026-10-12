@@ -132,14 +132,51 @@ def classify(path):
     return out
 
 
+_LABELS = None
+
+
+def labels_by_stem():
+    """{'20261012_071559': 'kxs_sgp_defaults_1'} from results.csv, which holds the diag filename AND the label.
+
+    Do NOT recover the label by splitting the filename on '_' and dropping a fixed number of parts: the TRACK name
+    can itself contain underscores, so singapore_2020 came back as '2020_kxs_sgp_defaults_1' and every join on it
+    silently missed (2026-10-12). results.csv pairs file with label exactly, so look it up.
+    """
+    global _LABELS
+    if _LABELS is None:
+        _LABELS = {}
+        try:
+            with io.open(os.path.join(HERE, "harness_results", "results.csv"), encoding="utf-8", errors="replace") as fh:
+                import csv
+                for r in csv.DictReader(fh):
+                    f, lab = r.get("file") or "", r.get("label") or ""
+                    b = os.path.basename(f)
+                    if b.startswith("diag_race_") and lab:
+                        _LABELS[b[len("diag_race_"):len("diag_race_") + 15]] = lab
+        except OSError:
+            pass
+    return _LABELS
+
+
 def label_for(stem):
-    pats = [os.path.join(VERVE, "diag_race_" + stem + "*"),
-            os.path.join(VERVE, "tools", "harness_results", "archive", "diag_race_" + stem + "*")]
-    for pat in pats:
+    hit = labels_by_stem().get(stem)
+    if hit:
+        return hit
+    # no results row (a race still running, or scored elsewhere): strip the track the diag header names, not a guess
+    for pat in (os.path.join(VERVE, "diag_race_" + stem + "*"),
+                os.path.join(VERVE, "tools", "harness_results", "archive", "diag_race_" + stem + "*")):
         for d in glob.glob(pat):
             b = os.path.basename(d).replace("diag_race_", "").replace(".jsonl", "")
-            parts = b.split("_")
-            return "_".join(parts[3:]) if len(parts) > 3 else b
+            try:
+                with io.open(d, encoding="utf-8", errors="replace") as fh:
+                    hdr = json.loads(fh.readline())
+                track = hdr.get("track") or ""
+            except (OSError, ValueError):
+                track = ""
+            rest = b[16:]                      # past '<date>_<time>_'
+            if track and rest.startswith(track.replace("/", "_") + "_"):
+                return rest[len(track.replace("/", "_")) + 1:]
+            return rest or b
     return stem
 
 
