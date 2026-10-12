@@ -23,6 +23,15 @@ WHAT IT IS FOR. Two standing uses, both pre-registered 2026-10-12:
      so it does not cancel, and every contact_events ratio is inflated in the ON arm's favour. The honest proximity
      measure is the ON-v-OFF ratio of the CAR-TO-CAR count on a matched pair.
 
+WHAT IT COUNTS, exactly - PC #2 guessed this wrong and was about to describe the column as de-duplicating:
+  - SLOT 0 IS EXCLUDED. It is the harness autopilot, not an AI car being measured, and it is the whole of the gap
+    between a raw record count and this one (1, 5, 0 and 13 records across four races). Nothing else is dropped
+    except a record with no numeric severity, which has never yet occurred.
+  - IT DOES NOT DE-DUPLICATE. The feed emits one incident record per CAR whose damage jumped, so a collision in which
+    both cars take damage appears twice, once from each side. Measured: 0-5 reciprocal pairs per race, roughly 5-10 %
+    of the car-to-car total. So the car-to-car figure is CAR-INVOLVEMENTS, not collisions - fine for an ON-v-OFF ratio
+    applied consistently, wrong if you call it "number of collisions". The pooled line prints the reciprocal count.
+
 Run tools/arm_check.py first: these numbers are only comparable between races with the same arm.
 """
 import collections
@@ -48,6 +57,8 @@ def read(path):
     """(solo severities, car-to-car severities, closing speeds, models by car index)."""
     solo, con, closing = [], [], []
     models = {}
+    raw = slot0 = 0
+    recs = []
     try:
         with io.open(path, encoding="utf-8", errors="replace") as fh:
             for line in fh:
@@ -67,7 +78,9 @@ def read(path):
                         if isinstance(c, dict) and "i" in c:
                             models[c["i"]] = c.get("model") or "?"
                 elif ty == "incident":
+                    raw += 1
                     if d.get("car") == 0:
+                        slot0 += 1
                         continue                      # slot 0 is the harness autopilot
                     sev = d.get("severity")
                     if not isinstance(sev, (int, float)):
@@ -76,12 +89,23 @@ def read(path):
                         solo.append(sev)
                     else:
                         con.append(sev)
+                        recs.append(d)
                         cl = d.get("closing")
                         if isinstance(cl, (int, float)):
                             closing.append(abs(cl))
     except OSError:
         return None
-    return solo, con, closing, models
+    # one collision seen from both sides: A names B in its contact list and B names A, within 2 s
+    pairs = 0
+    for a in recs:
+        for b in recs:
+            if b is a:
+                continue
+            ta, tb = a.get("t") or 0, b.get("t") or 0
+            if abs(ta - tb) <= 2 and b.get("car") in (a.get("contact") or [])                     and a.get("car") in (b.get("contact") or []):
+                pairs += 1
+                break
+    return solo, con, closing, models, raw, slot0, pairs
 
 
 def med(xs):
@@ -110,10 +134,10 @@ def main():
         r = read(p)
         if not r:
             continue
-        solo, con, closing, _ = r
+        solo, con, closing, _, raw, slot0, pairs = r
         if not solo and not con:
             continue
-        rows.append((lab, solo, con, closing))
+        rows.append((lab, solo, con, closing, raw, slot0, pairs))
     if not rows:
         print("incident_split: no %s feeds matched%s" % (track, " --label " + want if want else ""))
         return 1
@@ -123,12 +147,13 @@ def main():
           ("label", "inc", "solo", "contact", "solo%", "sevSolo", "sevCon", "closeCon"))
     tot = collections.Counter()
     ps, pc = [], []
-    for lab, solo, con, closing in rows:
+    for lab, solo, con, closing, raw, slot0, pairs in rows:
         n = len(solo) + len(con)
         print("  %-24s %6d %6d %7d %6.0f%% %8.0f %8.0f %9.0f"
               % (lab[:24], n, len(solo), len(con), 100.0 * len(solo) / max(n, 1),
                  med(solo), med(con), med(closing)))
         tot["n"] += n; tot["solo"] += len(solo); tot["con"] += len(con)
+        tot["raw"] += raw; tot["slot0"] += slot0; tot["pairs"] += pairs
         ps += solo; pc += con
     if len(rows) > 1 or "--pool" in sys.argv:
         print()
@@ -137,6 +162,11 @@ def main():
         print("  severity: solo median %.0f, heavy>=20 %.0f%% | car-to-car median %.0f, heavy>=20 %.0f%%"
               % (med(ps), heavy(ps), med(pc), heavy(pc)))
         print("  (a pooled severity can be one race: check the per-race rows before quoting it)")
+        print("  %d raw records, %d excluded as slot 0 (the harness autopilot, not an AI car); NOT de-duplicated -"
+              % (tot["raw"], tot["slot0"]))
+        print("  %d car-to-car records are one collision seen from both sides, so this column is CAR-INVOLVEMENTS,"
+              % tot["pairs"])
+        print("  not collisions. Consistent for an ON-v-OFF ratio; wrong to call a collision count.")
     return 0
 
 
