@@ -26,6 +26,10 @@ def metrics(diag):
             # measure that can be read against reality at all. `contacts` above is every touch, brushes included, and no
             # series publishes those: it is ON-v-OFF proximity evidence only, never a rate to score (LESSONS METHOD).
             "inc100": g("inc_per_car_100laps"), "inc": g("incidents", int), "inc01": g("incidents_lap0_1", int),
+            # inc100 is NOT comparable across race distances: it carries the opening lap's fixed cost, so the same cars read
+            # 7.65 over 12 laps and 3.7 over 50 (PC #2 GT3, 2026-10-11). inc100_l2 excludes laps 0-1 and IS the distance-stable
+            # rate - use it whenever two sets ran different lengths, or against any real-world figure whose distance is unknown.
+            "inc100_l2": g("inc_per_car_100laps_lap2plus"),
             "laps": g("leader_laps", int)}
 
 
@@ -41,7 +45,7 @@ def main():
         pairs.setdefault((track, i), {})[arm] = f
     if not pairs:
         print("no suite diags found for", prefix); return
-    keys = ["heavy80", "dead", "inc", "inc01", "inc100", "contacts", "medlap", "laps"]
+    keys = ["heavy80", "dead", "inc", "inc01", "inc100", "inc100_l2", "contacts", "medlap", "laps"]
     print(f"{'pair':16s} " + " ".join(f"{k+' on/off/d':>22s}" for k in keys))
     per_track = {}
     for (track, i), arms in sorted(pairs.items()):
@@ -80,6 +84,9 @@ def main():
         inc100_note = "  [sprint - read inc01, not this]" if sprint else ""
         verdict.append(f"inc/car/100laps: mean on-off {statistics.mean(ks['inc100']['d']):+.1f} (on mean "
                        f"{statistics.mean([d + o for d, o in zip(ks['inc100']['d'], ks['inc100']['off'])]):.1f})" + inc100_note)
+        verdict.append(f"inc/car/100laps LAP2+: mean on-off {statistics.mean(ks['inc100_l2']['d']):+.1f} (on mean "
+                       f"{statistics.mean([d + o for d, o in zip(ks['inc100_l2']['d'], ks['inc100_l2']['off'])]):.1f}) - the"
+                       f" distance-stable rate")
         verdict.append(f"contacts: mean on-off {statistics.mean(ks['contacts']['d']):+.1f} (brushes, no reference)")
         n = len(ks["dead"]["d"])
         print(f"{track} (n={n}{', informational' if n < 2 else ''}): " + " | ".join(verdict))
