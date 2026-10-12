@@ -574,6 +574,14 @@ telemetryCtx = function()
         if #v > 0 then table.sort(v); settings[#settings + 1] = string.format('"launcherAggr":%.3f', v[math.floor((#v + 1) / 2)]) end
     end)
     pcall(function() local f = Fuel.summary(); if f then settings[#settings + 1] = f end end)   -- (0.15.2) timed/lapped fuel work, if any
+    pcall(function()   -- (A2, 0.16) WHY each car was parked, as a {reason:count} tally in the settings blob - no schema change.
+        local t, out = {}, {}   -- the report has only ever carried retired_by_verve, a COUNT, so a player's "Verve retired 6 of my 7
+        for i, w in pairs(Recovery.parkWhy or {}) do   -- cars" could not be told from six genuine wrecks. Every community case that
+            if i ~= 0 and type(w) == 'string' then t[w] = (t[w] or 0) + 1 end   -- matters shows 0 incidents, so the REASON is the finding.
+        end
+        for w, c in pairs(t) do out[#out + 1] = string.format('"%s":%d', w, c) end
+        if #out > 0 then table.sort(out); settings[#settings + 1] = '"parkWhy":{' .. table.concat(out, ',') .. '}' end
+    end)
     local playerModel = ''; pcall(function() playerModel = ac.getCarID(0) or '' end)
     local cspBuild = nil; pcall(function() cspBuild = ac.getPatchVersionCode() end)
     return {
