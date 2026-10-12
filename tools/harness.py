@@ -1110,11 +1110,17 @@ def run_once(args, arm, run_idx):
                     break
             stopped_checks = stopped_checks + 1 if all_parked else 0      # a field stopped for 4 checks (40 s) is over, logger or not (point-to-point finish)
             lap_done = (leader_lap > args.laps) if not getattr(args, "minutes", 0) else False   # timed: the flag is 'all parked'
-            dead_log = bool(not getattr(args, "minutes", 0) and getattr(args, "laps", 0)
-                            and age > DIAG_DEAD_S and leader_lap >= args.laps)
-            if lap_done or dead_log or (getattr(args, "stop_laps", 0) and leader_lap >= args.stop_laps) or (all_parked and (age > 40 or stopped_checks >= 4) and leader_lap >= 1):
+            dead_log = bool(not getattr(args, "minutes", 0) and age > DIAG_DEAD_S and leader_lap >= 1)
+            at_distance = bool(getattr(args, "laps", 0) and leader_lap >= args.laps)
+            if dead_log and not at_distance:
+                # the app stopped well before the distance (a Lua error mid-race, CSP dropping the app): no further
+                # data can arrive and nothing will close AC, so take what there is rather than wait out the budget
+                print(f"  !! the diagnostics have been quiet {age:.0f} s at lap {leader_lap}/{args.laps} - the app stopped; closing AC and scoring what there is")
+                quiet_finish = True
+                break
+            if lap_done or (dead_log and at_distance) or (getattr(args, "stop_laps", 0) and leader_lap >= args.stop_laps) or (all_parked and (age > 40 or stopped_checks >= 4) and leader_lap >= 1):
                 finished = True
-                quiet_finish = dead_log and not lap_done
+                quiet_finish = dead_log and at_distance and not lap_done
                 if quiet_finish:
                     print(f"  !! lap {leader_lap}/{args.laps} reached and the diagnostics have been quiet {age:.0f} s, but AC never quit - closing it")
                 else:
