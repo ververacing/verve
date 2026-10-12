@@ -36,7 +36,10 @@ import subprocess
 import sys
 import time
 
-AC_DIR = r"C:\Program Files (x86)\Steam\steamapps\common\assettocorsa"
+# The game folder, DERIVED, never written down: a literal path is an identity leak (tools/leak_check.py) and is
+# wrong on every machine but this one. This file is <AC>/apps/lua/Verve/tools/harness.py.
+_TOOLS = os.path.dirname(os.path.abspath(__file__))
+AC_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(_TOOLS))))   # Verve -> lua -> apps -> AC
 DOCS = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa")
 CFG = os.path.join(DOCS, "cfg")
 RACE_INI = os.path.join(CFG, "race.ini")
