@@ -30,3 +30,6 @@ tools/verve_driver_profiles.csv
 tools/raw_*.csv
 tools/gen_drivers.py
 roster_names*.csv
+
+# never commit the identity deny-list (tools/leak_check.py reads it; it holds the barred terms)
+tools/.identity_deny
