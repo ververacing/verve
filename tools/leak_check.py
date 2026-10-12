@@ -47,9 +47,11 @@ def rules():
                 out.append((f"a barred term (.identity_deny line {n + 1})", re.compile(re.escape(t), re.I)))
                 n += 1
     # the public identity is allowed, so drop any rule that would match it
-    # the public identity is allowed, and so is the mandated commit attribution: a checker that flags every
-    # single commit message gets ignored, which is worse than no checker (caught on the first real push)
-    allowed = ("tcverve", "ververacing", "tc verve", "noreply@anthropic.com")
+    # The public identity is allowed. The commit attribution is NOT listed here: a rule is dropped when it matches
+    # anything in this tuple, and the email-address rule matches an email address - so putting one here deletes
+    # email detection altogether. It cost me a self-test to see that. Attribution is skipped per LINE instead.
+
+    allowed = ("tcverve", "ververacing", "tc verve")
     keep = []
     for name, rx in out:
         if any(rx.search(a) for a in allowed):
