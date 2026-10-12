@@ -18,9 +18,10 @@ import subprocess
 import sys
 import time
 
-REPO = r"C:\Users\Tyler\Desktop\verve-engineer"
+HOME = os.path.expanduser("~")          # derived, not written down: see tools/leak_check.py
+REPO = os.path.join(HOME, "Desktop", "verve-engineer")
 BRANCH = "claude/engineer-groundwork"
-DESK = r"C:\Users\Tyler\Documents\Assetto Corsa\verve_desk\pc2\eng_tool"
+DESK = os.path.join(HOME, "Documents", "Assetto Corsa", "verve_desk", "pc2", "eng_tool")
 WANTED = ("pyproject.toml", "src", "tests", "docs", "README.md")
 STAMP = "PROVENANCE.md"
 
