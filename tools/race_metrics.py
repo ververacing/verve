@@ -87,6 +87,11 @@ def metrics(path, skip_frozen=()):
             meds.append(statistics.median(times))
 
     classified = [c for c in last["grid"] if not c["ret"] and not c.get("park")]
+    # the cars that did not make it: retired, or more than a lap adrift at the flag. Named here so the two loss
+    # metrics below can ask what STATE they were in, not only how many there were.
+    grid_last = last.get("grid", [])
+    classified_ids = {c["i"] for c in classified}
+    lost_ids = {c["i"] for c in grid_last if c["i"] not in classified_ids}
     out = {
         "file": path.split("/")[-1].split("\\")[-1],
         "label": (hdr or {}).get("label"),
@@ -98,6 +103,14 @@ def metrics(path, skip_frozen=()):
         "within_1_lap": sum(1 for c in classified if c["lap"] >= ll - 1),
         "within_2_laps": sum(1 for c in classified if c["lap"] >= ll - 2),
         "retired_or_parked": n - len(classified),
+        # HOW A CAR IS ACTUALLY LOST - the thing the contact metrics cannot see. Of 9 cars lost across three career
+        # Verve-OFF races, SEVEN had damage 0 and suspension 0: they ran wide and AC retired them where they sat, and
+        # two of those races reported incidents = 0. BTeam replicated it on 3465 F1 with a car on damage 5, BELOW the
+        # 8 threshold. So "0 incidents" never means "clean race" - it means no DAMAGING contact, a different claim.
+        # `lat` is track-space x scaled by 100, read straight off the car position, so unlike `off` (Verve's own
+        # recovery state, silent when Verve is disabled) it works in BOTH arms. 150 = 1.5 track half-widths out.
+        "lost_off_surface": sum(1 for c in grid_last if c["i"] in lost_ids and abs(c.get("lat") or 0) >= 150),
+        "lost_undamaged": sum(1 for c in grid_last if c["i"] in lost_ids and (c.get("dmg") or 0) < 8),
         "incidents": len(inc),
         "incidents_lap0_1": sum(1 for l in inc if l <= 1),
         "incidents_low_speed": low,
