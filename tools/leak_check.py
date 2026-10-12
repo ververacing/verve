@@ -1,0 +1,107 @@
+"""Gate anything that is about to LEAVE this machine: does it carry the real name, an email, or a Windows path?
+
+    python tools/leak_check.py <file-or-dir> [...]      # exit 1 if anything is found
+    python tools/leak_check.py --list                   # show what it looks for, without the values
+
+The identity rule: the public identity is TC Verve / ververacing, and the real name, the old tags, the work email and
+Windows paths never appear in anything that leaves here - commits, issues, READMEs, changelogs, videos, and now the
+race transcripts we push to the engineer's repo.
+
+THIS FILE LIVES IN A PUBLIC REPO, so it cannot contain the strings it hunts for - writing them down here would leak
+exactly what it exists to prevent. Instead it derives them at runtime from the machine (the OS user name, the home
+directory) and matches generic shapes (any drive-letter path, any email address, any Users\\<name> fragment). Extra
+terms - the old tags, anything else the owner wants barred - go one per line in tools/.identity_deny, which is
+gitignored and never read aloud: the report says WHICH RULE matched and the line number, never the matched text.
+
+Written 2026-10-11, when the first race transcripts were about to be pushed to a repo. PC #2 checked its own output
+before letting it onto the shared desk; this is the same check, made repeatable and made part of the push.
+"""
+import os
+import re
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+DENY_FILE = os.path.join(HERE, ".identity_deny")
+TEXT_EXT = {".md", ".txt", ".json", ".jsonl", ".csv", ".lua", ".py", ".ini", ".yml", ".yaml", ".html", ".sh", ""}
+
+
+def rules():
+    """(name, compiled pattern) pairs. Values derived at runtime so none of them is written down here."""
+    out = [
+        ("a Windows absolute path", re.compile(r"\b[A-Za-z]:[\\/](?:Users|Program Files|Documents)", re.I)),
+        ("a Users\\<name> fragment", re.compile(r"\bUsers[\\/][A-Za-z0-9._-]+", re.I)),
+        ("an email address", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")),
+    ]
+    for var in ("USERNAME", "USER"):
+        v = (os.environ.get(var) or "").strip()
+        if len(v) >= 3:
+            out.append(("the OS user name", re.compile(r"\b" + re.escape(v) + r"\b", re.I)))
+    home = os.path.basename(os.path.expanduser("~")).strip()
+    if len(home) >= 3:
+        out.append(("the home directory name", re.compile(r"\b" + re.escape(home) + r"\b", re.I)))
+    if os.path.isfile(DENY_FILE):
+        n = 0
+        for line in open(DENY_FILE, encoding="utf-8", errors="replace"):
+            t = line.strip()
+            if t and not t.startswith("#"):
+                out.append((f"a barred term (.identity_deny line {n + 1})", re.compile(re.escape(t), re.I)))
+                n += 1
+    # the public identity is allowed, so drop any rule that would match it
+    allowed = ("tcverve", "ververacing", "tc verve")
+    keep = []
+    for name, rx in out:
+        if any(rx.search(a) for a in allowed):
+            continue
+        keep.append((name, rx))
+    return keep
+
+
+def files_of(paths):
+    for p in paths:
+        if os.path.isdir(p):
+            for root, _, names in os.walk(p):
+                for n in names:
+                    if os.path.splitext(n)[1].lower() in TEXT_EXT:
+                        yield os.path.join(root, n)
+        elif os.path.isfile(p):
+            yield p
+
+
+def main():
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    rs = rules()
+    if "--list" in sys.argv:
+        print("leak_check looks for:")
+        for name, _ in rs:
+            print("  -", name)
+        print(f"\nextra terms: {'yes' if os.path.isfile(DENY_FILE) else 'none'} (tools/.identity_deny, gitignored)")
+        return 0
+    if not args:
+        print(__doc__.strip().splitlines()[2])
+        return 2
+    hits = checked = 0
+    for f in files_of(args):
+        checked += 1
+        try:
+            with open(f, encoding="utf-8", errors="replace") as fh:
+                for i, line in enumerate(fh, 1):
+                    for name, rx in rs:
+                        if rx.search(line):
+                            # never echo the match itself - say where and which rule
+                            # the last two path parts only: relpath can climb out of cwd and print the very
+                            # Users\<name> fragment this tool exists to catch, and this output gets pasted about
+                            short = os.path.join(os.path.basename(os.path.dirname(f)), os.path.basename(f))
+                            print(f"  LEAK  {short}:{i}  <- {name}")
+                            hits += 1
+                            break
+        except OSError as e:
+            print(f"  (unreadable: {f}: {e})")
+    if hits:
+        print(f"\nleak_check: {hits} line(s) in {checked} file(s) must be fixed before this leaves the machine")
+        return 1
+    print(f"leak_check: {checked} file(s) clean")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
