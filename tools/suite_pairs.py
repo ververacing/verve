@@ -26,9 +26,11 @@ def metrics(diag):
             # measure that can be read against reality at all. `contacts` above is every touch, brushes included, and no
             # series publishes those: it is ON-v-OFF proximity evidence only, never a rate to score (LESSONS METHOD).
             "inc100": g("inc_per_car_100laps"), "inc": g("incidents", int), "inc01": g("incidents_lap0_1", int),
-            # inc100 is NOT comparable across race distances: it carries the opening lap's fixed cost, so the same cars read
-            # 7.65 over 12 laps and 3.7 over 50 (PC #2 GT3, 2026-10-11). inc100_l2 excludes laps 0-1 and IS the distance-stable
-            # rate - use it whenever two sets ran different lengths, or against any real-world figure whose distance is unknown.
+            # inc100 is NOT comparable across race distances: it carries the opening lap's cost, so the same cars read 7.65
+            # over 12 laps and 3.70 over 50 (PC #2 GT3, 2026-10-11). inc100_l2 drops laps 0-1, which is better but still NOT
+            # distance-free: measured directly, the same field runs 6.10 lap-2+ over 12 laps and 3.20 over 50 - the rate itself
+            # halves as the field spreads. What IS stable is the laps-0-1 cost per car (0.308 and 0.314 in those two races), so
+            # compare opening laps on inc01 and quote any lap-2+ rate WITH its race distance attached.
             "inc100_l2": g("inc_per_car_100laps_lap2plus"),
             "laps": g("leader_laps", int)}
 
