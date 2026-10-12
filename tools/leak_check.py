@@ -60,15 +60,30 @@ def rules():
     return keep
 
 
-def files_of(paths):
+def files_of(paths, unresolved=None):
+    """Yield the files to scan. A path that resolves to NOTHING is recorded in `unresolved`, never ignored.
+
+    It used to be silently skipped, which made the tool able to say "clean" about files it never opened:
+    one real file plus two bogus paths reported "1 file(s) clean", and a path mangled by shell word-splitting
+    reported "0 file(s) clean" with exit 0 - a vacuous pass. PC #2 hit exactly that composing this tool into a
+    ledger stamper (2026-10-12): unquoted paths containing "Assetto Corsa" split, nothing resolved, and the
+    wrapper minted a PASS for an unexamined file. A gate that cannot tell "I checked these and they are clean"
+    from "I checked nothing" is not a gate.
+    """
     for p in paths:
         if os.path.isdir(p):
+            found = False
             for root, _, names in os.walk(p):
                 for n in names:
                     if os.path.splitext(n)[1].lower() in TEXT_EXT:
+                        found = True
                         yield os.path.join(root, n)
+            if not found and unresolved is not None:
+                unresolved.append(p + "  (directory, no scannable files in it)")
         elif os.path.isfile(p):
             yield p
+        elif unresolved is not None:
+            unresolved.append(p)
 
 
 def main():
@@ -84,7 +99,8 @@ def main():
         print(__doc__.strip().splitlines()[2])
         return 2
     hits = checked = 0
-    for f in files_of(args):
+    unresolved = []
+    for f in files_of(args, unresolved):
         checked += 1
         try:
             with open(f, encoding="utf-8", errors="replace") as fh:
@@ -104,6 +120,25 @@ def main():
             print(f"  (unreadable: {f}: {e})")
     if hits:
         print(f"\nleak_check: {hits} line(s) in {checked} file(s) must be fixed before this leaves the machine")
+        return 1
+    # A clean verdict must say what it examined. Refuse one that covers less than it was asked about, or nothing
+    # at all - otherwise the tool mints a pass for files it never opened (see files_of).
+    if unresolved:
+        print(f"\nleak_check: REFUSING A VERDICT - {len(unresolved)} of {len(args)} path(s) resolved to no file:")
+        for p in unresolved[:10]:
+            # the last two parts only, as everywhere else here: this output gets pasted about, and a tool whose
+            # job is keeping absolute paths out of shared text must not print them in its own refusal. The first
+            # version of this line used `os.sep in p`, which is '\\' on Windows and so never matched a path the
+            # shell had handed over with forward slashes - and it printed the full path (2026-10-12).
+            parts = p.replace("\\", "/").rstrip("/").split("/")
+            print("    " + "/".join(parts[-2:]) if len(parts) > 1 else "    " + p)
+        if len(unresolved) > 10:
+            print(f"    ... and {len(unresolved) - 10} more")
+        print(f"  {checked} file(s) were clean, but this is NOT a pass for the {len(args)} path(s) given."
+              "  Usually shell word-splitting on a path with a space - quote it.")
+        return 1
+    if not checked:
+        print("\nleak_check: REFUSING A VERDICT - nothing was examined. 'clean' would be vacuously true.")
         return 1
     print(f"leak_check: {checked} file(s) clean")
     return 0
