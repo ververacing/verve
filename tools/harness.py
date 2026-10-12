@@ -1077,11 +1077,18 @@ def run_once(args, arm, run_idx):
         # menu, so that signal never fires in an unattended run): the leader has completed all the laps,
         # or every car is stationary in the pits and the logger has gone quiet.
         stalled = False
+        quiet_finish = False
         stopped_checks = 0
         # A race that never starts (CSP "App Verve is not allowed to load", a Lua compile error, AC's start
         # lights never showing) used to be waited out for its whole budget and scored "frozen 20" - 24 minutes
         # lost per event on PC #2, 2026-09-24. If no car has moved STALL_S after the diag opened, it is over.
         STALL_S = 150
+        # A race that finished but never quit: Verve's graceful shutdown does not fire, the diagnostics stop on
+        # the leader's last lap, and neither "leader_lap > laps" nor "all parked" can ever come true - the run then
+        # waits out its whole budget (PC #2, Barcelona 12 laps, 2026-10-11: finished 17:17, still up 15 min later;
+        # on a 53-lap row that is three hours of the night). A logger silent this long with the leader already on
+        # the final lap is a finished race, so close it. Lap races only: a timed race has no last lap to test.
+        DIAG_DEAD_S = 150
         t_diag0, moved = None, False
         while time.time() - t_launch < budget:
             time.sleep(10)
@@ -1103,13 +1110,19 @@ def run_once(args, arm, run_idx):
                     break
             stopped_checks = stopped_checks + 1 if all_parked else 0      # a field stopped for 4 checks (40 s) is over, logger or not (point-to-point finish)
             lap_done = (leader_lap > args.laps) if not getattr(args, "minutes", 0) else False   # timed: the flag is 'all parked'
-            if lap_done or (getattr(args, "stop_laps", 0) and leader_lap >= args.stop_laps) or (all_parked and (age > 40 or stopped_checks >= 4) and leader_lap >= 1):
+            dead_log = bool(not getattr(args, "minutes", 0) and getattr(args, "laps", 0)
+                            and age > DIAG_DEAD_S and leader_lap >= args.laps)
+            if lap_done or dead_log or (getattr(args, "stop_laps", 0) and leader_lap >= args.stop_laps) or (all_parked and (age > 40 or stopped_checks >= 4) and leader_lap >= 1):
                 finished = True
-                # let Verve close AC itself (replay autosave); fall back to the kill after 90 s
-                for _ in range(18):
-                    if proc.poll() is not None:
-                        break
-                    time.sleep(5)
+                quiet_finish = dead_log and not lap_done
+                if quiet_finish:
+                    print(f"  !! lap {leader_lap}/{args.laps} reached and the diagnostics have been quiet {age:.0f} s, but AC never quit - closing it")
+                else:
+                    # let Verve close AC itself (replay autosave); fall back to the kill after 90 s
+                    for _ in range(18):
+                        if proc.poll() is not None:
+                            break
+                        time.sleep(5)
                 break
     finally:
         restore_pure(pure_bak)
@@ -1201,6 +1214,7 @@ def run_once(args, arm, run_idx):
     m["assists"] = json.dumps(assists_eff, sort_keys=True)
     m["csp_build"], m["csp_ai"] = csp_stamp()
     m["finished"] = finished
+    m["quiet_finish"] = 1 if quiet_finish else ""
     # exact lap times from AC itself (only when AC exited cleanly): AI best / median-of-best, player best
     best = best_laps_from_race_out(t_launch)
     ai_best = sorted(v for k, v in best.items() if k != 0)
