@@ -14,6 +14,10 @@ import re
 import statistics
 import subprocess
 import sys
+import time
+
+
+LIVE_S = 90          # a diag written this recently belongs to a race still running: scoring it reads a partial result
 
 
 def metrics(diag):
@@ -32,7 +36,7 @@ def metrics(diag):
             # halves as the field spreads. What IS stable is the laps-0-1 cost per car (0.308 and 0.314 in those two races), so
             # compare opening laps on inc01 and quote any lap-2+ rate WITH its race distance attached.
             "inc100_l2": g("inc_per_car_100laps_lap2plus"),
-            "laps": g("leader_laps", int)}
+            "laps": g("leader_laps", int), "age": time.time() - os.path.getmtime(diag)}
 
 
 def main():
@@ -57,16 +61,24 @@ def main():
         # A race that ended early (the game killed, a power cut, a quit-hang) is not a measurement, and pooling one into
         # the per-track mean silently poisons the verdict: rc16b_mon_on_1 died at lap 4 of 12 and dragged the Monza pace
         # mean to +2.0 s when its own redone pair read +0.0 (2026-10-11). Report such a pair, never average it in.
-        short = on["laps"] < 0.8 * off["laps"] or off["laps"] < 0.8 * on["laps"]
+        # A race still in progress reads as a short one - I scored a live Monza row as "4 of 12 laps" and nearly
+        # reported a cold-tyre crash that was simply the race being on lap 4 at the time (2026-10-11 20:45).
+        live = min(on["age"], off["age"]) < LIVE_S
+        short = not live and (on["laps"] < 0.8 * off["laps"] or off["laps"] < 0.8 * on["laps"])
         row = f"{track}_{i:<12} "
         for k in keys:
             d = on[k] - off[k]
             row += f"{on[k]:>7.1f}/{off[k]:>6.1f}/{d:>+6.1f} "
-            if short:
+            if short or live:
                 continue
             per_track.setdefault(track, {}).setdefault(k, {"d": [], "off": []})
             per_track[track][k]["d"].append(d); per_track[track][k]["off"].append(off[k])
-        print(row + (f" SHORT: {on['laps']} v {off['laps']} laps - left out of the track mean" if short else ""))
+        note = ""
+        if live:
+            note = f" LIVE: still racing ({on['laps']} v {off['laps']} laps so far) - not scored"
+        elif short:
+            note = f" SHORT: {on['laps']} v {off['laps']} laps - left out of the track mean"
+        print(row + note)
     print()
     for track, ks in per_track.items():
         verdict = []
