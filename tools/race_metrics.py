@@ -269,7 +269,10 @@ REALITY = {
     "nascar":    {"spread_pct": 1.5,  "dnf_pct": 10, "inc_per_car_100laps": 8,  "lead_changes_per_100laps": 30},
     "default":   {"spread_pct": 3.5,  "dnf_pct": 10, "inc_per_car_100laps": 10, "lead_changes_per_100laps": 6},
 }
-MODEL_CLASS_HINTS = [("gt3", "gt"), ("gt2", "gt"), ("gte", "gt"), ("ts040", "prototype"), ("919", "prototype"), ("r18", "prototype"),
+# "gt4" was missing, so a Cayman GT4 field matched nothing and fell through to the default reference of 10 instead of
+# gt's 8 (BTeam, mixed-class scoring, 2026-10-11). Note this only fixes a SINGLE-class GT4 race: a mixed GT3+GT4 grid
+# still gets ONE label from the majority vote below, which is why a mixed field must be split per car instead.
+MODEL_CLASS_HINTS = [("gt4", "gt"), ("gt3", "gt"), ("gt2", "gt"), ("gte", "gt"), ("ts040", "prototype"), ("919", "prototype"), ("r18", "prototype"),
                      ("962", "prototype"), ("787", "prototype"), ("tcr", "touring"), ("cup", "touring"), ("dtm", "touring"), ("evo2", "touring"), ("155", "touring"),
                      ("f1", "formula"), ("formula_hybrid", "formula"), ("sf70", "formula"), ("w09", "formula"), ("renault_r2", "formula"), ("redbull", "formula"),
                      ("fw26", "formula"), ("tatuus", "formula_jr"), ("formularenault", "formula_jr"), ("gokart", "kart"), ("kart", "kart"),
