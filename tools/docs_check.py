@@ -85,8 +85,22 @@ if mtime(STATE) and time.time() - mtime(STATE) > 24 * 3600:
 if os.path.isdir(os.path.join(DOCS, ".git")):
     dirty = git("status", "--porcelain", cwd=DOCS).strip()
     last = git("log", "-1", "--format=%ct", cwd=DOCS).strip()
+    # An uncommitted docs change is drift THE MOMENT IT EXISTS - decision 0019 says write it when it happens, never
+    # batched - so this is not conditional on when the last commit was. It used to be: the test was `dirty AND the
+    # last commit is over 24 h old`, which made the guard WEAKER the more diligently the folder was committed, and
+    # could essentially never fire while the daily routine was being followed. On 2026-10-13 it duly reported "docs
+    # current" with a just-written LESSONS line sitting uncommitted, while check 6 - the same property, guarded
+    # without a time clause, two lines below - correctly flagged an uncommitted backlog.md in the same run.
+    # Two checks for one property should not disagree, and the strict one was the one that worked.
+    if dirty:
+        # Take the path as the field AFTER the status code, not as a fixed offset: `dirty` has already been
+        # .strip()ed above, so the first line has lost the leading space of " M path" and a flat l[3:] ate a
+        # character off it - the first report this produced named "ESSONS.md". Check 6 uses the same offset and is
+        # correct only because it never strips the whole blob first.
+        flags.append("docs/ has uncommitted changes - commit the docs folder: "
+                     + ", ".join(l.strip().split(None, 1)[-1] for l in dirty.splitlines()[:5]))
     if dirty and last and time.time() - int(last) > 24 * 3600:
-        flags.append("docs/ has uncommitted changes and no docs commit in over 24 h - commit the docs folder")
+        flags.append("docs/ ALSO has had no commit in over 24 h - the daily docs commit was missed")
 
 # 6. the living documents are versioned AND committed
 LIVING = ["racecraft/state.md", "racecraft/backlog.md", "racecraft/reality.md",
