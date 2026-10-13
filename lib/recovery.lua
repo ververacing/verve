@@ -205,21 +205,15 @@ R.stallRestartN = 0
 R.DROP_MAX_PER_CAR = 6     -- repositions per car per race; past it the car is AC's (Imola F3 2026-09-21: 92 drops in 4 laps)
 R.DROP_SAME_M = 200        -- two drops within this many metres = the same CORNER (the gate scatters requests 50-150 m; 60 missed most repeats, Imola 2026-09-21)...
 R.DROP_SKIP_M = 150        -- ...the next one goes this much further along the track (past the corner it cannot take)
-local dropFailed = {}      -- cars whose last reposition did NOT rejoin: no second drop -- they retire (R.DROP_FAIL_CLEAR lifts it)
+local dropFailed = {}      -- cars whose last reposition did NOT rejoin: no second drop -- they retire
 -- (DROP_RETRY and OW_CLEAR lived here until 2026-09-24. Retrying a failed reposition made the rate WORSE
 -- (75.0% -> 66.7% over three pairs at Baku) and extra clearance for open-wheel cars did nothing (76.4% vs
 -- 75.0%, cars lost unchanged) - and the second test PC then showed the class effect was the tracks: F1 repositioned 15/16
 -- at Monza against GT3 7/7. Both removed rather than left switched off: dead switches cost upvalue headroom
 -- on a module three candidates from LuaJIT's limit, and this one carried two real bugs of its own.)
 R.dropN, R.dropOK = 0, 0   -- session tally (for the UI / diagnostics)
-R.dropVoid = 0             -- attempts superseded by a later drop of the same car before they were judged (review 2026-10-04)
 R.DROP_RATE_V2 = true      -- DEFAULT 0.14.4; switch-off rate over JUDGED drops of cars undamaged at the drop (false = dropOK/dropN, which counts
 R.DROP_RATE_SUSP = 0.20    -- pending drops and bent-suspension crawlers as failures: 4 false switch-offs in 535 races, 2026-09-25)
-R.DROP_ROLL = 0            -- >0: a repositioned car that has covered THIS fraction of a lap and is still moving counts as
-                           -- rejoined even if it never passed DROP_OK_SPEED. A car under way on bent suspension HAS rejoined;
-                           -- SUSP_FIX / SUSP_LIMP then decide whether it pits or retires, which is what real racing does. Today
-                           -- the flat 60 km/h test calls it a failure, which also bars it from any further reposition that race.
-R.DROP_ROLL_SPEED = 10     -- ...and is still moving at least this fast, so a car that rolled to a stop is not excused.
 R.rateOK, R.rateN = 0, 0   -- the V2 tally (judged, undamaged at the drop)
 R.TEMP_WHEELS = { 0, 1, 2, 3 }   -- DEFAULT 0.14.4; tyre restore: a 4-list {FL,FR,RL,RR} of the wheel argument to use (false = WHEEL_BITS, which restores
                            -- 2 of 4 wheels - front-left always 12 C after a drop, 2026-09-25). Candidates {0,1,2,3}, {1,2,4,8}.
@@ -242,26 +236,10 @@ R.GATE_FIRST_M = 10000     -- DEFAULT 0.14.7 (0.14.6: 1000, 0.14.5: 500): every 
                            -- back, else don't gate. AC credits the lap only if the car passes split 1 after its last teleport:
                            -- sector-1 landings 1039/1052 counted, sector 2 (the 'back' gate) 19/1865, last sector 0/80 (2026-09-26).
 R.GATE_FIRST_CAP = false   -- false = 0.14.5. true: a landing in the LAST sector (at or past the last intermediate split) is never gated back
-R.JAM_AHEAD_M = 0          -- >0 (m): a landing is NOT safe while R.JAM_N+ cars crawl (< R.JAM_KMH) on the road within this far AHEAD of it.
-                           -- Singapore 2026-10-10: a lap-0 crash jammed Stamford Road; the gate dropped each jammed car ~420 m upstream
-                           -- and dropSafe (blind to a slow car AHEAD) let it go, so they re-entered the jam at ~150 km/h - 82 contacts with
-                           -- Verve on v 24 off. Blocked here, the car HOLDS (the existing traffic wait, capped by RESCUE_FORCE_T) instead.
-R.JAM_N = 2                -- with JAM_AHEAD_M: this many crawling cars ahead make a jam
-R.JAM_KMH = 40             -- with JAM_AHEAD_M: below this a car on the road ahead counts as jammed
                            -- to split 1, however big GATE_FIRST_M. A trade, not a fix: gated, it becomes a sector-1 landing (1039/1052 credited)
                            -- for up to GATE_FIRST_M + walk + stagger of road; left there it keeps the road and likely loses the lap (last
                            -- sector 0/80); unmeasured either way. Fires only where last split - split 1 < GATE_FIRST_M: at 500 m none of the
                            -- 12 raced layouts (shortest Portland l1, ~650 m); at 1000-1500 m Portland, Mosport DDT, Brands GP (2026-09-26)
-R.GATE_STAG_ALL = 0        -- TEST SWITCH, a MODE. 0 = today. 1 = stagger the WALK'S START (tested 8 Oct: it does not
-                           -- work - landings still converged to 303-305 of 1000, ~10 m, because the walk then finds the
-                           -- SAME straight spot whatever point it starts from). 2 = offset AFTER the walk has chosen the
-                           -- spot, which is what the pre-V2 code did and what actually separates cars. Original note: The per-car 0-45 m stagger is applied only on the GATE-FIRST
-                           -- path (`first`), which needs GATE_FIRST_M > 0, a grid before the timing line AND a landing near split 1.
-                           -- On the ORDINARY gate path stag stays 0 and the straight-walk below is deterministic, so EVERY gated car
-                           -- lands on the SAME spline: PC #2 put 3 cars on spline 0.305 at lat +0.20 in one instant (8 Oct) and every
-                           -- imola reposition landed at 0.299-0.311 wherever the car had stopped. The walk's own comment already names
-                           -- the hazard ("one spot for a knot stacks them"); it was just never wired into the non-first path.
-                           -- true = stagger every gated drop. A/B first; default only if it wins.
 R.GATE_WALK_V2 = true      -- DEFAULT 0.14.6; false = 0.14.5. true: a gate-first drop starts its walk back for a straight at (margin + this car's 0-45 m
                            -- stagger), so the straightness test and the stop-at-the-line guard judge the real landing spot; 0.14.5 walks
                            -- from the margin and subtracts the stagger afterwards, unchecked: it can land in a corner exit (review 2026-09-26).
@@ -271,9 +249,6 @@ R.GATE_FAIL_RETRY = true   -- DEFAULT 0.14.8. (owner's 30-lap Baku race 2026-09-
                            -- drops; its next drop goes back where it originally stopped, ungated - it loses the lap, not the race.
                            -- Baku's split 1 is the castle entry: 27 of 35 drops landed there, one failed drop set dropFailed and
                            -- the car's next stop parked it 'hopeless' (7 cars). One retry per car; a second failure is final.
-R.dropPend = {}            -- [i] = os.clock() of this car's reposition while the judge has not ruled on it (nil once it has).
-                           -- Read by racecraft through stateOf().dropPending: a car whose reposition has not proven itself yet
-                           -- is still getting back up to speed, even though recT (and so .rec) is already 0 after the teleport.
 R.gateRetry = {}           -- [i] = where the car stopped before its failed gated drop (number); false once the retry is spent
 R.gateRetryT = {}          -- [i] = when that retry was granted: it is for the car's NEXT stop, not one laps later
 R.GATE_RETRY_S = 90        -- seconds a granted retry stays valid (review 2026-09-28: an unused one sent a later stop back to an old spot)
@@ -318,8 +293,7 @@ local function gateSafe(sim, progress, i)
     -- the nearest straight-ish spot before the split (so the dropped car isn't set down mid-corner in the path of
     -- the next arrival): walk back from the margin in small steps, take the first that's straight and clear
     local stag = 0     -- (R.GATE_WALK_V2) this car's gate-first stagger, walked from instead of subtracted after the walk
-    local stagM = tonumber(R.GATE_STAG_ALL) or (R.GATE_STAG_ALL == true and 1 or 0)
-    if i and R.GATE_WALK_V2 and (first or stagM == 1) then   -- (R.GATE_STAG_ALL 1) ...or on every gated drop, not just gate-first
+    if first and i and R.GATE_WALK_V2 then
         stag = hash01(i * 17) * STAGGER_RANGE
         if lastGate - GATE_MARGIN - stag < 0 then stag = 0 end   -- split 1 nearer the line than margin + stagger: no stagger, never behind the line
     end
@@ -339,7 +313,7 @@ local function gateSafe(sim, progress, i)
         end)
         if straight then best = pr; break end
     end
-    if i and (stagM == 2 or (not R.GATE_WALK_V2 and first)) then best = (best - hash01(i * 17) * STAGGER_RANGE) % 1 end   -- (mode 2) after the walk   -- per-car 0-45 m further back: one spot for a knot stacks them (wrapped: never before 0)
+    if first and i and not R.GATE_WALK_V2 then best = (best - hash01(i * 17) * STAGGER_RANGE) % 1 end   -- per-car 0-45 m further back: one spot for a knot stacks them (wrapped: never before 0)
     return best, true
 end
 
@@ -383,54 +357,33 @@ local function dropsAllowed(i)
     return true
 end
 
--- (A/B, owner yes 5 Oct) R.DROP_FAIL_CLEAR. A failed reposition bars the car from any further one for the whole race, so a car that is
--- repaired, pits, or simply gets going again and races on is still barred at its next off: 'hopeless', AC's AI must drive it out or it is
--- parked. Archive since 28 Sep: 85 barred cars in 781 races, 40 raced again (above 60 km/h), 14 of those later lost. true: a barred car
--- seen above DROP_OK_SPEED again has rejoined after all - the bar lifts and its next stop is a new episode like any other car's.
-R.DROP_FAIL_CLEAR = false
-R.dropFailN, R.dropFailClear = 0, 0   -- diag: cars barred / bars lifted this session (session line dfN, dfC)
-function R.clearFailedDrops()
-    for i in pairs(dropFailed) do
-        local c = ac.getCar(i)
-        if c and (c.speedKmh or 0) > DROP_OK_SPEED and not c.isRetired then dropFailed[i] = nil; R.dropFailClear = R.dropFailClear + 1 end
-    end
-end
-
 -- score the pending drops; switch repositioning off for the session if the rate is poor
 local function judgeDrops(now)
     local keep = {}
     for _, d in ipairs(drops) do
-        if d.ok == nil and not d.void then
+        if d.ok == nil then
             local c = ac.getCar(d.i)
-            local rolled = false
-            local roll = tonumber(R.DROP_ROLL) or 0                      -- harness JSON may hand us a string or a boolean; a raw
-            if roll > 0 and c and d.spl and (c.speedKmh or 0) > (tonumber(R.DROP_ROLL_SPEED) or 10) then   -- compare would raise inside
-                local gained = (c.splinePosition or 0) - d.spl          -- the pcall and silence the judge for the session (review 2026-10-04)
-                if gained < -0.5 then gained = gained + 1 elseif gained > 0.5 then gained = gained - 1 end   -- wrapped: a drop before the line, judged after it
-                rolled = gained >= roll
-            end
-            if c and ((c.speedKmh or 0) > DROP_OK_SPEED or rolled) then
-                d.ok = true; R.dropOK = R.dropOK + 1; R.dropPend[d.i] = nil
+            if c and (c.speedKmh or 0) > DROP_OK_SPEED then
+                d.ok = true; R.dropOK = R.dropOK + 1
                 if (d.sus or 0) < R.DROP_RATE_SUSP and not R.wildCar[d.i] then R.rateN = R.rateN + 1; R.rateOK = R.rateOK + 1 end
             elseif now - d.t > DROP_JUDGE_T or (c and c.isRetired) then
-                d.ok = false; R.dropPend[d.i] = nil
+                d.ok = false
                 local retry = R.GATE_FAIL_RETRY and d.gs and R.gateRetry[d.i] == nil and not (c and c.isRetired)   -- (a parked car: parkInPits set false)
                 if retry then R.gateRetry[d.i] = d.gs; R.gateRetryT[d.i] = now   -- one ungated retry where it stopped
-                elseif not (R.gateRetryT[d.i] and d.t < R.gateRetryT[d.i]) then R.dropFailN = R.dropFailN + (dropFailed[d.i] and 0 or 1); dropFailed[d.i] = true end   -- (a drop made BEFORE the
+                elseif not (R.gateRetryT[d.i] and d.t < R.gateRetryT[d.i]) then dropFailed[d.i] = true end   -- (a drop made BEFORE the
                 -- retry was granted, judged after it, must not void it: the retry's own record decides. Review 2026-09-28)
                 -- a failure that earns a retry is not scored: the retry is judged on its own. (Counting it dragged
                 -- the session rate down on Baku, where castle-entry landings fail: 4 misses in 5 turn repositioning off.)
                 if not retry and (d.sus or 0) < R.DROP_RATE_SUSP and not R.wildCar[d.i] then R.rateN = R.rateN + 1 end
             end
         end
-        if (d.ok == nil and not d.void) or now - d.t < DROP_JUDGE_T + 30 then keep[#keep + 1] = d end   -- (kept a bit longer for the diag trace; a void record leaves at the normal time)
+        if d.ok == nil or now - d.t < DROP_JUDGE_T + 30 then keep[#keep + 1] = d end   -- (kept a bit longer for the diag trace)
     end
     drops = keep
-    local judged, live = 0, 0
-    for _, d in ipairs(drops) do if d.ok ~= nil then judged = judged + 1 end; if not d.void then live = live + 1 end end
-    local attempts = R.dropN - R.dropVoid                   -- superseded attempts never get a verdict: not in the V1 rate
-    judged = math.max(judged, attempts - live)              -- (older non-void ones dropped from the list were judged too)
-    local poor = attempts >= DROP_TRIAL and judged >= DROP_TRIAL and (R.dropOK / math.max(1, attempts)) < DROP_MIN_RATE
+    local judged = 0
+    for _, d in ipairs(drops) do if d.ok ~= nil then judged = judged + 1 end end
+    judged = math.max(judged, R.dropN - #drops)   -- (older ones dropped from the list were judged too)
+    local poor = R.dropN >= DROP_TRIAL and judged >= DROP_TRIAL and (R.dropOK / R.dropN) < DROP_MIN_RATE
     if R.DROP_RATE_V2 then poor = R.rateN >= DROP_TRIAL and (R.rateOK / R.rateN) < DROP_MIN_RATE end
     if R.dropsOff and R.DROP_RATE_V2 and R.DROP_REARM_S > 0 and os.clock() - (R.dropsOffT or 0) > R.DROP_REARM_S then
         R.dropsOff = false; R.rateOK, R.rateN = 0, 0   -- (R.DROP_REARM_S) a fresh trial
@@ -595,7 +548,6 @@ end
 -- or a slow/distant one, doesn't block -- so this succeeds far more often than a blanket "spot clear",
 -- which is why beached cars used to never actually get repositioned.
 local function dropSafe(sim, i, prog)
-    local jamN = 0
     for j = 0, sim.carsCount - 1 do
         if j ~= i then
             local oc = ac.getCar(j)
@@ -607,12 +559,10 @@ local function dropSafe(sim, i, prog)
                 if g < 0 and ag < DROP_BEHIND and (oc.speedKmh or 0) > DANGER_SPEED then return false end  -- fast car closing from behind
                 if R.DROP_SAFE_T > 0 and g < 0 and (oc.speedKmh or 0) > DANGER_SPEED and not oc.isInPitlane
                    and ag * trackLen < (oc.speedKmh / 3.6) * R.DROP_SAFE_T then return false end   -- ...or within DROP_SAFE_T s at its speed
-                if R.JAM_AHEAD_M > 0 and g > 0 and g * trackLen < R.JAM_AHEAD_M and (oc.speedKmh or 0) < R.JAM_KMH
-                   and not oc.isInPitlane then jamN = jamN + 1 end                                 -- (R.JAM_AHEAD_M) crawling on the road ahead
             end
         end
     end
-    return not (R.JAM_AHEAD_M > 0 and jamN >= R.JAM_N)                                            -- a jam ahead: hold, don't launch into it
+    return true
 end
 
 -- Put an OFF-TRACK (beached) car back on the racing line at its own progress, facing forward, just
@@ -746,11 +696,8 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
     if okp then
         if retrying then R.gateRetry[i] = false; hopeless[i] = nil end   -- (a hopeless mark from before the grant: the retry is judged instead)
         rejoinUntil[i] = os.clock() + REJOIN_RAMP            -- rejoin gently (see REJOIN_RAMP)
-        for _, od in ipairs(drops) do if od.i == i and od.ok == nil and not od.void then od.void = true; R.dropVoid = R.dropVoid + 1 end end   -- (0.16) a new drop supersedes an unjudged
-        -- older one for the same car: from here on that record's "progress" would be this teleport, not driving (review 2026-10-04)
         drops[#drops + 1] = { i = i, t = os.clock(), ok = nil, spl = progress, sus = maxSusp(ac.getCar(i)), tt = temps,
                               gs = gated and reqProgress or nil }   -- judged over the next DROP_JUDGE_T; gs = the stop spot of a gated drop
-        R.dropPend[i] = os.clock()                     -- pending until judgeDrops rules (a later drop of this car re-stamps it)
         pendingDrop[i] = { pos = pos, dir = dir, apiDir = apiDir, t = os.clock(), tries = 0 }   -- verify its heading next frame
         R.dropN = R.dropN + 1
         dropCount[i] = (dropCount[i] or 0) + 1
@@ -759,12 +706,37 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
     return okp
 end
 
--- (lean016) The per-car body is ONE closure for the whole session: it was a pcall(function() ... end) built per car per frame
--- (recovery allocated ~16 KB per frame in the owner-video repro, 3 Oct). Its inputs (the car, the sim, dt) and the active-car
--- count live in this do-block (nothing else in the file sees them); R.update is the only caller, once per frame. Body unchanged.
-do
-local i, sim, dt, active = 0, nil, 0, 0
-local carBody = function()
+function R.update(dt)
+    if not R.ENABLED then R.count = 0; return end
+    local ok, sim = pcall(ac.getSim)
+    if not ok or not sim then return end
+    if os.clock() < R.settleUntil then R.count = 0; return end   -- a new session's first frames are the old one's (R.SETTLE_S)
+    local active = 0
+    if not scaled then scaled = true; pcall(function() scaleToTrack(sim.trackLengthM) end) end   -- per-track distances (self-heals after a hot-reload)
+    if #drops > 0 or (R.dropsOff and R.DROP_REARM_S > 0 and R.DROP_RATE_V2) then pcall(judgeDrops, os.clock()) end   -- (R.DROP_REARM_S) the re-arm needs a tick with no drops left
+    pcall(function() R.raceSession = (sim.raceSessionType == ac.SessionType.Race) end)
+    if R.pointToPoint == nil then      -- once per session: a hill climb / touge has no lap to rejoin and its finish is a stop
+        R.pointToPoint = false
+        pcall(function()
+            local a = ac.trackProgressToWorldCoordinate(0.0, false); local b = ac.trackProgressToWorldCoordinate(0.995, false)
+            if a and b and a:distance(b) > 300 then R.pointToPoint = true; ac.log('Verve: point-to-point track - recovery stands down') end
+        end)
+    end
+    if not overridesCleared then
+        -- After a (re)load our per-car tables are empty but the limits we set on the PHYSICS side persist: a
+        -- car mid throttle-ramp would stay at 40% throttle for the rest of the race. Clear them all once.
+        overridesCleared = true
+        for i = 0, sim.carsCount - 1 do
+            pcall(function()
+                local c = ac.getCar(i)
+                if c and c.isAIControlled and not c.isRetired then physics.setAIThrottleLimit(i, 1); physics.setAITopSpeed(i, 1e9); physics.setAIStopCounter(i, 0) end
+            end)
+            overriding[i] = true; releaseControls(i)      -- and any stale control override from before the (re)load
+        end
+    end
+    if R.pointToPoint then R.count = 0; return end
+    for i = 0, sim.carsCount - 1 do          -- includes the player's car WHEN it's under AI control (Ctrl+C)
+        pcall(function()
             local car = ac.getCar(i)
             if not car then return end
             trackLaps(i, car)
@@ -1185,46 +1157,10 @@ local carBody = function()
                     end
                 end
             end
-        end
-function R.update(dt_)
-    dt = dt_
-    if not R.ENABLED then R.count = 0; return end
-    local ok, sim_ = pcall(ac.getSim)
-    if not ok or not sim_ then return end
-    sim = sim_
-    if os.clock() < R.settleUntil then R.count = 0; return end   -- a new session's first frames are the old one's (R.SETTLE_S)
-    active = 0
-    if not scaled then scaled = true; pcall(function() scaleToTrack(sim.trackLengthM) end) end   -- per-track distances (self-heals after a hot-reload)
-    if #drops > 0 or (R.dropsOff and R.DROP_REARM_S > 0 and R.DROP_RATE_V2) then pcall(judgeDrops, os.clock()) end   -- (R.DROP_REARM_S) the re-arm needs a tick with no drops left
-    if R.DROP_FAIL_CLEAR then pcall(R.clearFailedDrops) end
-    pcall(function() R.raceSession = (sim.raceSessionType == ac.SessionType.Race) end)
-    if R.pointToPoint == nil then      -- once per session: a hill climb / touge has no lap to rejoin and its finish is a stop
-        R.pointToPoint = false
-        pcall(function()
-            local a = ac.trackProgressToWorldCoordinate(0.0, false); local b = ac.trackProgressToWorldCoordinate(0.995, false)
-            if a and b and a:distance(b) > 300 then R.pointToPoint = true; ac.log('Verve: point-to-point track - recovery stands down') end
         end)
-    end
-    if not overridesCleared then
-        -- After a (re)load our per-car tables are empty but the limits we set on the PHYSICS side persist: a
-        -- car mid throttle-ramp would stay at 40% throttle for the rest of the race. Clear them all once.
-        overridesCleared = true
-        for i = 0, sim.carsCount - 1 do
-            pcall(function()
-                local c = ac.getCar(i)
-                if c and c.isAIControlled and not c.isRetired then physics.setAIThrottleLimit(i, 1); physics.setAITopSpeed(i, 1e9); physics.setAIStopCounter(i, 0) end
-            end)
-            overriding[i] = true; releaseControls(i)      -- and any stale control override from before the (re)load
-        end
-    end
-    if R.pointToPoint then R.count = 0; return end
-    for i_ = 0, sim.carsCount - 1 do          -- includes the player's car WHEN it's under AI control (Ctrl+C)
-        i = i_
-        pcall(carBody)
     end
     R.count = active
 end
-end   -- (lean016) the recovery update do-block
 
 -- SUSPENSION LIMPER (harness A/B: R.SUSP_LIMP > 0 = the suspension damage, 0..1, that counts). Re-bodying never fixes
 -- suspension, so a car with a broken corner crawls at 30 km/h on the racing line for the rest of the race (Barcelona
@@ -1241,8 +1177,7 @@ R.boxTryN = 0              -- rescues attempted
 R.boxOkN = 0               -- rescues that returned success
 R.boxRescueN = 0           -- session tally (diagnostics)
 R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0
-R.SUSP_FIX = 0.10          -- DEFAULT 0.15.2 (0.14.4: 0.25 - RSS 2026 cars at Bahrain crawled 6-20 min on 0.17, 1 Oct; 0.10 cut it to 3 min,
-                           -- crawl DNFs 2 -> 0, both PCs' suites not worse). >0: a car crawling on suspension damage >= this for SUSP_FIX_T s is REPAIRED where it is (all
+R.SUSP_FIX = 0.25          -- DEFAULT 0.14.4; >0: a car crawling on suspension damage >= this for SUSP_FIX_T s is REPAIRED where it is (all
 R.SUSP_FIX_T = 15.0        -- damage; its own fuel and tyre temperatures kept) and asked to pit. Owner's idea, 2026-09-25: Baku
 R.suspFixN = 0             -- cars at 0.30-0.49 ran at a median 30 km/h for the rest of the race. 0 = off.
 R.SUSP_FIX_MAX = 2         -- repairs per car per race; the next crawl retires it (a corner that keeps breaking is done)
@@ -1341,13 +1276,11 @@ function R.reset()
     lastRepairT = {}
     for i in pairs(overriding) do releaseControls(i) end   -- hand every car's controls back at a session change
     overridesCleared = false     -- and release every throttle / top-speed / stop-counter hold on the next update (they persist across sessions)
-    drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}; R.gateRetry = {}; R.gateRetryT = {}; R.dropPend = {}
+    drops = {}; dropFailed = {}; hopeless = {}; pendingDrop = {}; R.gateRetry = {}; R.gateRetryT = {}
     dropCount, dropSpots, escapeLogged = {}, {}, {}
     R.stallEngT, R.stallRestarts = {}, {}; R.stallRestartN = 0
     R.wetHint = {}
     R.dropN, R.dropOK, R.dropsOff, R.dropFlips, R.gateMoves = 0, 0, false, 0, 0
-    R.dropVoid = 0
-    R.dropFailN, R.dropFailClear = 0, 0
     R.rateOK, R.rateN = 0, 0
     gateStage = {}
     scaled = false
@@ -1389,7 +1322,6 @@ function R.stateOf(i)
         parked = parked[i] == true, dmgBase = dmgBase[i] or 0, episodeT = episodeT[i] or 0,
         rescueN = rescueN[i] or 0, ramp = rampLimit(i), dropFailed = dropFailed[i] == true,
         parkWhy = R.parkWhy[i], parkDmg = R.parkDmg[i] or 0, parkSusp = R.parkSusp[i] or 0, parkLap = R.parkLap[i] or 0,
-        dropPending = R.dropPend[i] ~= nil and os.clock() - R.dropPend[i] < 30,   -- (30 = DROP_JUDGE_T: bounded even if the judge never runs)
     }
 end
 

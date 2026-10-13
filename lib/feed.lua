@@ -66,21 +66,8 @@ local function flush()
     if wrote then buf = {} else closeFh() end   -- (a failed write keeps the lines for the next try, on a fresh handle)
 end
 
--- (0.16) "sim_ms" on every line: AC's session clock in ms (sim time, as AC's lap timer counts it; negative before the start,
--- resets each session). "t" stays wall seconds since the feed started: the two drift apart when the game cannot keep real
--- time, so sim_ms is what lines an event up with the replay and what a real-time ratio is measured with (dSim / dWall).
--- Read through pcall: a CSP build without the field leaves it out of the line rather than stopping the feed.
-local function sessionMs(sim) return sim.currentSessionTime end
-local function simNow()
-    local ok, sim = pcall(ac.getSim)
-    if ok and sim then local ok2, v = pcall(sessionMs, sim); if ok2 and type(v) == 'number' and v > -1e9 and v < 1e10 then return math.floor(v) end end
-    return nil
-end
-F.simMs = nil                 -- the session clock at the last state tick (the time every event of that tick carries)
-local function simField(sms) return sms and string.format(',"sim_ms":%d', sms) or '' end
-
-local function event(t, typ, fields, sms)    -- sms: a backdated event's own sim time (battle); default the tick's
-    emit(string.format('{"v":1,"t":%.1f,"type":"%s"%s%s}', t, typ, fields and (',' .. fields) or '', simField(sms or F.simMs)))
+local function event(t, typ, fields)
+    emit(string.format('{"v":1,"t":%.1f,"type":"%s"%s}', t, typ, fields and (',' .. fields) or ''))
 end
 
 local function lat01(pos)
@@ -112,27 +99,13 @@ local function newFile(sim)
     end
     local amb, road, laps = 0, 0, 0
     pcall(function() amb = sim.ambientTemperature or 0; road = sim.roadTemperature or 0; laps = sim.raceSessionLaps or sim.sessionLaps or 0 end)
-    emit(string.format('{"v":1,"t":0,"type":"header","track":"%s","layout":"","laps":%d,"ambient":%d,"road":%d,"cars":[%s]%s}',
-        esc(track), laps, math.floor(amb), math.floor(road), table.concat(cars, ','), simField(simNow())))
+    emit(string.format('{"v":1,"t":0,"type":"header","track":"%s","layout":"","laps":%d,"ambient":%d,"road":%d,"cars":[%s]}',
+        esc(track), laps, math.floor(amb), math.floor(road), table.concat(cars, ',')))
 end
 
 F.retSent = {}
--- (Verve Engineer live test, 5 Oct) the same decision for the same car is not news again for a while: 'attack' re-fired 11 times in
--- 200 s as one car dropped in and out of range, and the engineer said "lining you up" four times in two minutes. Seconds per
--- decision; manoeuvres and the rest use DEC_HOLD_MV. The 1 Hz state still carries the live verve.state every tick.
-F.DEC_HOLD = { attack = 60, defend = 60, yield = 30 }
-F.DEC_HOLD_MV = 20
-F.decT = {}
-function F.decision(t, i, d, detail)
-    local k = i .. ':' .. d
-    local last = F.decT[k]
-    if last and t - last < (F.DEC_HOLD[d] or F.DEC_HOLD_MV) then return end
-    F.decT[k] = t
-    event(t, 'verve', string.format('"car":%d,"decision":"%s","detail":"%s"', i, d, detail))
-end
 function F.reset()
     F.retSent = {}
-    F.decT = {}
     feedEvSeen = {}
     F.wildSent = {}
     namesSent, namesT = '', 0
@@ -144,7 +117,6 @@ function F.reset()
     lastFlush = -1e9   -- the new file's clock starts at 0: a stale value held a weekend race's writes for as long as the last session ran
     F.startSent = false
     F.startArmed = false   -- race_start needs a standing grid seen by this feed first (see F.update)
-    F.simMs = nil
 end
 
 -- stats: the same table Verve passes to the diagnostics logger (rc = Racecraft.last, recState = Recovery.stateOf)
@@ -170,7 +142,6 @@ function F.update(dt, stats)
     end
     if t < 3.0 then return end   -- a new session's first frames still show the old session's cars (weekend race, 2026-09-26)
     lastState = t
-    do local okT, v = pcall(sessionMs, sim); F.simMs = (okT and type(v) == 'number' and v > -1e9 and v < 1e10) and math.floor(v) or nil end   -- (before the session clock runs AC hands back a non-finite value: written as -9.2e18, 5 Oct)
     stats = stats or {}
     if t - namesT >= 5 then namesT = t; pcall(namesEvent, sim, t) end   -- every 5 s, written only when a name changed
     local rc = stats.rc or {}
@@ -231,7 +202,7 @@ function F.update(dt, stats)
             stName, tostring(c.yl), tostring(c.bl), tostring(c.rec), c.wd and (',"wild":"' .. c.wd .. '"') or '')   -- "wild" only on a chaos driver
     end
     local leaderLap = (#running > 0) and running[1].lap or 0
-    emit(string.format('{"v":1,"t":%.1f,"type":"state","leader_lap":%d,"running":%d,"cars":[%s]%s}', t, leaderLap, #running, table.concat(parts, ','), simField(F.simMs)))
+    emit(string.format('{"v":1,"t":%.1f,"type":"state","leader_lap":%d,"running":%d,"cars":[%s]}', t, leaderLap, #running, table.concat(parts, ',')))
 
     -- per-car events
     for _, c in ipairs(cars) do
@@ -240,31 +211,13 @@ function F.update(dt, stats)
             if c.lap > p.lap then
                 local lt = t - (lapStart[i] or t)
                 lapStart[i] = t
-                if p.lap == 0 then
-                    -- (0.16) The FIRST lap gets an event too. It used to be skipped because it is not a clean lap time
-                    -- (lapStart is when this feed first saw the car, so it includes the grid wait), but the consequence was
-                    -- that anyone counting laps from lap events undercounted by one per car - it cost the broadcast side a
-                    -- wrong car-lap total on the Brands Hatch comparison (3 Oct). Same field shape so no loader breaks:
-                    -- 'first':true marks it, 'best' is false, and it never touches bestLap / overallBest / fastest_lap.
-                    -- Consumers wanting lap TIMES must skip first:true; consumers counting laps can now count events.
-                    -- (0.16) It carries AC's own time for that lap, lap_ms, as every later lap does (omitted when AC has none).
-                    -- On a grid that sits before the timing line AC's first 'lap' can be the short run from the grid to it.
-                    local ms1, cuts1 = 0, -1
-                    pcall(function() local ac_c = ac.getCar(i); ms1 = (ac_c and ac_c.previousLapTimeMs) or 0; cuts1 = (ac_c and ac_c.lastLapCutsCount) or -1 end)
-                    event(t, 'lap', string.format('"car":%d,"lap":1,"time_s":%.1f,"best":false,"first":true%s%s', i, lt,
-                        (type(ms1) == 'number' and ms1 > 0) and string.format(',"lap_ms":%d', ms1) or '',
-                        (type(cuts1) == 'number' and cuts1 >= 0) and string.format(',"cuts":%d', cuts1) or ''))
-                end
                 if p.lap >= 1 and lt > 20 then
                     local best = lt < (bestLap[i] or 1e9)
                     if best then bestLap[i] = lt end
-                    local ms, cuts = 0, -1   -- (0.15) AC's own lap time: time_s is the 1 Hz tick difference (x.1 s resolution)
-                    -- (0.16) and AC's cut count for that lap: AC writes race_out with NO laps in 10-40 % of harness races, and
-                    -- then this event is the only lap record left - without the count a cut lap reads as a clean one.
-                    pcall(function() local ac_c = ac.getCar(i); ms = (ac_c and ac_c.previousLapTimeMs) or 0; cuts = (ac_c and ac_c.lastLapCutsCount) or -1 end)
-                    event(t, 'lap', string.format('"car":%d,"lap":%d,"time_s":%.1f,"best":%s%s%s', i, p.lap + 1, lt, tostring(best),
-                        (type(ms) == 'number' and ms > 0) and string.format(',"lap_ms":%d', ms) or '',
-                        (type(cuts) == 'number' and cuts >= 0) and string.format(',"cuts":%d', cuts) or ''))
+                    local ms = 0   -- (0.15) AC's own lap time: time_s is the 1 Hz tick difference (x.1 s resolution)
+                    pcall(function() local ac_c = ac.getCar(i); ms = (ac_c and ac_c.previousLapTimeMs) or 0 end)
+                    event(t, 'lap', string.format('"car":%d,"lap":%d,"time_s":%.1f,"best":%s%s', i, p.lap + 1, lt, tostring(best),
+                        (type(ms) == 'number' and ms > 0) and string.format(',"lap_ms":%d', ms) or ''))
                     if not overallBest or lt < overallBest then
                         overallBest = lt
                         if p.lap >= 2 then event(t, 'fastest_lap', string.format('"car":%d,"lap":%d,"time_s":%.1f', i, p.lap + 1, lt)) end
@@ -321,17 +274,17 @@ function F.update(dt, stats)
                 event(t, 'retire', string.format('"car":%d,"lap":%d,"reason":"%s"', i, c.lap, c.park and 'hopeless' or (c.dmg >= 150 and 'damage' or 'ac')))
             end
             -- Verve decisions (edge-triggered; attack/defend only when there's actually a car within reach)
-            if c.st == 2 and p.st ~= 2 then F.decision(t, i, 'defend', 'covering the inside line') end
-            if c.st == 1 and p.st ~= 1 and (gapAhead[i] or 9) < 1.5 then F.decision(t, i, 'attack', 'closing in, looking for a way past') end
-            if c.yl and not p.yl then F.decision(t, i, 'yield', 'moving aside for a faster car') end
+            if c.st == 2 and p.st ~= 2 then event(t, 'verve', string.format('"car":%d,"decision":"defend","detail":"covering the inside line"', i)) end
+            if c.st == 1 and p.st ~= 1 and (gapAhead[i] or 9) < 1.5 then event(t, 'verve', string.format('"car":%d,"decision":"attack","detail":"closing in, looking for a way past"', i)) end
+            if c.yl and not p.yl then event(t, 'verve', string.format('"car":%d,"decision":"yield","detail":"moving aside for a faster car"', i)) end
             if c.mv ~= 0 and c.mv ~= p.mv then
                 local MV = { [1] = { 'switchback', 'wide in, cutting back underneath on the exit' }, [2] = { 'lunge', 'braking late, diving for the inside' },
                              [3] = { 'setup', 'sitting in the tow, setting up the pass' }, [4] = { 'slingshot', 'in the draft, pulling out at the last moment' } }
                 local m = MV[c.mv]
                 if m and c.mv == 2 and c.wd then m = { 'divebomb', 'sending it from way back, braking late' } end   -- a chaos driver's lunge
-                if m then F.decision(t, i, m[1], m[2]) end
+                if m then event(t, 'verve', string.format('"car":%d,"decision":"%s","detail":"%s"', i, m[1], m[2])) end
             end
-            if c.bl and not p.bl then F.decision(t, i, 'go_around', 'swerving around a stopped car') end
+            if c.bl and not p.bl then event(t, 'verve', string.format('"car":%d,"decision":"go_around","detail":"swerving around a stopped car"', i)) end
             if c.wd and not F.wildSent[i] then F.wildSent[i] = true; event(t, 'verve', string.format('"car":%d,"decision":"wild","detail":"races with almost no margin"', i)) end
             if c.wd and p.wd and c.wd ~= p.wd then event(t, 'verve', string.format('"car":%d,"decision":"%s","detail":"%s"', i, c.wd, c.wd == 'tilt' and 'loses his temper - no margin now' or 'settles down')) end
             if c.rec and not p.rec then event(t, 'verve', string.format('"car":%d,"decision":"crash_repair","detail":"Verve is getting the car going again"', i)) end
@@ -358,16 +311,11 @@ function F.update(dt, stats)
                         if (gapAhead[i] or 9) < 2.5 or (gapAhead[over] or 9) < 2.5 then
                             event(t, 'overtake', string.format('"car":%d,"over":%d,"pos":%d,"spline":%.4f', i, over, k, running[k].spline))
                         end
+                        if k == 1 then event(t, 'lead_change', string.format('"car":%d,"over":%d', i, over)) end
                     end
                 end
             end
         end
-    end
-    -- (0.16) ONE lead_change per change of leader: the new P1 over the previous P1. It used to fire once for every car the new
-    -- leader jumped in a single tick (10 'lead changes' in one second at Fuji's start, 5 Oct; 177 spurious events in 15 of 85
-    -- feeds), and never when the old leader stopped. Same fields; a lead change by a pit cycle or a retirement now counts too.
-    if prevOrder and order[1] and prevOrder[1] and order[1] ~= prevOrder[1] then
-        event(t, 'lead_change', string.format('"car":%d,"over":%d', order[1], prevOrder[1]))
     end
     prevOrder = order
 
@@ -380,9 +328,9 @@ function F.update(dt, stats)
         seen[key] = true
         if g and g < BATTLE_GAP_S and b.spd > 60 then
             local bt = battles[key]
-            if not bt then bt = { t0 = t, s0 = F.simMs, n = 0, active = false }; battles[key] = bt end
+            if not bt then bt = { t0 = t, n = 0, active = false }; battles[key] = bt end
             bt.n = bt.n + 1
-            if bt.n == BATTLE_HOLD then bt.active = true; event(bt.t0, 'battle', string.format('"cars":[%d,%d],"pos":%d,"gap_s":%.2f', a.i, b.i, k - 1, g), bt.s0) end
+            if bt.n == BATTLE_HOLD then bt.active = true; event(bt.t0, 'battle', string.format('"cars":[%d,%d],"pos":%d,"gap_s":%.2f', a.i, b.i, k - 1, g)) end
         elseif battles[key] and (not g or g > 1.5) then
             if battles[key].active then event(t, 'battle_end', string.format('"cars":[%d,%d],"resolved":"%s"', a.i, b.i, 'gap')) end
             battles[key] = nil
@@ -414,26 +362,17 @@ end
 function F.finish()
     local ok, sim = pcall(ac.getSim)
     if ok and sim and started then
-        -- in finishing order (a reader taking results[1] as the winner was handed car 0); a car with no place goes last
-        local rows, parts = {}, {}
+        local parts = {}
         for i = 0, sim.carsCount - 1 do
             local c = ac.getCar(i)
-            if c then rows[#rows + 1] = { pos = c.racePosition or 0, i = i, laps = c.lapCount or 0, ret = c.isRetired == true } end
+            if c then parts[#parts + 1] = string.format('{"pos":%d,"car":%d,"laps":%d,"ret":%s}', c.racePosition or 0, i, c.lapCount or 0, tostring(c.isRetired == true)) end
         end
-        table.sort(rows, function(a, b)
-            local pa, pb = a.pos > 0 and a.pos or 1e9, b.pos > 0 and b.pos or 1e9
-            if pa ~= pb then return pa < pb end
-            return a.i < b.i
-        end)
-        for _, r in ipairs(rows) do
-            parts[#parts + 1] = string.format('{"pos":%d,"car":%d,"laps":%d,"ret":%s}', r.pos, r.i, r.laps, tostring(r.ret))
-        end
-        event(now(), 'race_end', '"results":[' .. table.concat(parts, ',') .. ']', simNow())
+        event(now(), 'race_end', '"results":[' .. table.concat(parts, ',') .. ']')
     end
     flush(); closeFh()
 end
 
 -- other modules' events (lib/fault.lua penalties): typed like the built-in ones, same clock
-function F.event(typ, fields) if F.ENABLED then event(now(), typ, fields, simNow()) end end
+function F.event(typ, fields) if F.ENABLED then event(now(), typ, fields) end end
 
 return F
