@@ -67,6 +67,21 @@ with open(log_path, "a", encoding="utf-8") as log:
     except Exception:  # noqa: BLE001
         watchdog_ensure = None
     for n, args in enumerate(lines, 1):
+        # HEALTH_STOP: the watchdog's THROTTLE stage stops batch.py and writes this file, so the current race
+        # finishes and no new row starts. Until 2026-10-12 nothing read it - batch.py only had the COOL_C wait below -
+        # so the watchdog's only working enforcement was a force-kill of acs.exe, and any chain relaunching the queue
+        # would have driven straight back into the heat. Refuse to start a row while it exists; the hourly check
+        # removes it deliberately after finding out why (that is the rule in the hourly prompt).
+        stop_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "harness_results", "HEALTH_STOP")
+        if os.path.exists(stop_file):
+            try:
+                why = open(stop_file, encoding="utf-8").read().strip().splitlines()[0]
+            except (OSError, IndexError):
+                why = "(unreadable)"
+            log.write(f"=== HEALTH_STOP present, refusing to start step {n}: {why}\n")
+            log.write("=== find out why, fix it, then delete tools/harness_results/HEALTH_STOP to resume\n")
+            log.write(f"=== batch stopped {time.strftime('%H:%M:%S')}\n"); log.flush()
+            raise SystemExit(3)
         if watchdog_ensure:
             try:
                 st = watchdog_ensure.ensure()
