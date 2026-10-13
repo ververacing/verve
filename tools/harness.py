@@ -57,8 +57,17 @@ PINNED_ASSISTS = {"FUEL_RATE": 1, "TYRE_WEAR": 1, "DAMAGE": 100}
 # Imola repositions (52 -> 25) and moved the Monza star from median P10 to P1.5 on IDENTICAL Verve code, and nothing in
 # results.csv said which build a row came from. 29 of ~56 reporting community installs are on 3465, 5 on 4169, so the
 # build is not a detail: it decides whether a measurement describes what players get.
-AI_KEYS = ("NEW_LATERAL_GRIP_ESTIMATION", "FIX_GRIP_MULT", "FIX_UPSHIFT_THRESHOLD", "ACT_IMPATIENT", "CAUTIOUS_STEERING",
-           "REDUCE_STABILIZATION", "TRAJECTORIES_FOR_DUMMIES", "STOP_TELEPORTING_STUCK")
+# (2026-10-12) ALL SEVENTEEN, not the eight I first picked. The eight were the ones I had a reason to suspect, which
+# is the wrong criterion for a provenance stamp: two of them (the grip pair) turned out to move Imola repositions by
+# half, so "I have no reason to suspect it" predicts nothing. Nine keys were going unrecorded, and the open question
+# on the desk is precisely what differs between 3465 and 4169 to make one machine produce 3.6x the solo loss of
+# control of the other. BTeam also reported a TELEPORT_WITH_DAMAGE key on 3465 that does not exist in 4169's section
+# at all - so the stamp must record whatever the section ACTUALLY holds, not only names known when this was written.
+AI_KEYS = ("NEW_LATERAL_GRIP_ESTIMATION", "FIX_GRIP_MULT", "FIX_SHORT_AXLE", "FIX_SHORT_AXLE_TRACK", "FIX_LOW_LEVEL",
+           "START_REDUCE_REDLINING", "START_STRAIGHTEN_TRAJECTORY", "ACT_IMPATIENT", "TRAJECTORIES_FOR_DUMMIES",
+           "CAUTIOUS_STEERING", "REMOVE_STEER_LOOKAHEAD_SPEED_LIMIT", "FIX_UPSHIFT_THRESHOLD",
+           "FIX_DOWNSHIFT_THRESHOLD", "ADJUST_SHIFTING_FOR_SLOW", "STOP_TELEPORTING_STUCK", "NEW_AI_SMOOTHING",
+           "REDUCE_STABILIZATION")
 
 
 def csp_stamp():
@@ -73,7 +82,7 @@ def csp_stamp():
         build = "%s/%s" % (mb.group(1) if mb else "?", mv.group(1) if mv else "?")
     except Exception:  # noqa: BLE001
         pass
-    vals = {}
+    vals, extra = {}, []
     for path in (os.path.join(AC_DIR, "extension", "config", "new_behaviour.ini"),
                  os.path.join(CSP_USER_CFG, "new_behaviour.ini")):      # the user file wins, as CSP reads it last
         try:
@@ -82,9 +91,19 @@ def csp_stamp():
                 v = ini.get("AI_TWEAKS", k, fallback=None)
                 if v is not None:
                     vals[k] = v.split(";")[0].strip()
+            # Any key the section holds that AI_KEYS does not know about - a newer or older build's own. Reported
+            # after the canonical names so the column stays diffable, and its own failure cannot cost a race.
+            try:
+                for k, v in ini.items("AI_TWEAKS"):
+                    if k not in AI_KEYS:
+                        vals[k] = v.split(";")[0].strip()
+                        if k not in extra:
+                            extra.append(k)
+            except Exception:  # noqa: BLE001
+                pass
         except Exception:  # noqa: BLE001
             pass
-    return build, ",".join("%s=%s" % (k, vals.get(k, "absent")) for k in AI_KEYS)
+    return build, ",".join("%s=%s" % (k, vals.get(k, "absent")) for k in tuple(AI_KEYS) + tuple(extra))
 # Everything else that decides how a car goes round. It was all whatever Content Manager last left in race.ini,
 # differing silently between machines and between one batch and the next; DYNAMIC_TRACK is the one that matters as
 # much as temperature, because it decides how much rubber is down. Overridable per run with --condition.
