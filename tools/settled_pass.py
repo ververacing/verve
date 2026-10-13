@@ -237,6 +237,33 @@ def grid_order(states, laps):
     return (num / (dx * dy) if dx and dy else None), n
 
 
+ENGAGED_GAP_S = 2.0
+
+
+def engagement_car_s(states, gap_s=ENGAGED_GAP_S, after=None):
+    """-> car-seconds spent within gap_s of the car ahead: the OPPORTUNITY to pass.
+
+    WHY A PASS RATE NEEDS THIS DENOMINATOR. Comparing passes per car-lap between arms assumes both had the same
+    chance to pass, and that assumption fails exactly where we most want an answer. Verve OFF retires 11 of 18 cars
+    at Spa, so seven survivors are strung out over 7 km with nobody to overtake; per car-lap it looks 5.9x less
+    passy than Verve ON, and most of that is simply having no one in front. Car-laps do not fix it - a retired car
+    stops contributing laps, but the SURVIVORS' laps are also emptier.
+
+    Close-running time measures the opportunity directly, so passes per engaged hour asks the question that matters:
+    when a car IS within striking distance, how often does a pass actually happen? A missing gap means nothing
+    ahead (the leader), which is not engagement. States are 1 Hz, so each sample is one car-second.
+    """
+    tot = 0
+    for t, cars in states:
+        if after is not None and t is not None and t <= after:
+            continue
+        for c in cars.values():
+            gap = c.get("gap_ahead_s")
+            if gap is not None and 0 <= gap < gap_s and not c.get("pit") and not c.get("ret"):
+                tot += 1
+    return tot
+
+
 def denominators(header, states):
     """-> (race laps excluding lap 1, car-laps excluding lap 1). The figure is only as good as this."""
     ends = lap1_ends(states)
