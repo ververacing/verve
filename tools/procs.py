@@ -92,10 +92,18 @@ def scripts():
         # `bash chain.sh <prev-log> <queue> <chain-log>`, whose command line ends in a .log. The hourly check would
         # have reported "no chains armed" while three were running, and the obvious reaction to that is to arm
         # duplicates. Found by running the tool for real one hour after writing it.
-        for tok in c.split():
-            t = tok.strip('"')
+        toks = [t.strip('"') for t in c.split()]
+        for i, t in enumerate(toks):
             if t.endswith(".sh"):
-                out.add(os.path.basename(t))
+                # Keep the ARGUMENTS in the label, deduplicated on the whole string. Three chains built from one
+                # generic chain.sh differ only by their arguments, so a basename alone collapsed them to a single
+                # "chain.sh" and the hourly check could not tell three armed from one. What it needs to know is how
+                # many are waiting and which queue each will launch.
+                rest = [os.path.basename(a) for a in toks[i + 1:] if a]
+                label = os.path.basename(t)
+                if rest:
+                    label += " -> " + (rest[1] if len(rest) > 1 else rest[0])
+                out.add(label)
                 break
     return sorted(out)
 
