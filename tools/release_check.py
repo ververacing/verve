@@ -52,8 +52,14 @@ APP_PATHS = ["lib", "Verve.lua", "diag.lua"]
 # The arm token is OPTIONAL. An earlier version of this regex demanded an `on` and an `off` arm per cell, which was a
 # pairing I had invented: the suite is a BASELINE-versus-HEAD comparison, not a switch A/B, so every row sits on the
 # same side. Completeness therefore failed for all three cells while a real regression went unexamined.
-SUITE_RE = re.compile(r"^(rc\d+[a-z]?)_(spa|bcn|mon)(?:_(on|off))?_\d+$")
-NEEDED_CELLS = {"spa": 3, "bcn": 3, "mon": 1}      # cell -> runs needed before that cell counts as present
+SUITE_RE = re.compile(r"^(rc\d+[a-z]?)_(spa12|spa|bcn|mon)(?:_(on|off))?_\d+$")  # spa12 BEFORE spa, it is a prefix
+# Recomposed 2026-10-13 on the owner's yes (decision 0027). GATING cells are the two 12-lap races; the 2-lap
+# sprints are still run and scored but judged on opening-lap character, not on contact counts. The old suite put
+# nine of ten runs in the sprints, and a 12-lap cell's own spread is 1.40x against a sprint arm's 3.50x on identical
+# code - so the sprints cannot see a regression a long race can, and would need about n=10 to try.
+GATING_CELLS = {"mon": 3, "spa12": 3}               # cell -> runs needed; these decide releasability
+CHARACTER_CELLS = {"spa": 3, "bcn": 3}              # run and scored, but they do NOT gate
+NEEDED_CELLS = GATING_CELLS                          # what completeness and not-worse are judged on
 MIN_SIDE = 3          # runs per arm before a default change is evidenced; the opening-lap spread demands 3+
 
 # metric -> (higher is worse?, label). laptime is two-sided: drifting either way means the pace changed.
@@ -180,6 +186,8 @@ def check_suite(rep, rows):
         if s > best:
             best, fresh_prefix = s, SUITE_RE.match(r["label"]).group(1)
     counts = per_cell(cells_of(suite, fresh_prefix))
+    # the character cells are reported for visibility and never block
+    chars = ", ".join("%s x%d" % (c, counts.get(c, 0)) for c in sorted(CHARACTER_CELLS))
     short = []
     for c in sorted(NEEDED_CELLS):
         n = counts.get(c, 0)
@@ -188,8 +196,8 @@ def check_suite(rep, rows):
     if short:
         rep.fail("suite completeness", "freshest suite %s is short: %s" % (fresh_prefix, " ".join(short)))
     else:
-        rep.ok("suite completeness", "%s covers %s" % (
-            fresh_prefix, " ".join("%s x%d" % (c, counts[c]) for c in sorted(counts))))
+        rep.ok("suite completeness", "%s gating %s | character (not gating) %s" % (
+            fresh_prefix, " ".join("%s x%d" % (c, counts[c]) for c in sorted(NEEDED_CELLS)), chars))
     return fresh_prefix, suite
 
 
