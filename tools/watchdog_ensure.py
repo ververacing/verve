@@ -41,7 +41,17 @@ def age():
         return None
 
 
+# TEMPERATURE MONITORING IS OFF. Owner, 2026-10-13: "let's turn off libre and all temperature monitoring. We've been
+# nowhere near the limits yet and I'll track it elsewhere for now." This single switch is the whole off-ramp: batch.py
+# calls ensure() once per race row, so without it here the watchdog would restart itself on the next queue and the
+# owner's decision would quietly undo itself within the hour. Decision 0028. Flip to True to bring it all back - the
+# watchdog itself is unchanged and still works, including the graduated WARN/THROTTLE/KILL stages.
+ENABLED = False
+
+
 def ensure():
+    if not ENABLED:
+        return "disabled by the owner (2026-10-13, decision 0028)"
     """-> 'running' (log fresh) or 'started' (watchdog launched now) or 'failed: ...'"""
     a = age()
     if a is not None and a < STALE_S and pid_alive():
