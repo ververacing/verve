@@ -46,17 +46,6 @@ S.TIER_MODE = 1         -- DEFAULT 0.15. 0 = today (S.tierOf: slider >= 90, prof
                         -- (Drivers.paceOf) >= MOVE_T2 adds the switchback; no new plan on a lapped car letting me by. Manoeuvres only:
                         -- S.tierOf and the star rules in racecraft are untouched
 S.MOVE_T2 = 0.75
-S.LUNGE_OUT_T = 1.3     -- s the lunge spends COMMITTING off-line before it gathers up (today 1.3). TEST SWITCH.
-S.LUNGE_OFF_X = 1.4     -- x the attack offset it aims for while committing (today 1.4). TEST SWITCH.
-                        -- WHY THESE EXIST (8 Oct, the owner's star-climb question): across 102 of a star's manoeuvres, the
-                        -- lunges it LOST reached a median 0.23 half-widths of separation from the car it was passing and 36
-                        -- of 56 never cleared ~0.35 (about a car's width); the ones it won reached 0.30; switchbacks, which
-                        -- spend up to 6 s wide, reached 0.55-0.61 and convert far better. The lunge asks for
-                        -- K.ATTACK_OFFSET (0.35) x trait x 1.4 = ~0.49 but achieves about half of it, because 1.3 s is not
-                        -- long enough to move 2-3 m sideways at 250 km/h. So it commits while still behind the other car:
-                        -- it either backs out (the 64-225 s hold-ups behind one car on every star race) or clips it (the
-                        -- contacts at ~1.3 m lateral). Raising these asks the car to be genuinely ALONGSIDE first.
-                        -- The gather phase that follows keeps its 0.9 s, so the move is OUT_T + 0.9 long in total.
 S.CLUMSY = 1.0          -- TIER_MODE 1: x (1 - moveSkill). A Rookie's lunge commits 70 % as long, 1.0x off-line (not 1.4x), 60 % of the
                         -- brake relief, gathers up +0.45 (not +0.3) and gives up at 1.0x attack range (not 1.5x). 0 = everyone like a Veteran
 S.PICK_MOMENT = 0.5     -- DEFAULT 0.15. 0-1, TIER_MODE 1: a skilled driver's lunge odds follow his run: x(1 - P) at +0 km/h .. x(1 + P) at +10 (a Rookie's do not)
@@ -239,10 +228,9 @@ local function run(i, p, c, g, book)
     end
     if tgtGap > c.attackGap * (1.5 - 0.5 * cl) or tgtGap > 0.5 then finish(i); return nil end   -- got away (or we are past it: gap wraps to ~1)
     if p.name == 'lunge' then
-        local outT = (tonumber(S.LUNGE_OUT_T) or 1.3) * (1 - 0.3 * cl)       -- (S.LUNGE_OUT_T)
-        if age < outT then
-            return { target = p.side * c.off * ((tonumber(S.LUNGE_OFF_X) or 1.4) - 0.4 * cl), caut = -0.5 * (book.lunge or 1) * (1 - 0.4 * cl), aggr = 0.2, hold = 1.0, code = CODE.lunge }
-        elseif age < outT + 0.9 then                         -- gather it up: brake a touch more, hold the inside
+        if age < 1.3 * (1 - 0.3 * cl) then
+            return { target = p.side * c.off * (1.4 - 0.4 * cl), caut = -0.5 * (book.lunge or 1) * (1 - 0.4 * cl), aggr = 0.2, hold = 1.0, code = CODE.lunge }
+        elseif age < 2.2 then                                -- gather it up: brake a touch more, hold the inside
             return { target = p.side * c.off * 0.7, caut = 0.3 + 0.15 * cl, aggr = 0, code = CODE.lunge }
         end
         finish(i); return nil

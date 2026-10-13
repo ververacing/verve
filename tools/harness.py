@@ -1326,6 +1326,21 @@ def run_once(args, arm, run_idx):
     m["ambient_c"] = args.ambient if args.ambient is not None else DEFAULT_AMBIENT
     m["road_c"] = args.road if args.road is not None else DEFAULT_ROAD
     m["conditions"] = condition_stamp(getattr(args, "condition", None))
+    # THE WHOLE INVOCATION, label removed so two runs of one cell match exactly. Added 2026-10-12 after an arm audit
+    # gave false comfort: `sc_off_spa_*` and `rc16c_spa_off_*` have IDENTICAL `arm` JSON, the same track, cars and
+    # ai_level, and both scored leader_laps=2 - yet one was `--laps 12 --stop-laps 2` (twelve laps of fuel) and the
+    # other a plain `--laps 2`. Nothing in results.csv could tell them apart, because leader_laps is the OUTCOME and
+    # no column held the REQUEST. The day's two confounds were one the arm column could catch (an inherited --csp)
+    # and one it structurally could not (race length), so a confound check needs the full command line or it will
+    # keep certifying pairs that differ in ways it cannot see.
+    try:
+        _a = list(sys.argv[1:])
+        if "--label" in _a:
+            _i = _a.index("--label")
+            del _a[_i:_i + 2]
+        m["cmd"] = " ".join(_a)
+    except Exception:  # noqa: BLE001
+        m["cmd"] = ""
     # AC's own fuel record (appended columns): tanks it emptied at a stop, AI stops it began, laps it fuelled the field
     # for, and whether its log was cut off (the counts are then lower bounds; no race line = no counts)
     m.update(ac_log_fuel(aclog))

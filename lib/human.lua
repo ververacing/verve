@@ -72,9 +72,6 @@ H.MV_OFF_P = { 0.06, 0.025, 0.010, 0.005 }   -- P(a lock-up or a missed apex bec
 H.MV_SPIN_P = { 0.005, 0, 0, 0 }             -- P(a lift becomes a spin), robust classes only
 H.MV_CR = 0.25             -- consistency and risk against the archetype line at the same pace move the rate by up to this fraction
 H.MV_TOP_FRAC = 0.10       -- the top this fraction of a roster bucket by pace gets the last anchor (15 laps)
-H.MV_TOP_RAW = true        -- DEFAULT 0.16 (owner yes 6 Oct; A/B 6 v 6: mistakes 5.2 -> 10.0 per 100 car-laps, incidents level). (fix) mvTopOf compares the driver's RAW roster pace with its raw cut-off. With ratingV2 (default since
-                           -- 0.14.9) the profile it is handed carries pace rescaled to 0.86-1.00, above the f1/gt/vintage/rally cut-offs
-                           -- (0.77-0.84): every named driver there counted 'top', pinned at 15 laps per mistake (profile audit, 5 Oct)
 H.MV_ARCH = { { 0.30, 0.60, 0.50 }, { 0.60, 0.35, 0.80 }, { 0.85, 0.20, 0.95 } }   -- pace, risk, cons of the archetypes (the line)
 H.MV_RATE_X = 1.0
 -- (0.15.1 test, owner yes 1 Oct) H.MV_COMP: a mistake drawn while the car is busy in traffic, or armed and dropped for want of a
@@ -460,12 +457,7 @@ function H.mvTopOf(prof)                      -- a named driver in the top MV_TO
         th = ps[math.max(1, math.ceil(H.MV_TOP_FRAC * #ps))] or 9
         H.mvTop[prof.bucket] = th
     end
-    local p = prof.pace
-    if H.MV_TOP_RAW and prof.key and Drivers.rawOf then                -- (H.MV_TOP_RAW) like with like: V2 keeps the order, so same top 10%
-        local d = Drivers.rawOf(prof.key)
-        if d and type(d.pace) == 'number' then p = d.pace end
-    end
-    return p >= th
+    return prof.pace >= th
 end
 -- one car's mistake profile, re-read every 5 s (a profile or a level can change mid-session)
 function H.mvSkill(i, prof, now)
@@ -681,14 +673,32 @@ function H.reset()     -- session start: re-derive the per-track distances; the 
 end
 
 -- Returns additive (gripOffset, cautionOffset). Player / slow / recovering cars -> 0,0.
--- (lean016) getModifiers' inner body is ONE closure for the whole session: it was a pcall(function() ... end) built per car
--- per frame, plus a closure for the speed read - ~1.7 KB of garbage per car per frame, the biggest single source in the
--- profiler's per-function probe (3 Oct). The car, the clock, the profile and the six levers live in this do-block (nothing
--- else in the file sees them); Verve.lua's car loop is the only caller, one car at a time. The bodies are unchanged.
-do
-local i, now, prof, vGrip, vCaut, pGrip, pCaut, mvG, mvC = nil, 0, nil, 0, 0, 0, 0, 0, 0
-local spdOf = function() local c = ac.getCar(i); return (c and c.speedKmh) or 999 end
-local modBody = function()
+function H.getModifiers(i)
+    if not H.ENABLED then return 0, 0 end
+    if not scaled then scaled = true; pcall(function() scaleToTrack(ac.getSim().trackLengthM) end) end
+    if i == nil or i < 0 then return 0, 0 end
+    if i == 0 then local isAI = false; pcall(function() local c = ac.getCar(0); isAI = c ~= nil and c.isAIControlled == true end); if not isAI then return 0, 0 end end
+    do
+        local ok, spd = pcall(function() local c = ac.getCar(i); return (c and c.speedKmh) or 999 end)
+        if ok and spd and spd < 40 then return 0, 0 end
+    end
+    seed(i)
+    local now = os.clock()
+    local prof = Drivers.statsOf(i)     -- optional per-slot driver profile (nil = normal system)
+
+    local vGrip, vCaut = 0, 0
+    if H.HUMAN_VAR then
+        -- a driver profile pins consistency (metronomic vs streaky) and cancels the random pace
+        -- bias (pace is handled deterministically via the car's AI level in the director).
+        local consDiv = prof and (0.4 + 1.2 * prof.cons) or cons[i]
+        local dwv = 0.6 * math.sin(now * 0.050 + phase[i]) + 0.4 * math.sin(now * 0.017 + phase[i] * 1.7)
+        dwv = dwv / consDiv
+        vGrip = (prof and 0 or pers[i]) + dwv * DRIFT_AMP
+        vCaut = -dwv * CAUTION_AMP
+    end
+    local pGrip, pCaut, mvG, mvC = 0, 0, 0, 0   -- mvG / mvC: H.MISTAKE_V2's dip and caution (full strength, outside the slew)
+
+    pcall(function()
         local car = ac.getCar(i)
         if not car then return end
         local cm = Classes.multOf(i)
@@ -711,7 +721,7 @@ local modBody = function()
                     -- driver RISK drives errors, and works even on classes that never bobble by
                     -- default (e.g. formula). Fragile aero classes (low classGate) get errors far
                     -- LESS often and gentler, so a driver's risk shows as the odd lost place, not a
-                    -- spin/DNF -- while the relative order between drivers (the riskier one still errs more) is kept.
+                    -- spin/DNF -- while the relative order between drivers (Lance > Lewis) is kept.
                     local frag = math.min(classGate, 1)          -- 0 = fragile aero .. 1 = robust
                     rate = (MISTAKE_BASE + MISTAKE_RATE * p) * (0.15 + 1.15 * prof.risk) * (0.30 + 0.70 * frag)
                     sevScale = 0.45 + 0.55 * frag
@@ -774,34 +784,7 @@ local modBody = function()
             local da = dirtyair01(i, car)
             if da > 0 and cm.dirty > 0 then pGrip = pGrip - DIRTY_MAX_GRIP * da * cm.dirty; pCaut = pCaut + DIRTY_MAX_CAUT * da * cm.dirty * H.DIRTY_CAUT_X end
         end
-    end
-function H.getModifiers(i_)
-    i = i_
-    if not H.ENABLED then return 0, 0 end
-    if not scaled then scaled = true; pcall(function() scaleToTrack(ac.getSim().trackLengthM) end) end
-    if i == nil or i < 0 then return 0, 0 end
-    if i == 0 then local isAI = false; pcall(function() local c = ac.getCar(0); isAI = c ~= nil and c.isAIControlled == true end); if not isAI then return 0, 0 end end
-    do
-        local ok, spd = pcall(spdOf)
-        if ok and spd and spd < 40 then return 0, 0 end
-    end
-    seed(i)
-    now = os.clock()
-    prof = Drivers.statsOf(i)     -- optional per-slot driver profile (nil = normal system)
-
-    vGrip, vCaut = 0, 0
-    if H.HUMAN_VAR then
-        -- a driver profile pins consistency (metronomic vs streaky) and cancels the random pace
-        -- bias (pace is handled deterministically via the car's AI level in the director).
-        local consDiv = prof and (0.4 + 1.2 * prof.cons) or cons[i]
-        local dwv = 0.6 * math.sin(now * 0.050 + phase[i]) + 0.4 * math.sin(now * 0.017 + phase[i] * 1.7)
-        dwv = dwv / consDiv
-        vGrip = (prof and 0 or pers[i]) + dwv * DRIFT_AMP
-        vCaut = -dwv * CAUTION_AMP
-    end
-    pGrip, pCaut, mvG, mvC = 0, 0, 0, 0   -- mvG / mvC: H.MISTAKE_V2's dip and caution (full strength, outside the slew)
-
-    pcall(modBody)
+    end)
 
     local k = H.INTENSITY
     local gripTarget = vGrip * k + pGrip
@@ -822,6 +805,5 @@ function H.getModifiers(i_)
     if mvG ~= 0 then return math.max(cur - mvG, H.MV_GRIP_FLOOR), cautionOff end   -- a mistake's dip: fast, outside the slew
     return cur, cautionOff
 end
-end   -- (lean016) the getModifiers do-block
 
 return H

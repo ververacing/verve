@@ -9,10 +9,7 @@ C.active = false        -- a career event is running
 C.series, C.event = nil, nil
 C.eventLevel = nil      -- the event's own AI_LEVEL (AC's built-in ramp: ~80 at Novice 1 up to ~97 at the top)
 C.ramp = 0              -- 0..1 position of this event on that ramp (across every installed career event)
-C.meter = nil           -- [RACE] AI_LEVEL of the launched race (the launcher's difficulty slider); NIL = not
-                        -- readable. Never defaulted to a number: see C.meterSource and lib/difficulty.lua.
-C.meterSource = nil     -- 'race.ini' | 'per-car median' | nil. Shown in the UI so an undetected level is
-                        -- diagnosable in seconds instead of silently becoming maximum (board report 2026-10-12).
+C.meter = 100           -- [RACE] AI_LEVEL of the launched race (the launcher's difficulty slider)
 C.carLevels = {}        -- [i] = AI_LEVEL of CAR_i from race.ini (nil if absent)
 C.track, C.layout, C.model, C.cars, C.laps = nil, nil, nil, 0, 0
 C.sessionType = nil
@@ -124,7 +121,7 @@ function C.detect()
     if detectedFor == idx then return end
     detectedFor = idx
     C.active, C.series, C.event, C.eventLevel, C.ramp = false, nil, nil, nil, 0
-    C.meter, C.carLevels, C.meterSource = nil, {}, nil
+    C.meter, C.carLevels = 100, {}
     pcall(function()
         local ini = parseIni(io.load(ac.getFolder(ac.FolderID.Cfg) .. '/race.ini', ''))
         local race = ini.RACE or {}
@@ -132,8 +129,7 @@ function C.detect()
         C.model = (race.MODEL or ''):lower(); C.cars = tonumber(race.CARS) or sim.carsCount
         C.laps = C.raceLapsOf(ini)
         C.sessionType = ini.SESSION_0 and ini.SESSION_0.TYPE or nil
-        C.meter = tonumber(race.AI_LEVEL)
-        if C.meter then C.meterSource = 'race.ini' end
+        C.meter = tonumber(race.AI_LEVEL) or 100
         local raceNames, raceModels = {}, {}
         for sec, kv in pairs(ini) do
             local n = sec:match('^CAR_(%d+)$')
@@ -142,21 +138,6 @@ function C.detect()
                 if kv.AI_LEVEL then C.carLevels[n] = tonumber(kv.AI_LEVEL) end
                 if kv.DRIVER_NAME and #kv.DRIVER_NAME > 0 and n > 0 then raceNames[#raceNames + 1] = kv.DRIVER_NAME:lower() end
                 if n > 0 and kv.MODEL and kv.MODEL ~= '-' then raceModels[#raceModels + 1] = kv.MODEL:lower() end
-            end
-        end
-        -- (0.16) The launcher may write the difficulty ONLY per car - an external launcher like GT Life builds
-        -- the grid itself, and a user reported Verve pinning the field at maximum because [RACE] AI_LEVEL was
-        -- not where we look. The per-car levels are already parsed above, so use their MEDIAN rather than
-        -- assuming anything. Median, not mean, so one oddly-levelled car cannot drag the whole field.
-        if not C.meter then
-            local vals = {}
-            for k, v in pairs(C.carLevels) do
-                if k > 0 and type(v) == 'number' and v > 0 then vals[#vals + 1] = v end
-            end
-            if #vals > 0 then
-                table.sort(vals)
-                C.meter = vals[math.ceil(#vals / 2)]
-                C.meterSource = 'per-car median'
             end
         end
         local sun = tonumber(ini.LIGHTING and ini.LIGHTING.SUN_ANGLE)

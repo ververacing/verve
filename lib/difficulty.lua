@@ -105,14 +105,9 @@ function D.reset() cache = {}; cachedFor = nil end
 local function compute(i)
     local car = ac.getCar(i)
     if not car then return nil end
-    -- (0.16) NO `or 100`. An unreadable level used to become maximum, which is the opposite of standing down.
-    -- compute() already returns nil for a car it cannot judge, so nil here means Verve leaves this car alone
-    -- and the player gets stock AC behaviour rather than our guess.
-    local iniLevel = Career.carLevels[i] or Career.meter               -- launcher's number for this car (0..100+)
-    if not iniLevel then return nil end
+    local iniLevel = Career.carLevels[i] or Career.meter or 100        -- launcher's number for this car (0..100+)
     if Career.active and D.CAREER_CURVE then
-        local startPct, endPct = bandFor(Career.meter or iniLevel)   -- (0.16) the car's own level if the
-                                                                     -- race-wide one was never readable
+        local startPct, endPct = bandFor(Career.meter)
         local pct = startPct + (endPct - startPct) * (Career.ramp or 0)
         local base = pctToLevel(pct, (curveFor(i)))
         -- keep the event's own relative spread between opponents (86..88 => +-1%), measured against the grid's
@@ -170,12 +165,8 @@ function D.stockLevel(i)
 end
 
 function D.describe()
-    if not Career.active then
-        if D.sliderOverride then return D.sliderOverride end
-        if not Career.meter then return 'Difficulty NOT DETECTED - leaving the level alone (check the launcher)' end
-        return string.format('Field at the configured level (%d, from %s)', Career.meter, Career.meterSource or '?')
-    end
-    if not D.CAREER_CURVE then return string.format('Career, flat: %d', Career.meter or 0) end
+    if not Career.active then return D.sliderOverride or string.format('Field at the configured level (%d)', Career.meter or 100) end
+    if not D.CAREER_CURVE then return string.format('Career, flat: %d', Career.meter or 100) end
     local s, e = bandFor(Career.meter)
     local pct = s + (e - s) * (Career.ramp or 0)
     return string.format('Career curve: meter %d, %.0f%% into the career, field %.0f%% off expert pace', Career.meter or 100, (Career.ramp or 0) * 100, pct)
