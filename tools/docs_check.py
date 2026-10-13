@@ -6,6 +6,11 @@ The 2026-09-28 docs set drifted for 12 days because nothing noticed. This notice
   3. docs/LESSONS.md older than the newest commit touching Lua (a behaviour change that never became a lesson?)
   4. racecraft/state.md longer than 200 lines (it is rewritten, not appended) or not touched in 24 h
   5. uncommitted changes in the docs folder's own git older than a day
+  6. racecraft/state.md (and the other living documents) NOT TRACKED BY ANY GIT, or tracked and left uncommitted.
+     Until 2026-10-12 state.md was in no repo at all: it is rewritten wholesale under decision 0019, twice on a busy
+     day, so it was always one bad overwrite from gone - and check 4 above happily reported it "current" the whole
+     time, because length and freshness say nothing about recoverability. The daily "docs committed" line was only
+     ever true of docs/. A check that cannot tell "versioned" from "merely present" will keep calling this fine.
 
     python tools/docs_check.py
 Exit code 0 = current, 1 = something to fix (the hourly check fixes it before anything else).
@@ -83,10 +88,30 @@ if os.path.isdir(os.path.join(DOCS, ".git")):
     if dirty and last and time.time() - int(last) > 24 * 3600:
         flags.append("docs/ has uncommitted changes and no docs commit in over 24 h - commit the docs folder")
 
+# 6. the living documents are versioned AND committed
+LIVING = ["racecraft/state.md", "racecraft/backlog.md", "racecraft/reality.md",
+          "requests_for_racecraft.md", "requests_for_broadcast.md"]
+desk_top = git("rev-parse", "--show-toplevel", cwd=DESK).strip()
+if not desk_top:
+    flags.append("verve_desk is NOT a git repo - state.md and the other living documents have no history at all")
+else:
+    untracked = [f for f in LIVING
+                 if os.path.exists(os.path.join(DESK, f))
+                 and subprocess.run(["git", "ls-files", "--error-unmatch", f], cwd=DESK,
+                                    capture_output=True, text=True).returncode != 0]
+    if untracked:
+        flags.append("living documents in NO git: " + ", ".join(untracked))
+    dirty = [l[3:].strip() for l in git("status", "--porcelain", cwd=DESK).splitlines()
+             if l[3:].strip() in LIVING]
+    if dirty:
+        flags.append("living documents changed but not committed: " + ", ".join(dirty)
+                     + " - commit the desk repo")
+
 if flags:
     print("DOCS DRIFT - fix before anything else:")
     for f in flags:
         print("  - " + f)
     sys.exit(1)
-print("docs current: switches %d with status, state.md %d lines, LESSONS and SWITCHES newer than the last commit" % (len(status), n))
+print("docs current: switches %d with status, state.md %d lines, LESSONS and SWITCHES newer than the last commit, "
+      "living documents tracked and committed" % (len(status), n))
 sys.exit(0)
