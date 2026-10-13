@@ -465,6 +465,36 @@ def build_race_ini(args, base_path):
     return ini, len(cars) + 1
 
 
+def condition_stamp(overrides):
+    """-> "SECTION.KEY=value,..." for the pins that decide how a car goes round, with a run's --condition marked '*'.
+
+    Written 2026-10-12. The pins above are deliberate and good; NOTHING RECORDED THEM. DYNAMIC_TRACK decides how much
+    rubber is down and this file's own comment calls it as important as temperature, yet results.csv carried
+    ambient_c and road_c and no grip at all - so grip was controlled by assumption and unverifiable from any row we
+    had ever scored. That bit immediately: PC #2's stock-AC Spa floor came in 15x cleaner than PC #1's (0.31 v 4.8
+    solo per 100 car-laps, 0 v 6-of-18 strandings) and the first question - "are both machines actually on the same
+    rubber?" - could not be answered from the data on either side, only from reading two copies of this source.
+    Same shape as csp_ai recording the machine's defaults instead of the race's: a pin you cannot read back is a
+    hope, not a control.
+    """
+    want = [(s, k) for s, k, _ in RACE_CONDITIONS if s in ("DYNAMIC_TRACK", "GROOVE")]
+    vals = {(s, k): str(v) for s, k, v in RACE_CONDITIONS}
+    marked = set()
+    for spec in (overrides or []):
+        try:
+            path, value = spec.split("=", 1)
+            section, key = path.split(".", 1)
+        except ValueError:
+            continue
+        sk = (section.strip().upper(), key.strip().upper())
+        vals[sk] = value.strip()
+        marked.add(sk)
+        if sk not in want:
+            want.append(sk)        # an override outside the grip sections still belongs in the record
+    return ",".join("%s.%s=%s%s" % (s, k, vals.get((s, k), "?"), "*" if (s, k) in marked else "")
+                    for s, k in want)
+
+
 def write_result_row(csv_path, m):
     """Append one race to results.csv as ONE growing file: a race without some columns gets blanks, a race with new columns
     widens the file (earlier rows get blanks). The old code rotated the file to results_until_<stamp>.csv whenever the column
@@ -1295,6 +1325,7 @@ def run_once(args, arm, run_idx):
                                     if ini.has_option("LIGHTING", "__CM_WEATHER_TYPE") else "stock")
     m["ambient_c"] = args.ambient if args.ambient is not None else DEFAULT_AMBIENT
     m["road_c"] = args.road if args.road is not None else DEFAULT_ROAD
+    m["conditions"] = condition_stamp(getattr(args, "condition", None))
     # AC's own fuel record (appended columns): tanks it emptied at a stop, AI stops it began, laps it fuelled the field
     # for, and whether its log was cut off (the counts are then lower bounds; no race line = no counts)
     m.update(ac_log_fuel(aclog))
