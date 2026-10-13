@@ -82,14 +82,21 @@ def scripts():
     out = set()
     for cmd in _wmic("bash.exe"):
         c = cmd.strip()
-        # Do NOT strip the trailing quote. `bash -c "... chain_bar.sh"` ends with a QUOTE; stripping it exposes the
-        # .sh and reinstates the exact self-match this function exists to prevent - which is what my own selftest
-        # caught on its first run, having written the comment claiming immunity directly above the bug.
-        # Two independent tests, either of which is sufficient to reject a shell:
+        # Reject a `bash -c` shell FIRST. Do not strip its trailing quote: `bash -c "... chain_bar.sh"` ends in a
+        # QUOTE, and stripping it exposes the .sh and reinstates the exact self-match this function exists to
+        # prevent - which my own selftest caught, with the comment claiming immunity sitting directly above the bug.
         if " -c " in c or c.endswith('"'):
             continue
-        if c.endswith(".sh"):
-            out.add(os.path.basename(c))
+        # Then find a .sh ARGUMENT anywhere, not just at the end. The first version tested only the end of the
+        # string, so it missed every script invoked WITH arguments - including this project's own generic
+        # `bash chain.sh <prev-log> <queue> <chain-log>`, whose command line ends in a .log. The hourly check would
+        # have reported "no chains armed" while three were running, and the obvious reaction to that is to arm
+        # duplicates. Found by running the tool for real one hour after writing it.
+        for tok in c.split():
+            t = tok.strip('"')
+            if t.endswith(".sh"):
+                out.add(os.path.basename(t))
+                break
     return sorted(out)
 
 
@@ -130,7 +137,7 @@ def selftest():
         c = c.strip()
         if " -c " in c or c.endswith('"'):
             return False
-        return c.endswith(".sh")
+        return any(tok.strip('"').endswith(".sh") for tok in c.split())
 
     # 1. self-match: a `bash -c` command line mentioning chain scripts must NOT be counted as a script
     shell = 'C:\\Program Files\\Git\\bin\\bash.exe -c "grep chain_foo.sh && ls chain_bar.sh"'
@@ -150,6 +157,13 @@ def selftest():
           % ("yes" if is_script(real) else "NO - BROKEN"))
     ok &= is_script(real)
 
+    # the case the first version missed in production: a script invoked WITH arguments, so the command line ends in
+    # an argument rather than in .sh. This project's own chains look exactly like this.
+    withargs = 'bash.exe /c/tmp/scratch/chain.sh batch_prev.log batch_next.txt chain_next.log'
+    print("  arguments:  a script with args (line ends in .log) counted?       %s"
+          % ("yes" if is_script(withargs) else "NO - BROKEN, this hid three live chains"))
+    ok &= is_script(withargs)
+
     # 2. parent/child: the Store shim and the real interpreter must collapse to ONE
     shim = 'C:\\Users\\T\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe -u tools/batch.py tools/harness_results/batch_x.txt'
     core = '"C:\\Users\\T\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe" -u tools/batch.py tools/harness_results/batch_x.txt'
@@ -165,7 +179,7 @@ def selftest():
           % ("yes" if two == 2 else "NO - BROKEN"))
     ok &= two == 2
 
-    print("\n  %s" % ("all five cases correct" if ok else "SELFTEST FAILED - do not trust this module"))
+    print("\n  %s" % ("all six cases correct" if ok else "SELFTEST FAILED - do not trust this module"))
     return 0 if ok else 1
 
 
