@@ -70,9 +70,18 @@ AI_KEYS = ("NEW_LATERAL_GRIP_ESTIMATION", "FIX_GRIP_MULT", "FIX_SHORT_AXLE", "FI
            "REDUCE_STABILIZATION")
 
 
-def csp_stamp():
-    """-> (build, "KEY=value,..." for AI_KEYS as the race will actually see them: the CSP default, with any user override
-    on top). A missing key is reported as 'absent', which is what an older build looks like."""
+def csp_stamp(override=None):
+    """-> (build, "KEY=value,..." for AI_KEYS as the race ACTUALLY saw them: the CSP default, then any user override,
+    then THIS RUN's --csp AI_TWEAKS on top, which is marked with a trailing '*'. A missing key is reported as 'absent',
+    which is what an older build looks like.
+
+    `override` is the run's {"KEY": value} from --csp new_behaviour/AI_TWEAKS. It has to be passed in because this is
+    called at SCORING time, after restore_csp_overrides() has already put the user ini back - so reading the files
+    alone reports the machine's defaults and not the race. That was a live bug, not a hypothetical: every keys-OFF row
+    we have scored carries NEW_LATERAL_GRIP_ESTIMATION=1 and FIX_GRIP_MULT=1 in csp_ai, the exact opposite of the 0
+    the row set, while this docstring claimed the values were what the race would see. The `arm` column held the truth
+    the whole time, which is why arm_check never noticed. Caught 2026-10-12 while widening the stamp from 8 keys to
+    17 - a wider stamp that is still wrong is worse than a narrow one, because it looks authoritative."""
     build = ""
     try:
         # NOT configparser: data_manifest.ini has duplicate keys and a strict parser raises on it (tested 2026-10-11)
@@ -103,7 +112,18 @@ def csp_stamp():
                 pass
         except Exception:  # noqa: BLE001
             pass
-    return build, ",".join("%s=%s" % (k, vals.get(k, "absent")) for k in tuple(AI_KEYS) + tuple(extra))
+    # the run's own override last, marked, so "this race set it" never reads as "this machine ships it"
+    marked = set()
+    try:
+        for k, v in (override or {}).items():
+            vals[k] = str(int(v)) if isinstance(v, bool) else str(v)
+            marked.add(k)
+            if k not in AI_KEYS and k not in extra:
+                extra.append(k)
+    except Exception:  # noqa: BLE001
+        pass
+    return build, ",".join("%s=%s%s" % (k, vals.get(k, "absent"), "*" if k in marked else "")
+                           for k in tuple(AI_KEYS) + tuple(extra))
 # Everything else that decides how a car goes round. It was all whatever Content Manager last left in race.ini,
 # differing silently between machines and between one batch and the next; DYNAMIC_TRACK is the one that matters as
 # much as temperature, because it decides how much rubber is down. Overridable per run with --condition.
@@ -1240,7 +1260,7 @@ def run_once(args, arm, run_idx):
     m["label"] = label
     m["run"] = run_idx
     m["assists"] = json.dumps(assists_eff, sort_keys=True)
-    m["csp_build"], m["csp_ai"] = csp_stamp()
+    m["csp_build"], m["csp_ai"] = csp_stamp(((arm.get("csp") or {}).get("new_behaviour") or {}).get("AI_TWEAKS"))
     m["finished"] = finished
     m["quiet_finish"] = 1 if quiet_finish else ""
     # exact lap times from AC itself (only when AC exited cleanly): AI best / median-of-best, player best
