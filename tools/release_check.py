@@ -63,9 +63,18 @@ NEEDED_CELLS = GATING_CELLS                          # what completeness and not
 MIN_SIDE = 3          # runs per arm before a default change is evidenced; the opening-lap spread demands 3+
 
 # metric -> (higher is worse?, label). laptime is two-sided: drifting either way means the pace changed.
+# laptime_median_s IS DELIBERATELY ABSENT. It is not a lap time: race_metrics derives it from the difference
+# between DIAG SNAPSHOT timestamps, and diag writes every 8 s - so every "lap time" it produces is a multiple of 8,
+# and a median over an even-length list gives multiples of 4. That is why every Monza 12-lap row in results.csv
+# reads a whole number (120, 121, 124, 128) with spreads of exactly 8, 12 or 16, while a real GT3 Monza lap is
+# about 110 s. It cannot resolve anything finer than ~8 s, so comparing 120.3 against 120.0 - which refused this
+# release - was reading a quantisation artefact as a pace regression.
+# The feed already carries AC's own lap times to the millisecond (`lap_ms`, with `cuts`), which is the right source
+# for a pace gate. Until the suite scores from that, THIS GATE DOES NOT JUDGE PACE, and says so rather than
+# pretending a coarse number is a fine one.
 SUITE_METRICS = [("contact_events", True, "contact"), ("incidents", True, "inc"),
-                 ("heavy80", True, "heavy80"), ("retired_or_parked", True, "dead"),
-                 ("laptime_median_s", None, "medlap")]
+                 ("heavy80", True, "heavy80"), ("retired_or_parked", True, "dead")]
+PACE_NOTE = "pace NOT judged: laptime_median_s has ~8 s resolution (diag-snapshot derived); use the feed's lap_ms"
 
 
 def sh(*args):
@@ -212,7 +221,11 @@ def check_not_worse(rep, suite, fresh_prefix):
         return
     base_prefix = others[-1]          # rc16a < rc16b < rc16c sorts correctly for this naming scheme
     new, old = cells_of(suite, fresh_prefix), cells_of(suite, base_prefix)
-    for cell, arm in sorted(new):
+    # ONLY THE GATING CELLS. Decision 0027 made the 2-lap sprints character-only, and this loop was still
+    # judging them - so a single heavy hit in a Spa sprint (heavy80 0.3 against a 0.0-0.0 baseline) could refuse
+    # the whole release on a cell the owner had explicitly demoted. The sprints are reported by completeness and
+    # scored by hand for opening-lap character; they do not appear here.
+    for cell, arm in sorted(k for k in new if k[0] in GATING_CELLS):
         a, b = old.get((cell, arm), []), new[(cell, arm)]
         name = "not worse %s" % (cell if arm == "-" else "%s/%s" % (cell, arm))
         if len(a) < 2 or len(b) < 2:
@@ -235,17 +248,30 @@ def check_not_worse(rep, suite, fresh_prefix):
             # outside [lo, hi], so it lands in the REFUSED middle state and correctly asks for a deeper baseline
             # instead of passing quietly.
             w = max(hi - lo, 1.0)
-            if lo <= mean <= hi:
-                tag, where = "", None                 # indistinguishable from the baseline: that is "not worse"
-            elif mean > hi + w or (higher_worse is None and mean < lo - w):
-                tag, where = " WORSE", bad            # further out than the spread can explain
-            else:
-                tag, where = " ?", unresolved         # outside the range but inside one spread of it
+            # For a higher-is-worse metric, anything at or BELOW the top of the baseline range is not worse -
+            # including below the whole range, which is an IMPROVEMENT. The old form only passed values INSIDE
+            # [lo, hi], so HEAD being better than baseline came back "?" and refused the release: Monza incidents
+            # went 24,25,24 -> 22,20,21 and the gate called a four-incident improvement unresolved. A gate that
+            # cannot tell "better" from "unmeasurable" will block good work as readily as bad.
+            if higher_worse:
+                if mean <= hi:
+                    tag, where = (" BETTER", None) if mean < lo else ("", None)
+                elif mean > hi + w:
+                    tag, where = " WORSE", bad
+                else:
+                    tag, where = " ?", unresolved
+            else:                                      # two-sided (pace): drifting either way is a change
+                if lo <= mean <= hi:
+                    tag, where = "", None
+                elif mean > hi + w or mean < lo - w:
+                    tag, where = " WORSE", bad
+                else:
+                    tag, where = " ?", unresolved
             notes.append("%s %.1f vs %.1f-%.1f%s" % (label, mean, lo, hi, tag))
             if where is not None:
                 where.append(label)
-        detail = "%s(n=%d) -> %s(n=%d): %s" % (base_prefix, len(a), fresh_prefix, len(b),
-                                               ", ".join(notes) or "no metric comparable")
+        detail = "%s(n=%d) -> %s(n=%d): %s | %s" % (base_prefix, len(a), fresh_prefix, len(b),
+                                                    ", ".join(notes) or "no metric comparable", PACE_NOTE)
         if not notes:
             rep.refuse(name, detail)
         elif bad:
