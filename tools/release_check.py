@@ -47,6 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERVE = os.path.dirname(HERE)
 DOCS = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa", "verve_desk", "docs")
 RESULTS = os.path.join(HERE, "harness_results", "results.csv")
+PACE_CSV = os.path.join(HERE, "harness_results", "pace.csv")   # written by tools/pace.py from the feed
 APP_PATHS = ["lib", "Verve.lua", "diag.lua"]
 
 # The arm token is OPTIONAL. An earlier version of this regex demanded an `on` and an `off` arm per cell, which was a
@@ -87,9 +88,29 @@ MIN_SIDE = 3          # runs per arm before a default change is evidenced; the o
 # The feed already carries AC's own lap times to the millisecond (`lap_ms`, with `cuts`), which is the right source
 # for a pace gate. Until the suite scores from that, THIS GATE DOES NOT JUDGE PACE, and says so rather than
 # pretending a coarse number is a fine one.
-SUITE_METRICS = [("contact_events", True, "contact"), ("incidents", True, "inc"),
-                 ("heavy80", True, "heavy80"), ("retired_or_parked", True, "dead")]
-PACE_NOTE = "pace NOT judged: laptime_median_s has ~8 s resolution (diag-snapshot derived); use the feed's lap_ms"
+# PACE IS NOW JUDGED, from the source named above. tools/pace.py reads the feed's `lap_ms` and writes
+# harness_results/pace.csv; `pace_best_s` is the field's fastest CLEAN lap, which is the pace CEILING.
+# WHY THE CEILING AND NOT A FIELD AVERAGE: a field-aggregate lap time is partly a TRAFFIC metric, and the arms here
+# differ in how much they overtake - which is the thing under test, so it confounds the measurement by construction.
+# Measured 2026-10-13: Monza's unfiltered field median read 1.0-1.7 s "slower" on HEAD with non-overlapping ranges
+# against a baseline whose own spread was 0.12 s, and the entire difference was midfield cars getting fewer clear
+# laps because HEAD passes more. Filtering to laps run more than 2 s clear of the car ahead dissolved it. The
+# ceiling needs no such filter - the fastest lap of a race is almost always a clear one, and filtering did not move
+# it at all - so the ceiling is what this gates on.
+# ONE-SIDED, NOT TWO-SIDED. The earlier two-sided treatment ("drifting either way means the pace changed") is wrong
+# for a REGRESSION gate: getting faster is not a regression, and flagging it would block good work exactly as the
+# better-than-baseline bug did for incidents. Whether we are faster than is REALISTIC is a different question, asked
+# against reality.md's human references, not against our own previous build.
+# The fourth field is the NOISE FLOOR in that metric's own units. It used to be a blanket 1.0, which reads as "one
+# whole event" for a count and as "one second" for a lap time - the same number meaning two unrelated things.
+# Counts keep 1.0 (you cannot resolve a rare event against a zero-spread baseline at n=3). Pace gets 0.30 s, which
+# is MEASURED rather than chosen: the fastest clean lap repeats to 0.17 s across three Monza races and 0.23 s across
+# three Spa races, so 0.30 s sits just above the tightest observed arm spread and otherwise lets the arm's own
+# spread govern.
+SUITE_METRICS = [("contact_events", True, "contact", 1.0), ("incidents", True, "inc", 1.0),
+                 ("heavy80", True, "heavy80", 1.0), ("retired_or_parked", True, "dead", 1.0),
+                 ("pace_best_s", True, "pace_s", 0.30)]
+PACE_NOTE = "pace judged on pace_best_s (feed lap_ms, 0.001 s resolution, fastest clean lap = the ceiling)"
 
 
 def sh(*args):
@@ -135,9 +156,23 @@ def read_results():
         import csv
         import io
         with io.open(RESULTS, encoding="utf-8", errors="replace") as fh:
-            return list(csv.DictReader(fh))
+            rows = list(csv.DictReader(fh))
     except OSError:
         return None
+    # Join the pace sidecar on label. Pace lives in its own file because it is computed from the FEED, not from the
+    # harness row - the harness cannot write it without being imported, and importing harness.py taskkills the game.
+    # A missing pace.csv, or a row absent from it, simply leaves the column empty and the gate skips the metric for
+    # that cell rather than inventing a value.
+    try:
+        with io.open(PACE_CSV, encoding="utf-8", errors="replace") as fh:
+            pace = {r["label"]: r for r in csv.DictReader(fh) if r.get("label")}
+    except OSError:
+        return rows
+    for r in rows:
+        p = pace.get(r.get("label") or "")
+        if p and p.get("best_s"):
+            r["pace_best_s"] = p["best_s"]
+    return rows
 
 
 def stamp_of(row):
@@ -256,7 +291,7 @@ def check_not_worse(rep, suite, fresh_prefix, all_rows=()):
                              "regression nor rule one out" % (base_label, len(a), fresh_prefix, len(b)))
             continue
         bad, unresolved, notes = [], [], []
-        for key, higher_worse, label in SUITE_METRICS:
+        for key, higher_worse, label, floor in SUITE_METRICS:
             av, bv = nums(a, key), nums(b, key)
             if not av or not bv or (max(av) == 0 and max(bv) == 0):
                 continue              # the sprint cells never produce a median lap time; do not pretend they did
@@ -270,7 +305,7 @@ def check_not_worse(rep, suite, fresh_prefix, all_rows=()):
             # A floor of one whole event keeps a zero-width baseline from hair-triggering; the value still falls
             # outside [lo, hi], so it lands in the REFUSED middle state and correctly asks for a deeper baseline
             # instead of passing quietly.
-            w = max(hi - lo, 1.0)
+            w = max(hi - lo, floor)
             # For a higher-is-worse metric, anything at or BELOW the top of the baseline range is not worse -
             # including below the whole range, which is an IMPROVEMENT. The old form only passed values INSIDE
             # [lo, hi], so HEAD being better than baseline came back "?" and refused the release: Monza incidents
