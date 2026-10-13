@@ -18,6 +18,8 @@ local Contacts  = require('lib.contacts')     -- contacts from CSP's collision s
 local Fault     = require('lib.fault')        -- who caused each contact, and the time penalty it costs (owner's ask 2026-09-17)
 local Strategy  = require('lib.strategy')     -- planned manoeuvres (racecraft drives it; Verve owns the toggle + status)
 local Fuel      = require('lib.fuel')         -- timed races: AC's 1.2-lap AI fuel load and its empty-tank pit loop (G.timedFuel)
+local Ers       = require('lib.ers')          -- AI battery deployment, MGU-K (R.ERS_MODE; default 'off' = AC decides)
+local TyreHint  = require('lib.tyrehint')     -- cold-tyre AI tyre hint (R.COLD_TYRE; default 0 = AC's own)
 Racecraft.penCap = Fault.penCap            -- penalty throttle caps, read by racecraft's throttle setter (shared table)
 Fault.attach(Recovery.recentDrops, Feed.event)
 Racecraft.humanMv = Human.mv               -- (lib/human.lua H.MISTAKE_V2) a visible mistake's levers, applied by racecraft (shared table)
@@ -207,14 +209,20 @@ function script.update(dt)
     if Harness then
         if not harnessApplied then
             harnessApplied = true
-            if type(Harness.settings) == 'table' then
-                for k, v in pairs(Harness.settings) do if DEFAULTS[k] ~= nil then G[k] = v end end   -- session only, never saved
+            -- a JSON number landing on a BOOLEAN switch is coerced (0 -> false, else true): Lua treats 0 as true, so
+            -- a queue row written in the numeric "0 = off" convention of the sibling switches was turning booleans
+            -- ON (review 2026-10-10, R.BG_ALL_GATE). Numbers onto numbers, strings onto strings pass through as before.
+            local function hv(dst, k, v)
+                if type(dst[k]) == 'boolean' and type(v) == 'number' then dst[k] = (v ~= 0) else dst[k] = v end
             end
-            if type(Harness.recovery) == 'table' then for k, v in pairs(Harness.recovery) do Recovery[k] = v end end
-            if type(Harness.racecraft) == 'table' then for k, v in pairs(Harness.racecraft) do Racecraft[k] = v end end
-            if type(Harness.fault) == 'table' then for k, v in pairs(Harness.fault) do Fault[k] = v end end
-            if type(Harness.human) == 'table' then for k, v in pairs(Harness.human) do Human[k] = v end end
-            if type(Harness.strategy) == 'table' then for k, v in pairs(Harness.strategy) do Strategy[k] = v end end
+            if type(Harness.settings) == 'table' then
+                for k, v in pairs(Harness.settings) do if DEFAULTS[k] ~= nil then hv(G, k, v) end end   -- session only, never saved
+            end
+            if type(Harness.recovery) == 'table' then for k, v in pairs(Harness.recovery) do hv(Recovery, k, v) end end
+            if type(Harness.racecraft) == 'table' then for k, v in pairs(Harness.racecraft) do hv(Racecraft, k, v) end end
+            if type(Harness.fault) == 'table' then for k, v in pairs(Harness.fault) do hv(Fault, k, v) end end
+            if type(Harness.human) == 'table' then for k, v in pairs(Harness.human) do hv(Human, k, v) end end
+            if type(Harness.strategy) == 'table' then for k, v in pairs(Harness.strategy) do hv(Strategy, k, v) end end
             if Diag and Harness.label then Diag.label = tostring(Harness.label) end
         end
         -- AC loads to a pre-session screen and waits for the Drive button; nothing (not even the AI grid)
@@ -260,7 +268,21 @@ function script.update(dt)
                 -- diag snapshot have not been written yet, so every tool that counts laps from them would
                 -- under-read the race by one (second test PC, 2026-09-24). The diag writes every 8 s, so clear that.
                 if harnessStopT == 0 then harnessStopT = os.clock() end
-                if os.clock() - harnessStopT >= 10 then
+                -- (STOP_WAIT, harness A/B) quit only once every car still racing has taken the flag, plus 3 s, at most
+                -- STOP_WAIT s after the leader's. A flat 10 s quit lands while the field is crossing the line: when a car
+                -- crosses at the moment AC shuts down, AC loses it (-1 in race_out's raceResult) and writes NO laps at all
+                -- (every -1 file has 0 laps, 18 of 1583; 20 % of stop-at-lap quits v 5 % when AC ends the race itself).
+                local waitMax, pending = tonumber(Racecraft.STOP_WAIT) or 0, false
+                if waitMax > 0 then
+                    for k = 0, simH.carsCount - 1 do
+                        local ck = ac.getCar(k)
+                        if ck and not ck.isRaceFinished and (ck.lapCount or 0) < Harness.stopAtLap and not ck.isRetired and not ck.isInPitlane
+                           and (ck.speedKmh or 0) > 5 then pending = true; break end   -- (a --stop-laps sprint: done = reached the stop lap)
+                    end
+                    if pending then Harness.doneT = nil elseif not Harness.doneT then Harness.doneT = os.clock() end
+                end
+                local held = os.clock() - harnessStopT
+                if held >= 10 and (waitMax <= 0 or held >= waitMax or (Harness.doneT and os.clock() - Harness.doneT >= 3)) then
                     harnessQuit = true
                     pcall(function() ac.log('Verve harness: stop-at-lap reached, shutting AC down (replay autosave)'); ac.shutdownAssettoCorsa() end)
                 end
@@ -338,6 +360,8 @@ function script.update(dt)
                     -- randomised driver profiles, the way a real grid will be run (same as the UI button)
                     if Harness.randomizeDrivers and not Drivers.anyAssigned() then   -- once per weekend, not per session
                         pcall(function()
+                            local seed = tonumber(Harness.driverSeed) or 0       -- (--driver-seed) the same draw for both arms of a pair
+                            Drivers.SEED = seed > 0 and math.floor(seed) or nil
                             Drivers.randomizeGrid()
                             local parts = {}
                             for i = 1, simH.carsCount - 1 do
@@ -492,17 +516,19 @@ function script.update(dt)
     if G.timedFuel then pc('fuel', Fuel.update, sim, dt) else pcall(Fuel.offTick) end   -- timed races: green fuel load + pit-box guard (lib/fuel.lua)
     Troublespots.ENABLED = G.troubleSpots
     Troublespots.update(dt)
+    pc('ers', Ers.update, sim, dt)   -- AI battery deployment (lib/ers.lua); returns at once while R.ERS_MODE is 'off'
+    pc('tyrehint', TyreHint.update, sim, dt)   -- cold-tyre AI tyre hint (lib/tyrehint.lua); returns at once while R.COLD_TYRE is 0
 
     if Diag then pcall(function()
         Diag.update(dt, {
             managed = managed, attacking = Racecraft.attacking, defending = Racecraft.defending,
             recovering = Recovery.count, crashRepairs = Recovery.repairedCount,
             limpRepairs = Recovery.limpCount, retired = Recovery.retiredCount, crawlN = Racecraft.crawlN or 0,
-            roomN = Racecraft.roomN or 0, roomAct = Racecraft.roomAct or 0, evalN = Racecraft.evalN or 0, fastTuckN = Racecraft.fastTuckN or 0, yellowSlowN = Racecraft.yellowSlowN or 0,
+            roomN = Racecraft.roomN or 0, roomAct = Racecraft.roomAct or 0, bgN = Racecraft.bgN or 0, bgPassN = Racecraft.bgPassN or 0, evalN = Racecraft.evalN or 0, fastTuckN = Racecraft.fastTuckN or 0, yellowSlowN = Racecraft.yellowSlowN or 0,
             hotSpots = Troublespots.hotCount(), crashRisk = Troublespots.crashiness(), isOval = Racecraft.isOval,
             peak = Troublespots.peakHeat(), storeLen = Troublespots.storeLen, saveOk = Troublespots.lastSaveOk,
             per = diagPer, rc = Racecraft.last, recState = Recovery.stateOf, cv2 = Racecraft.cv2, episodes = Strategy.episodes,
-            recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, boxRescueN = Recovery.boxRescueN, boxSeenN = Recovery.boxSeenN, boxTryN = Recovery.boxTryN, boxOkN = Recovery.boxOkN, dropsOff = Recovery.dropsOff, fuelLoadN = Fuel.loadN, fuelBoxN = Fuel.boxFixN, fuelReN = Fuel.boxReN,
+            recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, dropFailN = Recovery.dropFailN, dropFailClear = Recovery.dropFailClear, boxRescueN = Recovery.boxRescueN, boxSeenN = Recovery.boxSeenN, boxTryN = Recovery.boxTryN, boxOkN = Recovery.boxOkN, dropsOff = Recovery.dropsOff, fuelLoadN = Fuel.loadN, fuelBoxN = Fuel.boxFixN, fuelReN = Fuel.boxReN,
             mvN = Strategy.attempts, mvOK = Strategy.ok, mvT = Strategy.byTypeString(), gateN = Recovery.gateMoves,
             fwdSign = (Recovery.fwdSign and Recovery.fwdSign() or 0), dropFlips = Recovery.dropFlips,
             suspPits = Recovery.suspPitCount, faults = Fault.count, penalties = Fault.penCount, contacts = Contacts.count,
@@ -547,6 +573,15 @@ telemetryCtx = function()
         for i, a in pairs(Racecraft.baseAggr or {}) do if i ~= 0 and type(a) == 'number' and a >= 0 then v[#v + 1] = a end end   -- (not slot 0: the autopilot reads 1.0)
         if #v > 0 then table.sort(v); settings[#settings + 1] = string.format('"launcherAggr":%.3f', v[math.floor((#v + 1) / 2)]) end
     end)
+    pcall(function() local f = Fuel.summary(); if f then settings[#settings + 1] = f end end)   -- (0.15.2) timed/lapped fuel work, if any
+    pcall(function()   -- (A2, 0.16) WHY each car was parked, as a {reason:count} tally in the settings blob - no schema change.
+        local t, out = {}, {}   -- the report has only ever carried retired_by_verve, a COUNT, so a player's "Verve retired 6 of my 7
+        for i, w in pairs(Recovery.parkWhy or {}) do   -- cars" could not be told from six genuine wrecks. Every community case that
+            if i ~= 0 and type(w) == 'string' then t[w] = (t[w] or 0) + 1 end   -- matters shows 0 incidents, so the REASON is the finding.
+        end
+        for w, c in pairs(t) do out[#out + 1] = string.format('"%s":%d', w, c) end
+        if #out > 0 then table.sort(out); settings[#settings + 1] = '"parkWhy":{' .. table.concat(out, ',') .. '}' end
+    end)
     local playerModel = ''; pcall(function() playerModel = ac.getCarID(0) or '' end)
     local cspBuild = nil; pcall(function() cspBuild = ac.getPatchVersionCode() end)
     return {
@@ -563,7 +598,8 @@ telemetryCtx = function()
         settingsJson = '{' .. table.concat(settings, ',') .. '}',
     }
 end
-ac.onRelease(function() pcall(function() local okS, simR = pcall(ac.getSim); if okS and simR then Telemetry.abort('quit', simR, telemetryCtx()) end end); pcall(Feed.finish) end)   -- (Feed.finish: race_end + the last lines; it was never called)
+ac.onRelease(function() pcall(function() local okS, simR = pcall(ac.getSim); if okS and simR then Telemetry.abort('quit', simR, telemetryCtx()) end end); pcall(Feed.finish)   -- (Feed.finish: race_end + the last lines; it was never called)
+    pcall(Troublespots.save, true) end)   -- (lean016) the learned map's last minutes (in-race saves are now every T.SAVE_EVERY s)
 
 ac.onSessionStart(function()
     -- harness: every session of a weekend needs its own Drive press + autopilot arming
