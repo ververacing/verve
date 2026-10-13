@@ -218,7 +218,15 @@ def check_not_worse(rep, suite, fresh_prefix):
                 continue              # the sprint cells never produce a median lap time; do not pretend they did
             mean = sum(bv) / len(bv)
             lo, hi = min(av), max(av)
-            w = hi - lo               # the baseline arm's OWN observed spread, as the yardstick for noise
+            # The baseline arm's OWN observed spread is the yardstick for noise - but it can be ZERO, and then the
+            # allowance vanishes and the rule degenerates to "any nonzero value is a regression". That fired on
+            # 2026-10-12: rc16b's Monza arm had heavy80 0 and dead 0 across n=2, so ONE heavy hit in one of three new
+            # races (rc16c_mon_off_2, 1 of 54 car-races) was reported WORSE. With two runs at zero you cannot tell
+            # "never happens" from "happens once in fifty" - that is absence of evidence, not evidence of a change.
+            # A floor of one whole event keeps a zero-width baseline from hair-triggering; the value still falls
+            # outside [lo, hi], so it lands in the REFUSED middle state and correctly asks for a deeper baseline
+            # instead of passing quietly.
+            w = max(hi - lo, 1.0)
             if lo <= mean <= hi:
                 tag, where = "", None                 # indistinguishable from the baseline: that is "not worse"
             elif mean > hi + w or (higher_worse is None and mean < lo - w):
