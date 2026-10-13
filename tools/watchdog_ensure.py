@@ -15,7 +15,23 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOG = os.path.join(HERE, "harness_results", "health.log")
+PIDFILE = os.path.join(HERE, "harness_results", "health.pid")
 STALE_S = 180
+
+
+def pid_alive():
+    """Is the recorded watchdog PID still a live process? tasklist, never PowerShell - the owner asked for no
+    PowerShell, and the loop this guards was itself spawning one a minute."""
+    try:
+        pid = int(open(PIDFILE, encoding="utf-8").read().strip())
+    except (OSError, ValueError):
+        return False
+    try:
+        out = subprocess.run(["tasklist", "/FI", "PID eq %d" % pid], capture_output=True, text=True,
+                             timeout=20).stdout
+    except Exception:  # noqa: BLE001
+        return True      # cannot tell: do not thrash a possibly-live watchdog
+    return str(pid) in out
 
 
 def age():
@@ -28,8 +44,11 @@ def age():
 def ensure():
     """-> 'running' (log fresh) or 'started' (watchdog launched now) or 'failed: ...'"""
     a = age()
-    if a is not None and a < STALE_S:
+    if a is not None and a < STALE_S and pid_alive():
         return "running"
+    # Freshness ALONE is not liveness. STALE_S is 180 s, so a watchdog killed a minute ago still looked "running"
+    # for three minutes and this function started nothing - which is how monitoring came to be off on 2026-10-13
+    # while the hourly check reported it up. Now a dead PID forces a restart however fresh the log looks.
     try:
         flags = 0x00000008 | 0x00000200 if os.name == "nt" else 0      # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
         subprocess.Popen([sys.executable, os.path.join(HERE, "health_watchdog.py")], cwd=os.path.dirname(HERE),

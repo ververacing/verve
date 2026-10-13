@@ -35,6 +35,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOG = os.path.join(HERE, "harness_results", "health.log")
 STOP = os.path.join(HERE, "harness_results", "HEALTH_STOP")
+PIDFILE = os.path.join(HERE, "harness_results", "health.pid")
 INTERVAL = 60
 LHM = "http://127.0.0.1:8085/data.json"   # LibreHardwareMonitor's sensor server (optional)
 
@@ -159,13 +160,29 @@ def stop_batch(reason, kill_game):
 
 def main():
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
+    # Record the PID so watchdog_ensure can ask whether THIS PROCESS is alive instead of inferring it from the log's
+    # mtime. Inferring it meant a watchdog killed one minute ago still looked "running" for three.
+    try:
+        with open(PIDFILE, "w", encoding="utf-8") as fh:
+            fh.write(str(os.getpid()))
+    except OSError:
+        pass
     runs = {"kill": 0, "throttle": 0}
     blind = 0
     acted = "throttle" if os.path.exists(STOP) else None    # already throttled? do not re-act, but KILL may still escalate
     while True:
         g = gpu()
         h = lhm()
-        cl = h.get("cpu_load", cpu_load())
+        # NO POWERSHELL IN THIS LOOP, in either branch. Two bugs lived on this line.
+        # First: `h.get("cpu_load", cpu_load())` evaluates the default EAGERLY, so cpu_load() - which spawns a
+        # PowerShell - ran on every tick and the result was discarded whenever LibreHardwareMonitor had the number.
+        # Second, and the reason the obvious fix was not enough: making it conditional only moved the spawn to the
+        # case where LHM is CLOSED, which is exactly when the owner closes it to quiet the machine down. He saw a
+        # PowerShell every half minute while racing, and a conditional call would have kept doing it.
+        # CPU LOAD IS NOT A SAFETY METRIC - nothing gates on it; the thresholds use temperatures. So it is simply
+        # unknown when LHM is absent, rather than worth a process per minute to fetch. cpu_load() is kept for a
+        # caller that wants it on demand, but the loop never calls it.
+        cl = h.get("cpu_load")
         line = time.strftime("%H:%M:%S")
         if g:
             t, u, p, f, c = g
@@ -177,7 +194,10 @@ def main():
             line += "  GPU 0C hot 0C load 0% 0W fan 0% 0MHz  [GPU SENSOR MISSING]"
         cpu_c = h.get("cpu_c")
         disk_c = h.get("disk_c")
-        line += f"  CPU {cpu_c:.0f}C load {cl:.0f}%" if cpu_c is not None else f"  CPU 0C load {cl:.0f}% [CPU SENSOR MISSING]"
+        # cl can be None now that the loop never spawns a PowerShell for it, and "{None:.0f}" raises - which would
+        # have killed the watchdog on its first tick with LHM closed, leaving no monitoring at all and no clue why.
+        load_s = f"{cl:.0f}%" if cl is not None else "n/a"
+        line += f"  CPU {cpu_c:.0f}C load {load_s}" if cpu_c is not None else f"  CPU 0C load {load_s} [CPU SENSOR MISSING]"
         line += f"  disk {disk_c:.0f}C" if disk_c is not None else "  disk n/a"
 
         level, why = tier(hot_c, cpu_c, disk_c)
