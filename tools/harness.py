@@ -17,6 +17,7 @@ Examples
   python tools/harness.py --laps 6 --runs 3 --label baseline --settings '{"enabled": false}'
   python tools/harness.py --laps 8 --ab A.json B.json --runs 4     # alternate two arms, 4 runs each
   python tools/harness.py --track ks_silverstone --laps 5 --ambient 22 --road 30
+  python tools/harness.py --models ks_mercedes_amg_gt3 --ai-level 100 --ballast '1..3=80' --restrictor 'last=20'   # per-car pace handicaps
 
 An arm file (A.json) is {"label": "...", "settings": {...G keys...}, "recovery": {"DRIVE": false},
 "racecraft": {...}} -- keys under "settings" are Verve's global toggles/sliders (enabled, crashRepair,
@@ -379,6 +380,70 @@ def parse_profiles(spec, ncars):
         else:
             out["slots"][int(k)] = v
     return out
+
+
+# Per-car pace handicaps written into CAR_n, for a pace gap that does not come from Verve: driver profiles only exist with Verve
+# on (Verve.lua returns before Drivers.applyPace when disabled), so an on/off pair built from --profiles compares a spread grid
+# with a uniform one (the p2gx 2x2, 13-14 Oct). BALLAST (kg) and RESTRICTOR (%) are AC's own and should hold with Verve off;
+# a per-car AI_LEVEL may be ignored by AC itself (lib/difficulty.lua: 60 and 100 lapped the same on one install), and with Verve
+# on a spread wider than 10 levels is honoured as written while a narrower one keeps its relative spread around the slider.
+# Confirm each one took effect from the handicapped cars' best laps before reading anything off it.
+CAR_PACE = (("car_levels", "AI_LEVEL", "--car-levels", 50, 120),
+            ("ballast", "BALLAST", "--ballast", 0, 500),
+            ("restrictor", "RESTRICTOR", "--restrictor", 0, 100))
+
+
+def parse_slot_numbers(spec, ncars, flag, lo, hi):
+    """'all=40,1..3=80,last=0' -> {slot: int} over slots 0..ncars-1, the --profiles syntax: slot 0 = the autopilot player car,
+    'last' = the back of the grid, an explicit slot wins over 'all'. A bad part, value or slot refuses the run."""
+    if not spec:
+        return {}
+    every, slots = None, {}
+    for part in str(spec).split(","):
+        k, _, v = part.partition("=")
+        k = k.strip()
+        try:
+            val = int(v.strip())
+            if k == "all":
+                idx = None
+            elif k == "last":
+                idx = [ncars - 1]
+            elif ".." in k:
+                a, b = k.split("..", 1)
+                idx = list(range(int(a), int(b) + 1))
+            else:
+                idx = [int(k)]
+        except ValueError:
+            raise SystemExit(f"{flag} wants SLOT=NUMBER parts (all, last, 3, 1..5), got {part!r}")
+        if not lo <= val <= hi:
+            raise SystemExit(f"{flag}: {val} is outside {lo}..{hi} ({part!r})")
+        if idx is None:
+            every = val
+            continue
+        if not idx:
+            raise SystemExit(f"{flag}: empty slot range ({part!r})")
+        for i in idx:
+            if not 0 <= i < ncars:
+                raise SystemExit(f"{flag}: slot {i} is not on a {ncars}-car grid ({part!r})")
+            slots[i] = val
+    out = {i: every for i in range(ncars)} if every is not None else {}
+    out.update(slots)
+    return out
+
+
+def apply_car_pace(ini, arm, ncars):
+    """Write the arm's --car-levels / --ballast / --restrictor into CAR_n (after --ai-level, so a slot's own level wins).
+    Returns {arm key: spec} for what was applied."""
+    applied = {}
+    for key, ini_key, flag, lo, hi in CAR_PACE:
+        vals = parse_slot_numbers(arm.get(key), ncars, flag, lo, hi)
+        for i, v in sorted(vals.items()):
+            if not ini.has_section(f"CAR_{i}"):
+                raise SystemExit(f"{flag}: race.ini has no [CAR_{i}]")
+            ini.set(f"CAR_{i}", ini_key, str(v))
+        if vals:
+            applied[key] = arm.get(key)
+    return applied
 
 
 PLAYER_NAME_FALLBACK = "Kai Weber"   # fictional, and not one the generic grid names produce
@@ -863,6 +928,9 @@ def run_once(args, arm, run_idx):
         print('  ' + pinned)
     ini, ncars = build_race_ini(args, backup if args.grid is None else RACE_INI)
     force_ai_level(ini, getattr(args, "ai_level", 0))
+    pace = apply_car_pace(ini, arm, ncars)
+    if pace:
+        print("  per-car pace: " + ", ".join(f"{k} {v}" for k, v in pace.items()))
     if ini.has_section("CAR_0"):
         ini.set("CAR_0", "DRIVER_NAME", player_name(arm.get("profiles"), ncars))   # never the owner's own name
     write_ini(ini, RACE_INI)
@@ -1078,7 +1146,9 @@ def run_once(args, arm, run_idx):
     if rt_med is not None and rt_med < realtime.SUSPECT:
         print(f"  !! the sim ran at {rt_med:.2f}x real time over {rt_laps} laps (CPU occupancy): "
               f"treat this race's timings as suspect")
-    m["arm"] = json.dumps({k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots", "fault", "csp", "human", "strategy", "fuel")}, sort_keys=True)
+    arm_rec = {k: arm.get(k) for k in ("settings", "recovery", "racecraft", "drivers", "troublespots", "fault", "csp", "human", "strategy", "fuel")}
+    arm_rec.update({k: arm[k] for k, *_ in CAR_PACE if arm.get(k)})   # only when set: rows without them stay as they were
+    m["arm"] = json.dumps(arm_rec, sort_keys=True)
     m["weather"] = args.weather or ""
     m["ambient_c"] = args.ambient if args.ambient is not None else DEFAULT_AMBIENT
     m["road_c"] = args.road if args.road is not None else DEFAULT_ROAD
@@ -1161,6 +1231,10 @@ def main():
     ap.add_argument("--ab", nargs=2, metavar=("A.json", "B.json"), help="two arm files; runs alternate A,B,A,B...")
     ap.add_argument("--lap-budget-s", type=int, default=150, help="seconds allowed per lap before a run is killed")
     ap.add_argument("--ai-level", type=int, default=0, help="force every AI car's AI_LEVEL (career events and --models grids alike); 0 = as configured")
+    ap.add_argument("--car-levels", help="per-car AI_LEVEL after --ai-level, --profiles slot syntax: '1..3=85,last=100' (50-120). AC itself may ignore "
+                    "it; with Verve on a spread over 10 levels is honoured as written. For a pace gap without Verve use --ballast or --restrictor")
+    ap.add_argument("--ballast", help="per-car ballast in kg, --profiles slot syntax: 'all=0,1..3=80' (0-500)")
+    ap.add_argument("--restrictor", help="per-car intake restrictor in %%, --profiles slot syntax: 'last=20' (0-100)")
     ap.add_argument("--base148", action="store_true", help="a build cut before v0.14.8 (wild0151, dev0152) run on the v0.14.8 defaults: merges "
                     "AGGR_BASE_FIX into --racecraft, GATE_FAIL_RETRY into --recovery and paceAbs into --settings (a key given explicitly wins); "
                     "the merged values land in results.csv's arm column")
@@ -1180,7 +1254,11 @@ def main():
                  "recovery": json.loads(args.recovery) if args.recovery else {}, "racecraft": json.loads(args.racecraft) if args.racecraft else {},
                  "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}, "human": json.loads(args.human) if args.human else {}, "strategy": json.loads(args.strategy) if args.strategy else {}, "fuel": args.fuel,
                  "assists": json.loads(args.assists) if args.assists else {}, "stop_laps": args.stop_laps,
-                 "changes": json.loads(args.changes) if args.changes else None}]
+                 "changes": json.loads(args.changes) if args.changes else None,
+                 "car_levels": args.car_levels, "ballast": args.ballast, "restrictor": args.restrictor}]
+    for arm in arms:   # a typo in a per-car spec refuses before anything is touched (the slot range is checked again per race)
+        for key, _, flag, lo, hi in CAR_PACE:
+            parse_slot_numbers(arm.get(key), 1000, flag, lo, hi)
     if args.base148:
         for arm in arms:
             for mod, kv in BASE148.items():
