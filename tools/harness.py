@@ -833,6 +833,44 @@ ARCHIVE_DIR = paths.archive_dir_for_housekeeping()   # D: today, a local folder 
 
 KEEP_DAYS = 2.0          # diag files and race feeds older than this are moved to the archive drive
 
+def refuse_voided_profiles(arms):
+    """Refuse a row whose --profiles cannot possibly apply, because Verve is switched off in the same row.
+
+    THE SILENT CONFOUND THIS EXISTS TO STOP, found on 2026-10-14 and it had already cost six scored races.
+    Verve.lua's update returns at `if not G.enabled` (line 407) BEFORE it reaches Drivers.applyPace (line 455),
+    so with `--settings {"enabled":false}` no driver profile is ever applied. The row still accepts --profiles,
+    records it in the arm column, and prints it in the log, so the queue, the results table and every report read
+    as though the grid had been composed - while the race actually ran a UNIFORM field at the raw --ai-level.
+
+    What that cost: every Verve ON/OFF comparison on PC #1 compared a pace-INVERTED ON grid against a UNIFORM OFF
+    grid and attributed the whole difference to Verve. Measured on the mirror cell, grid rho came out +0.88/+0.43/
+    +0.35 OFF against -0.81/-0.81/-0.75 ON, and best laps 110-111 s OFF against 113-117 s ON - so the OFF field was
+    both uniform AND 4-6 s a lap faster. A uniform faster field crashes more and passes less, which is the exact
+    direction of the two headlines drawn from it (the 43% retirement gap and 4.2x passes per engaged hour, both
+    withdrawn). Affected and withdrawn: vo_spa_1..3 and vok_spa12_1..3.
+
+    REFUSE rather than warn. A warning in a queue log nobody reads at 3 a.m. is how this survived in the first
+    place, and the failure is invisible in the output: the race completes, scores normally, and looks like a
+    controlled comparison. The right A/B keeps Verve ENABLED in both arms and toggles a subsystem instead -
+    `--settings {"racecraft":false}` leaves applyPace running, so the grid is composed identically on both sides.
+    """
+    for arm in arms:
+        if not (arm.get("profiles") or "").strip():
+            continue
+        s = arm.get("settings") or {}
+        if s.get("enabled") is False:
+            raise SystemExit(
+                "  !! refused: --profiles %r cannot apply because this row also sets --settings enabled:false.\n"
+                "     Verve.lua returns at `if not G.enabled` before Drivers.applyPace, so NO profile is applied and\n"
+                "     the race would run a uniform field at --ai-level while the log claims the grid you asked for.\n"
+                "     This silently confounded six scored races (vo_spa_1..3, vok_spa12_1..3): a pace-inverted ON\n"
+                "     arm was compared against a uniform, 4-6 s a lap faster OFF arm.\n"
+                "     For a Verve ON/OFF comparison keep Verve ENABLED in both arms and toggle a subsystem instead,\n"
+                "     e.g. --settings '{\"racecraft\":false}', which leaves the grid composition identical.\n"
+                "     To run a genuinely uniform stock field, drop --profiles from this row and say so in the label."
+                % (arm.get("profiles"),))
+
+
 MIN_FREE_GB = 4.0        # refuse to launch with less free space than this on the drive holding the app
 
 
@@ -1434,6 +1472,7 @@ def main():
                  "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}, "human": json.loads(args.human) if args.human else {}, "strategy": json.loads(args.strategy) if args.strategy else {}, "fuel": args.fuel,
                  "assists": json.loads(args.assists) if args.assists else {}, "stop_laps": args.stop_laps,
                  "changes": json.loads(args.changes) if args.changes else None}]
+    refuse_voided_profiles(arms)
     if args.base148:
         for arm in arms:
             for mod, kv in BASE148.items():
