@@ -182,7 +182,15 @@ def pace_by_car(path_or_laps):
         if i is None or not ms or (cuts or 0) > 0 or e.get("first"):
             continue
         per.setdefault(i, []).append(ms)
-    return {i: sorted(v)[len(v) // 2] for i, v in per.items() if len(v) >= 3}
+    # EACH CAR'S FASTEST CLEAN LAP, NOT ITS MEDIAN. I argued exactly this in tools/pace.py - a median lap is
+    # contaminated by traffic, so it measures how boxed-in a car was as much as how quick it is - and then graded
+    # the GRID with medians anyway, which is the same mistake in the place it does the most damage. BTeam caught it
+    # on the 2x2: grading by median read rho +0.6 to +0.8 on a MATCHED grid purely from traffic, and flipped an
+    # INVERTED grid positive, because a fast car stuck behind a slow one posts slow medians and so looks slow. The
+    # grade then says "qualifying-like" about a grid that is nothing of the kind. A fastest clean lap is the
+    # closest thing to a car's own pace that a race offers, and min needs only ONE clear lap rather than a clear
+    # majority - so the floor drops to 1 lap from 3.
+    return {i: min(v) for i, v in per.items() if len(v) >= 1}
 
 
 def _rank(d):
@@ -244,8 +252,9 @@ def engagement_car_s(states, gap_s=ENGAGED_GAP_S, after=None):
     """-> car-seconds spent within gap_s of the car ahead: the OPPORTUNITY to pass.
 
     WHY A PASS RATE NEEDS THIS DENOMINATOR. Comparing passes per car-lap between arms assumes both had the same
-    chance to pass, and that assumption fails exactly where we most want an answer. Verve OFF retires 11 of 18 cars
-    at Spa, so seven survivors are strung out over 7 km with nobody to overtake; per car-lap it looks 5.9x less
+    chance to pass, and that assumption fails whenever the arms lose different numbers of cars. In the Spa GT3 cell
+    a Verve-OFF arm finished with seven of eighteen running, so the survivors were strung out with nobody to
+    overtake; per car-lap that arm looks several times less
     passy than Verve ON, and most of that is simply having no one in front. Car-laps do not fix it - a retired car
     stops contributing laps, but the SURVIVORS' laps are also emptier.
 
