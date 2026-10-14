@@ -148,7 +148,7 @@ def selftest():
         return any(tok.strip('"').endswith(".sh") for tok in c.split())
 
     # 1. self-match: a `bash -c` command line mentioning chain scripts must NOT be counted as a script
-    shell = 'C:\\Program Files\\Git\\bin\\bash.exe -c "grep chain_foo.sh && ls chain_bar.sh"'
+    shell = '/apps/git/bin/bash.exe -c "grep chain_foo.sh && ls chain_bar.sh"'
     print("  self-match: a bash -c mentioning .sh files counted as a script?   %s"
           % ("YES - BROKEN" if is_script(shell) else "no"))
     ok &= not is_script(shell)
@@ -160,7 +160,7 @@ def selftest():
     ok &= not is_script(sneaky)
 
     # and a genuine script invocation must still be counted
-    real = 'C:\\Program Files\\Git\\bin\\bash.exe /c/tmp/scratch/chain.sh'
+    real = '/apps/git/bin/bash.exe /tmp/scratch/chain.sh'
     print("  self-match: a real `bash <path>/chain.sh` still counted?          %s"
           % ("yes" if is_script(real) else "NO - BROKEN"))
     ok &= is_script(real)
@@ -173,8 +173,8 @@ def selftest():
     ok &= is_script(withargs)
 
     # 2. parent/child: the Store shim and the real interpreter must collapse to ONE
-    shim = 'C:\\Users\\T\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe -u tools/batch.py tools/harness_results/batch_x.txt'
-    core = '"C:\\Users\\T\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe" -u tools/batch.py tools/harness_results/batch_x.txt'
+    shim = '/apps/store/WindowsApps/python.exe -u tools/batch.py tools/harness_results/batch_x.txt'
+    core = '"/apps/python/pythoncore-3.14-64/python.exe" -u tools/batch.py tools/harness_results/batch_x.txt'
     collapsed = len({_args_only(shim), _args_only(core)})
     print("  parent/child: shim + real interpreter collapse to one?            %s"
           % ("yes" if collapsed == 1 else "NO - BROKEN, counted %d" % collapsed))
