@@ -38,7 +38,37 @@ def load(path):
             contacts.append(d)
         elif d.get("ev") == "drop":
             drops.append(d)
+    _warn_clock_steps(path, contacts)
     return hdr, contacts, drops
+
+
+def _warn_clock_steps(path, contacts):
+    """Say so loudly if the diag's clock went BACKWARDS, because the incident grouping cannot survive it silently.
+
+    The diag's `t` is UNIX EPOCH, so it inherits any system clock step. Contacts are grouped into one incident by
+    `abs(c["t"] - prev["t"]) <= 1.5`, and that comparison has no idea the clock moved: a 5 s backward step makes two
+    contacts 5 s apart look simultaneous (MERGING two incidents into one, with one car's fault attributed to the
+    other) and makes two contacts 1 s apart look 4 s apart (SPLITTING one incident into two, halving a strike).
+    Both are silent and both land in the --ledger penalty, which is the whole point of this tool.
+
+    BTeam found three real Kernel-General Id 1 time-change events on PC #2 on 2026-10-13 at 13:08:32, stepping about
+    5.5 s backward, from routine W32Time sync via svchost - small, but exactly the size that merges adjacent
+    contacts. PC #1 had none in the same 24 h, so this is latent here rather than active; it is guarded because a
+    step is invisible in the output and the fix is three lines.
+
+    A WARNING rather than a refusal: this is a diagnostic a human reads, and a race with a step is still worth
+    looking at as long as nobody trusts the grouping across it. A forward gap is NOT flagged - a stalled diag and a
+    forward step are indistinguishable from epoch deltas alone, so flagging it would cry wolf on every hitch.
+    """
+    ts = [c["t"] for c in contacts if isinstance(c.get("t"), (int, float))]
+    back = [(i, ts[i] - ts[i - 1]) for i in range(1, len(ts)) if ts[i] < ts[i - 1]]
+    if back:
+        worst = min(d for _, d in back)
+        print("  !! CLOCK WENT BACKWARDS in %s: %d backward step(s), largest %.1f s."
+              % (os.path.basename(path), len(back), worst))
+        print("     The diag's t is UNIX epoch, so incident grouping (contacts within 1.5 s) is UNRELIABLE across")
+        print("     these points - incidents either side may be wrongly merged or split, and any ledger strike")
+        print("     drawn from them is unsafe. Re-run the race or score it by position rather than by time.")
 
 
 def ring_rows(c):
