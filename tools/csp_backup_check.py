@@ -38,24 +38,32 @@ HARNESS_WROTE = "[RAIN]\nAVOID_PUDDLES=1\n\n[AI_TWEAKS]\nNEW_LATERAL_GRIP_ESTIMA
 
 
 def source_check():
-    """Assert the guard is actually in apply_csp_overrides. Reads the file as TEXT - never imports it."""
+    """Assert the guard is in BOTH functions that back up a user file. Reads the file as TEXT - never imports it.
+
+    Two functions, same defect, same fix: apply_csp_overrides (CSP's AI behaviour keys) and apply_assists (the
+    owner's damage, fuel and tyre settings). The second is the one that changes how their own driving feels.
+    """
     try:
         src = io.open(HARNESS, encoding="utf-8", errors="replace").read()
     except OSError as e:
         print("  REFUSED: cannot read harness.py (%s)" % e)
         return False
-    m = re.search(r"\ndef apply_csp_overrides\(.*?\n(?=\ndef |\nARCHIVE_DIR)", src, re.S)
-    if not m:
-        print("  REFUSED: apply_csp_overrides not found - this check has gone stale, fix it before trusting it")
-        return False
-    body = m.group(0)
-    if "shutil.copy2(path, bak)" not in body:
-        print("  REFUSED: the backup copy is gone from apply_csp_overrides - check has gone stale")
-        return False
-    guarded = re.search(r"if os\.path\.exists\(bak\):", body) is not None
-    print("  apply_csp_overrides guards an existing backup?        %s"
-          % ("yes" if guarded else "NO - it will overwrite the true original after an interrupted run"))
-    return guarded
+    ok = True
+    for fn, copy_call in (("apply_csp_overrides", "shutil.copy2(path, bak)"),
+                          ("apply_assists", "shutil.copy2(ASSISTS_INI, bak)")):
+        m = re.search(r"\ndef %s\(.*?\n(?=\ndef |\nARCHIVE_DIR)" % fn, src, re.S)
+        if not m:
+            print("  REFUSED: %s not found - this check has gone stale, fix it before trusting it" % fn)
+            return False
+        body = m.group(0)
+        if copy_call not in body:
+            print("  REFUSED: the backup copy is gone from %s - check has gone stale" % fn)
+            return False
+        guarded = re.search(r"if os\.path\.exists\(bak\):", body) is not None
+        print("  %-20s guards an existing backup?        %s"
+              % (fn, "yes" if guarded else "NO - it will overwrite the true original after an interrupted run"))
+        ok &= guarded
+    return ok
 
 
 def backup(path, guarded):
