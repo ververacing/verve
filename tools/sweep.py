@@ -47,6 +47,10 @@ LOG_FILE = os.path.join(HERE, "harness_results", "sweep.log")
 KILLABLE = {"grep", "tail", "head", "sleep", "timeout", "cat", "less", "awk", "sed", "find", "xargs"}
 SHELLS = {"bash", "sh"}
 REPORT_ONLY = {"python", "py", "powershell", "pwsh"}
+# A python RUNNING one of these is the live queue itself - identifiable infrastructure, so it is PROTECTED and
+# stays out of the report. Report-only already meant it was never killed; the problem was that the running
+# queue's own python pair appeared under REPORT every single hour, which is how a report becomes wallpaper.
+QUEUE_SCRIPTS = {"batch.py", "harness.py"}
 MAX_AGE_MIN = 120
 MIN_ORPHAN_MIN = 2       # an orphan younger than this is a transient from our own pipelines, not a stray
 
@@ -117,16 +121,27 @@ def keep_list():
     return out
 
 
-def runs_a_script(cmdline):
-    """True when a shell command line names a .sh FILE to run - a chain or watcher, i.e. infrastructure.
+def script_run(cmdline, ext):
+    """-> the basename of the `ext` file this command line RUNS, or None.
 
     `bash -c "...grep foo.sh..."` is NOT running a script: the .sh is inside the command text. That distinction
-    is the same self-match trap procs.py documents, and here getting it backwards kills a chain.
+    is the same self-match trap procs.py documents, and here getting it backwards kills a chain. When the shape
+    is ambiguous this returns None, i.e. NOT infrastructure - for a .sh that means eligible for the kill test,
+    so the two selftest cases below pin the shapes that matter rather than trusting the heuristic.
     """
     c = (cmdline or "").strip()
     if " -c " in c or c.endswith('"'):
-        return False
-    return any(t.strip('"').lower().endswith(".sh") for t in c.split())
+        return None
+    for t in c.split():
+        t = t.strip('"').lower()
+        if t.endswith(ext):
+            return t.replace("\\", "/").rsplit("/", 1)[-1]
+    return None
+
+
+def runs_a_script(cmdline):
+    """True when a shell command line names a .sh FILE to run - a chain or watcher, i.e. infrastructure."""
+    return script_run(cmdline, ".sh") is not None
 
 
 def classify(r, mine, keep):
@@ -137,6 +152,9 @@ def classify(r, mine, keep):
     if pid in keep:
         return "protected", "on the keep list"
     if name in REPORT_ONLY:
+        s = script_run(cmd, ".py")
+        if s in QUEUE_SCRIPTS:
+            return "protected", "the live queue (%s)" % s
         return "report", "never killed: may be a harness run whose exit hook restores race.ini"
     if name in SHELLS and runs_a_script(cmd):
         return "protected", "a shell running a .sh - a chain or watcher"
@@ -224,6 +242,18 @@ def selftest():
         k3, _ = classify((nm, 7, 6, 999.0, "x"), mine, keep)
         print("  %-11s is report-only, never stray?                %s" % (nm, "yes" if k3 == "report" else "NO"))
         ok &= k3 == "report"
+
+    queue = ("python", 11, 10, 95.0, 'C:/x/python.exe -u tools/batch.py batch_20261014_pc1_recov.txt')
+    k7, why7 = classify(queue, mine, keep)
+    print("  the live queue's own python is protected, not reported?   %s (%s)"
+          % ("yes" if k7 == "protected" else "NO - it will be REPORTed every hour as noise", why7))
+    ok &= k7 == "protected"
+
+    fake = ("python", 12, 10, 95.0, 'python -c "print(open(\'tools/batch.py\').read())"')
+    k8, _ = classify(fake, mine, keep)
+    print("  a python -c whose TEXT mentions batch.py is NOT the queue? %s"
+          % ("yes" if k8 == "report" else "NO - self-match, any -c mentioning a .py reads as infrastructure"))
+    ok &= k8 == "report"
 
     k4, _ = classify(("grep", 8, 1, 500.0, "grep foo"), mine, keep)
     print("  a leaf utility is eligible?                               %s" % ("yes" if k4 == "ok" else "NO"))
