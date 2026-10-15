@@ -121,21 +121,35 @@ def keep_list():
     return out
 
 
+RUNNERS = {"sh", "bash", "source", ".", "python", "python3", "pythonw", "py"}
+
+
 def script_run(cmdline, ext):
     """-> the basename of the `ext` file this command line RUNS, or None.
 
-    `bash -c "...grep foo.sh..."` is NOT running a script: the .sh is inside the command text. That distinction
-    is the same self-match trap procs.py documents, and here getting it backwards kills a chain. When the shape
-    is ambiguous this returns None, i.e. NOT infrastructure - for a .sh that means eligible for the kill test,
-    so the two selftest cases below pin the shapes that matter rather than trusting the heuristic.
+    THE DISTINCTION, and getting it backwards in either direction is expensive: `bash -c "grep foo.sh"` only
+    MENTIONS a script (the procs.py self-match trap - protecting it would let any stray survive by naming a
+    .sh), while `bash -c "source snap; sh watch.sh"` genuinely RUNS one and is load-bearing.
+
+    The first version rejected every command line containing " -c ", which got the self-match right and the
+    second case WRONG - and the second case is how every background shell this session launches actually looks,
+    so the sweep listed its own armed queue waiter as "WOULD KILL". Read-only by default is the only reason
+    that cost nothing.
+
+    So the test is positional rather than textual: a token ending in `ext` counts as RUN only when the nearest
+    preceding command word is a RUNNER and nothing but flags sits between them. `grep foo.sh` fails it because
+    grep is not a runner; `python -u tools/batch.py` passes it across the -u flag.
     """
-    c = (cmdline or "").strip()
-    if " -c " in c or c.endswith('"'):
-        return None
-    for t in c.split():
-        t = t.strip('"').lower()
-        if t.endswith(ext):
-            return t.replace("\\", "/").rsplit("/", 1)[-1]
+    toks = [t.strip('"\'').replace("\\", "/") for t in (cmdline or "").split()]
+    base = [t.rsplit("/", 1)[-1].lower() for t in toks]
+    runner = None
+    for i, b in enumerate(base):
+        stem = b[:-4] if b.endswith(".exe") else b
+        if stem in RUNNERS:
+            runner = i
+        elif b.endswith(ext) and runner is not None:
+            if all(base[j].startswith("-") for j in range(runner + 1, i)):
+                return b
     return None
 
 
@@ -237,6 +251,16 @@ def selftest():
     print("  a bash -c whose TEXT mentions a .sh is not protected?     %s"
           % ("yes" if k2 != "protected" else "NO - self-match, it would survive as infrastructure"))
     ok &= k2 != "protected"
+
+    # The shape every background shell this session launches actually has. The first version of script_run
+    # rejected anything containing " -c " and so listed this - a live, armed queue waiter - as WOULD KILL.
+    wrapped = ("bash", 13788, 1, 14.0,
+               '"C:/apps/git/bin/bash.exe" -c "source /c/u/t/.claude/shell-snapshots/snap.sh; '
+               'sh /tmp/scratch/wait_queue_done2.sh"')
+    k9, why9 = classify(wrapped, mine, keep)
+    print("  a `bash -c \"source snap; sh watch.sh\"` IS protected?      %s (%s)"
+          % ("yes" if k9 == "protected" else "NO - WOULD KILL AN ARMED WAITER", why9))
+    ok &= k9 == "protected"
 
     for nm in ("python", "powershell"):
         k3, _ = classify((nm, 7, 6, 999.0, "x"), mine, keep)
