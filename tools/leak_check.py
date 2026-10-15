@@ -129,8 +129,16 @@ def scan_text(label, text, rs, diff_mode=False):
         if diff_mode:
             if not line.startswith("+") or line.startswith("+++"):
                 continue
-            if any(f in line for f in OWN_FIXTURES):
-                continue
+        # THIS TOOL'S OWN FIXTURES ARE EXCUSED IN EVERY MODE. The excusal used to sit inside the diff_mode branch
+        # above, while FILE scanning ran a SEPARATE inline copy of this loop in main() that had no excusal at all
+        # - so the identity gate reported 4 leaks in leak_check.py on every run, permanently, all of them this
+        # file's own canaries and comment examples. A gate that always fails on a known false positive is a gate
+        # everyone learns to wave through, which is worse than no gate. main() now calls this function instead.
+        # SCOPED TO THIS FILE, not excused globally: a placeholder path or example.org address has a legitimate
+        # reason to exist HERE and nowhere else in the app, so the same token in any other file still fires.
+        if (diff_mode or os.path.basename(str(label)).lower() == "leak_check.py") \
+                and any(f in line for f in OWN_FIXTURES):
+            continue
         for name, rx in rs:
             if rx.search(line):
                 print("  LEAK  %s:%d  <- %s" % (label, i, name))
@@ -221,18 +229,16 @@ def main():
         checked += 1
         try:
             with open(f, encoding="utf-8", errors="replace") as fh:
-                for i, line in enumerate(fh, 1):
-                    if "noreply@anthropic.com" in line or line.lstrip().lower().startswith("co-authored-by:"):
-                        continue          # the required attribution, not an identity leak
-                    for name, rx in rs:
-                        if rx.search(line):
-                            # never echo the match itself - say where and which rule
-                            # the last two path parts only: relpath can climb out of cwd and print the very
-                            # Users\<name> fragment this tool exists to catch, and this output gets pasted about
-                            short = os.path.join(os.path.basename(os.path.dirname(f)), os.path.basename(f))
-                            print(f"  LEAK  {short}:{i}  <- {name}")
-                            hits += 1
-                            break
+                text = fh.read()
+            # ONE SCANNER, NOT TWO. This loop used to be a second inline copy of scan_text's logic, and that is
+            # exactly how the two drifted apart: scan_text learned to excuse this file's own selftest fixtures
+            # (44ba3ed) and the copy here never did, so the identity gate reported 4 leaks in leak_check.py on
+            # every run - permanently, all of them canaries and comment examples. A duplicated check is a check
+            # that will disagree with itself eventually; the fix is to delete the duplicate, not to patch both.
+            # The label stays the last two path parts, because a relpath can climb out of cwd and print the very
+            # Users\<name> fragment this tool exists to catch, and this output gets pasted about.
+            short = os.path.join(os.path.basename(os.path.dirname(f)), os.path.basename(f))
+            hits += scan_text(short, text, rs)
         except OSError as e:
             print(f"  (unreadable: {f}: {e})")
     if hits:
