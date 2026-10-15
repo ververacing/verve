@@ -4,12 +4,27 @@
 -- quit / restarted / the game crashed, at the next launch with an abort reason). It describes what was run
 -- (track, cars, laps, difficulty, weather, settings), how the field did (finishers, retirements, incidents,
 -- repairs, lap-time spread) and how the human did (positions, laps, incidents) -- and nothing about who: no
--- names, no gamer tag, no paths, no hardware ids. `install_id` is a random string generated once.
+-- names, no gamer tag, no paths, no hardware ids. `install_id` is a random string, created on the FIRST
+-- opted-in send (not at load) so declining leaves nothing behind, and described in the consent text.
 -- The endpoint accepts inserts only (the key below can neither read nor change anything).
 local T = {}
 T.ENABLED = false
 T.VERSION = '0.0.0'          -- set by Verve.lua from update.lua
 T.UNATTENDED = false         -- harness/autopilot run: flagged so human statistics can exclude it
+
+-- (0.16, decision 0031) ONLY A RACE IS REPORTED. The consent text says "after each race", but T.update
+-- built stats for ANY started session and T.abort had no session-type check, so quitting a PRACTICE or
+-- QUALIFYING session posted a row. Defaults to FALSE on any failure to read the session type: if we cannot
+-- tell what this session is, we do not report it.
+-- CHECKED BEFORE WRITING THIS, because the harness deliberately exercises the opt-in path on every row
+-- (harness.py passes shareData true): the harness writes its race session as TYPE=3 (harness.py:348), which
+-- IS ac.SessionType.Race, so harness coverage of this code path is preserved. What the gate does remove is
+-- the practice and qualifying sessions of a WEEKEND row, which is exactly the fix.
+function T.isRaceSession(sim)
+    local isRace = false
+    pcall(function() isRace = sim and sim.raceSessionType == ac.SessionType.Race end)
+    return isRace
+end
 
 local URL = 'https://qcdnlochctwfsvslnqxo.supabase.co/rest/v1/race_reports'
 local KEY = 'sb_publishable_eaoWTXUhM7jcbZ8vBRhtYw_bPIcJa8W'
@@ -18,12 +33,22 @@ local Contacts = require('lib.contacts')
 -- launcher assists (damage / fuel rate) on builds that expose ac.getAssists(); nil elsewhere
 local function assist(k) local v = nil; pcall(function() local a = ac.getAssists and ac.getAssists(); if a then v = a[k] end end); return v end
 local S = ac.storage({ installId = '', pending = '', sent = 0 })
-if S.installId == '' then
+
+-- (0.16, decisions 0031 and 0032) CREATED ON THE FIRST OPTED-IN SEND, NOT AT LOAD. It used to be generated
+-- the moment this module loaded, so a player who never turned sharing on still had a persistent random id
+-- written to their storage. Nothing was sent, but creating an identifier for someone who declined is not what
+-- the consent text describes. The owner chose (decision 0032) to KEEP the id - it is what lets repeat reports
+-- from one install be grouped, without which the data cannot tell one person's fifty races from fifty people's
+-- one - and to DESCRIBE it in the consent text instead. Called from buildReport, which only runs when a report
+-- is actually being built and sent.
+function T.ensureInstallId()
+    if S.installId ~= '' then return S.installId end
     local chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
     local id = {}
     math.randomseed(os.time() + math.floor(os.clock() * 1000))
     for _ = 1, 20 do local k = math.random(#chars); id[#id + 1] = chars:sub(k, k) end
     S.installId = table.concat(id)
+    return S.installId
 end
 
 -- ------------------------------------------------------------------ per-session stats (1 Hz sampling)
@@ -202,7 +227,7 @@ function T.buildReport(sim, ctx, completed, abortReason)
     end
     if wType == nil then pcall(function() wType = tonumber(sim.weatherType) end) end
     local fields = {
-        '"install_id":' .. jstr(S.installId),
+        '"install_id":' .. jstr(T.ensureInstallId()),
         '"verve_version":' .. jstr(T.VERSION),
         '"schema_version":2',
         '"csp_build":' .. jint(ctx.cspBuild),
@@ -264,13 +289,19 @@ local function post(body, onDone, tries)         -- tries: unknown columns alrea
             function(err, res)
                 local ok = (not err) and res and res.status and res.status >= 200 and res.status < 300
                 local rejected = (not ok) and res and res.status and res.status >= 400 and res.status < 500
-                pcall(function() ac.log(string.format('Verve telemetry: %s (%s) %s', ok and 'sent' or 'failed', tostring(err or (res and res.status)), rejected and tostring(res.body):sub(1, 200) or '')) end)
+                -- (0.16, decision 0031) LOG THE STATUS AND THE PostgREST CODE, NEVER THE BODY. This used to
+                -- write up to 200 characters of the server's reply into the player's AC log, which is a file
+                -- they may share when reporting a bug. The body is still READ below to recover a dropped
+                -- column name - using it is fine, logging it is not.
+                local prcode = ''
+                if rejected then pcall(function() prcode = tostring(res.body):match('"code"%s*:%s*"([%w_]+)"') or 'unknown' end) end
+                pcall(function() ac.log(string.format('Verve telemetry: %s (%s)%s', ok and 'sent' or 'failed', tostring(err or (res and res.status)), rejected and (' PostgREST ' .. prcode) or '')) end)
                 if rejected and (tries or 0) < 8 then       -- one unknown column per reply: drop it and resend (bounded)
                     local col = tostring(res.body):match("Could not find the '([%w_]+)' column")
                     if col then post(withoutColumn(body, col), onDone, (tries or 0) + 1); return end
                 end
                 if rejected then S.pending = '' end        -- malformed row: drop it, don't retry forever
-                if onDone then onDone(ok) end
+                if onDone then onDone(ok, rejected) end   -- (0.16) `rejected` lets a caller tell "retry later" from "this row is malformed, drop it"
             end)
     end)
 end
@@ -288,6 +319,7 @@ local flushed = false
 -- Verve calls this at session change / app release with the reason; the current race becomes a pending row
 function T.abort(reason, sim, ctx)
     if not st or sentThis or not T.ENABLED then return end
+    if not T.isRaceSession(sim) then st = nil; return end  -- (0.16, decision 0031) never a practice/qualifying row
     if st.samples < 30 then st = nil; return end           -- nothing worth reporting
     pcall(function()
         local body = T.buildReport(sim, ctx, false, reason)
@@ -307,6 +339,10 @@ function T.update(dt, ctx)
     local idx = sim.currentSessionIndex or 0
     if sessionIdx ~= idx then sessionIdx = idx; T.reset() end
     if not sim.isSessionStarted then return end
+    -- (0.16, decision 0031) after the pending flush and the session-change reset, so a leftover race row from
+    -- a previous launch still goes out and a session change still resets - but no practice or qualifying
+    -- session ever builds stats. With st left nil, T.abort also returns early, which is belt and braces.
+    if not T.isRaceSession(sim) then return end
     if st == nil then st = newStats(sim) end
     local now = os.clock()
     if now - lastT >= 1.0 then

@@ -409,6 +409,10 @@ function script.update(dt)
         -- observer and keeps running too, so a stock-AI race gets the same timing card as a Verve race)
         if Diag then pcall(function() Diag.update(dt, { managed = 0 }) end) end
         Feed.ENABLED = G.raceFeed
+        -- (0.16, decision 0031) SET THIS IN THE DISABLED BRANCH TOO. It used to be assigned only below this
+        -- return, so with Verve off and sharing just unticked the flag kept its stale `true` and Telemetry.abort
+        -- still posted a row at quit - the one case where the player had actively said no.
+        Telemetry.ENABLED = G.shareData == true
         if G.raceFeed then pcall(Feed.update, dt, {}) end
         -- (0.16) MEASUREMENT PARITY, not a behaviour change. feed.lua promotes a collision tap to an incident only
         -- `if Contacts.available`, and Contacts.update was called ONLY below this return - so a Verve-OFF race
@@ -804,7 +808,10 @@ function script.windowMain()
     end
     toggle('Repair damage on track', 'repairOnTrack', 'On: a stuck or wrecked AI car is set back on the racing line with its body repaired (keeps the field alive; the default). Off: it is set back on the line but keeps its damage and pits for repairs like stock AC.')
     toggle('Tactics: set-up passes, late-brake lunges, switchbacks', 'strategy', 'Planned manoeuvres on top of the reactive racecraft, per class (a GT driver out-brakes, a formula driver sets it up on the straight, a stock car slingshots). Unlocked from 90 on the difficulty meter; a driver\'s pace rating decides how much of the playbook they use (a Rookie never switchbacks, a Veteran does).')
-    toggle('Send anonymous race stats to improve Verve', 'shareData', 'After each race, send one small anonymous summary (track, cars, laps, difficulty, finishers, incidents, repairs, your positions and lap times). No names, no gamer tag, no paths, no hardware ids. Off by default.')
+    -- (0.16, decision 0032) The text now says what the code actually does: races only (which the session gate
+    -- enforces), including one left early (T.abort sends it at the next launch), and the install number, which
+    -- the owner chose to keep and describe rather than remove.
+    toggle('Send anonymous race stats to improve Verve', 'shareData', 'After each race, including one you leave early, send one small anonymous summary (track, cars, laps, difficulty, finishers, incidents, repairs, your positions and lap times), plus a random install number so repeat reports from the same copy can be grouped. Never practice or qualifying. No names, no gamer tag, no paths, no hardware ids. Off by default.')
     toggle('Formula DRS discipline', 'drsDiscipline', 'On Formula cars, close DRS when the game says it is not available (outside a DRS zone or not within range). In-zone DRS is left to the game.')
     if ui.checkbox('Advanced', G.showAdvanced) then setG('showAdvanced', not G.showAdvanced) end
     if G.showAdvanced then
