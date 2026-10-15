@@ -77,6 +77,23 @@ H.MV_TOP_RAW = true        -- DEFAULT 0.16 (owner yes 6 Oct; A/B 6 v 6: mistakes
                            -- (0.77-0.84): every named driver there counted 'top', pinned at 15 laps per mistake (profile audit, 5 Oct)
 H.MV_ARCH = { { 0.30, 0.60, 0.50 }, { 0.60, 0.35, 0.80 }, { 0.85, 0.20, 0.95 } }   -- pace, risk, cons of the archetypes (the line)
 H.MV_RATE_X = 1.0
+H.MV_INTENSITY = false     -- (0.16, decision 0030) OFF: the Variability slider GATES mistakes. ON: it SCALES them.
+
+-- (0.16, decision 0030) -> rate factor, size factor for visible mistakes, from the Variability slider k.
+--   rate f(k) = k / 0.5        for k <= 0.5     (a calmer field is really calmer, not just the same or nothing)
+--   rate f(k) = 1 + (k - 0.5)  for k > 0.5      (up to 2x today's rate at the slider's real top of 1.5)
+--   size      = min(1, k / 0.5)                 CAPPED AT 1 ON PURPOSE: below 0.5 mistakes get smaller, but they
+--                                               never get BIGGER than today, because a deeper grip dip risks a
+--                                               spin and the rule is that mistakes are visible, not race-ending.
+-- f(0.5) = 1.0 EXACTLY on both branches - 0.5 is exactly representable in IEEE754, so 0.5/0.5 and 1+(0.5-0.5)
+-- are bit-identical - which is what makes "the default is unchanged" true rather than approximately true.
+-- k > 0 stays the off gate elsewhere, so a slider at zero still means no mistakes at all.
+function H.mvFactors()
+    if not H.MV_INTENSITY then return 1, 1 end
+    local k = H.INTENSITY or 0.5
+    if k <= 0 then return 0, 0 end
+    return ((k <= 0.5) and (k / 0.5) or (1 + (k - 0.5))), math.min(1, k / 0.5)
+end
 -- (0.15.1 test, owner yes 1 Oct) H.MV_COMP: a mistake drawn while the car is busy in traffic, or armed and dropped for want of a
 -- moment, is OWED (at most MV_COMP_MAX) and paid at the next clear stretch (MV_COMP_PER_LAP per lap of progress). Measured 30 Sep
 -- (gate15a C arm): realised laps per mistake Rookie 3.0 / Mid 4.5 / Veteran 15 against anchors 2 / 4 / 9 - the gap is the drops.
@@ -578,13 +595,14 @@ function H.mistakeV2(i, car, prof, cm, now)
     local frag = math.min(cm.mistake or 1, 1)
     -- 1. idle: the hazard, per lap of progress
     if not st.k and not st.t0 and now >= (st.next or 0) and (car.lapCount or 0) >= H.MV_MIN_LAP and (car.bestLapTimeMs or 0) > 0 then
+        local rateF = H.mvFactors()     -- (0.16, decision 0030) 1 when H.MV_INTENSITY is off, so no behaviour change
         if not sk.sent and H.feedEvent then
             sk.sent = true
             pcall(H.feedEvent, 'mistake_model', string.format('"car":%d,"pace":%.2f,"laps_per":%.1f,"rate_x":%.2f,"tier":"%s","top":%s,"profiled":%s,"cons":%.2f,"risk":%.2f',
-                i, sk.pace, sk.laps, H.MV_RATE_X * (H.MV_CLASS_RATE[sk.cls] or 1), sk.tier, tostring(sk.top == true), tostring(sk.prof), sk.cons, sk.risk))
+                i, sk.pace, sk.laps, H.MV_RATE_X * (H.MV_CLASS_RATE[sk.cls] or 1) * rateF, sk.tier, tostring(sk.top == true), tostring(sk.prof), sk.cons, sk.risk))
         end
         local p = H.pressureV2(i, car, now)
-        local perLap = H.MV_RATE_X * (H.MV_CLASS_RATE[sk.cls] or 1) * (1 + H.MV_PRESS * p * (1 - sk.cons)) / sk.laps
+        local perLap = H.MV_RATE_X * (H.MV_CLASS_RATE[sk.cls] or 1) * (1 + H.MV_PRESS * p * (1 - sk.cons)) * rateF / sk.laps
         local hit = ds > 0 and math.random() < perLap * ds
         local busy = false   -- (read only when it matters: a draw, or an owed mistake waiting - as before when H.MV_COMP is off)
         if (hit or (H.MV_COMP and (st.owed or 0) > 0)) and H.busy then busy = H.busy(i) and true or false end
@@ -703,7 +721,10 @@ local modBody = function()
             if H.HUMAN_ERRORS and H.MISTAKE_V2 and H.INTENSITY > 0 then
                 mistakeUntil[i] = nil                              -- the bobble model idles while V2 runs
                 local okM, g2, c2 = pcall(H.mistakeV2, i, car, prof, cm, now)   -- a V2 fault can't strip warm-up / wet / dirty air
-                if okM then mvG, mvC = g2 or 0, c2 or 0 end
+                if okM then
+                    local _, sizeF = H.mvFactors()   -- (0.16, decision 0030) scaled ONCE here, so the grip dip and
+                    mvG, mvC = (g2 or 0) * sizeF, (c2 or 0) * sizeF   -- the caution cannot drift apart later
+                end
             elseif H.HUMAN_ERRORS then
                 local classGate = cm.mistake
                 local rate, sevScale, avoidSharp = 0, 1.0, false
