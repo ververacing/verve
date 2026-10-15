@@ -290,11 +290,18 @@ def check_not_worse(rep, suite, fresh_prefix, all_rows=()):
             rep.refuse(name, "%s n=%d vs %s n=%d - a single run has no range, so this cell can neither show a "
                              "regression nor rule one out" % (base_label, len(a), fresh_prefix, len(b)))
             continue
-        bad, unresolved, notes = [], [], []
+        bad, unresolved, notes, skipped = [], [], [], []
         for key, higher_worse, label, floor in SUITE_METRICS:
             av, bv = nums(a, key), nums(b, key)
             if not av or not bv or (max(av) == 0 and max(bv) == 0):
-                continue              # the sprint cells never produce a median lap time; do not pretend they did
+                # the sprint cells never produce a median lap time; do not pretend they did.
+                # BUT SAY SO. This skip used to be silent, and the cell then read "4 of 5 metrics judged" with
+                # no indication of WHICH one went missing. On the 2026-10-14 release the missing one was `dead`
+                # in BOTH gating cells - retirements, the claim the whole project rests on - because GT3 at
+                # Monza and Spa with Verve on retires nobody, so the metric is structurally dead there. A
+                # release could regress "Verve keeps cars racing" and this gate would not notice.
+                skipped.append(label)
+                continue
             mean = sum(bv) / len(bv)
             lo, hi = min(av), max(av)
             # The baseline arm's OWN observed spread is the yardstick for noise - but it can be ZERO, and then the
@@ -334,8 +341,18 @@ def check_not_worse(rep, suite, fresh_prefix, all_rows=()):
             notes.append("%s %.1f vs %.1f-%.1f%s" % (label, mean, lo, hi, tag))
             if where is not None:
                 where.append(label)
-        detail = "%s(n=%d) -> %s(n=%d): %s | %s" % (base_label, len(a), fresh_prefix, len(b),
-                                                    ", ".join(notes) or "no metric comparable", PACE_NOTE)
+        # NOT a failure, deliberately. A skipped metric means 0 against 0, which is uninformative, and refusing
+        # on it would make this gate UNPASSABLE on any GT3 cell however good the code was - the same trap the
+        # rare-event rule above exists to avoid. So it is STATED and left to the reader: they can act on a
+        # number they can see, and cannot act on one that silently vanished from a count.
+        skip_note = ""
+        if skipped:
+            skip_note = " | NOT JUDGED (0 in both arms): %s" % ", ".join(skipped)
+            if "dead" in skipped:
+                skip_note += " -- so THIS CELL SAYS NOTHING ABOUT RETIREMENTS"
+        detail = "%s(n=%d) -> %s(n=%d): %s%s | %s" % (base_label, len(a), fresh_prefix, len(b),
+                                                      ", ".join(notes) or "no metric comparable", skip_note,
+                                                      PACE_NOTE)
         if not notes:
             rep.refuse(name, detail)
         elif bad:
