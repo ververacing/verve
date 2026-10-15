@@ -808,7 +808,20 @@ def apply_csp_overrides(spec):
         path = os.path.join(CSP_USER_CFG, f"{module}.ini")
         bak = path + ".harness-backup"
         if os.path.exists(path):
-            shutil.copy2(path, bak)
+            # NEVER OVERWRITE AN EXISTING BACKUP. restore_csp_overrides restores with os.replace, which CONSUMES
+            # the backup, so after any completed run no backup exists. A backup sitting here at run start is
+            # therefore PROOF that the previous run never restored - a hard kill, a power cut or a reboot, none
+            # of which the `finally` at the bottom of main() can cover. Copying over it at that moment would
+            # back up the MODIFIED file as if it were the original, and the test values become permanent and
+            # indistinguishable from a deliberate user setting. Found 2026-10-14 after the owner's own
+            # new_behaviour.ini was seen holding this project's AI_TWEAKS values; the Pure path 180 lines down
+            # (the last_used.json guard) has always had exactly this check.
+            if os.path.exists(bak):
+                print("  !! %s.harness-backup ALREADY EXISTS: a previous run did not restore (os.replace would\n"
+                      "     have consumed it). KEEPING the old backup as the true original and NOT overwriting it.\n"
+                      "     The file on disk right now may still carry a previous run's --csp values." % module)
+            else:
+                shutil.copy2(path, bak)
             restore.append((path, bak))
         else:
             restore.append((path, None))
