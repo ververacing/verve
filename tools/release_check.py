@@ -53,12 +53,31 @@ APP_PATHS = ["lib", "Verve.lua", "diag.lua"]
 # The arm token is OPTIONAL. An earlier version of this regex demanded an `on` and an `off` arm per cell, which was a
 # pairing I had invented: the suite is a BASELINE-versus-HEAD comparison, not a switch A/B, so every row sits on the
 # same side. Completeness therefore failed for all three cells while a real regression went unexamined.
-SUITE_RE = re.compile(r"^(rc\d+[a-z]?)_(spa12|spa|bcn|mon)(?:_(on|off))?_\d+$")  # spa12 BEFORE spa, it is a prefix
+SUITE_RE = re.compile(r"^(rc\d+[a-z]?)_(spa12|spa|bcn|mon|sgf)(?:_(on|off))?_\d+$")  # spa12 BEFORE spa, it is a prefix
 # Recomposed 2026-10-13 on the owner's yes (decision 0027). GATING cells are the two 12-lap races; the 2-lap
 # sprints are still run and scored but judged on opening-lap character, not on contact counts. The old suite put
 # nine of ten runs in the sprints, and a 12-lap cell's own spread is 1.40x against a sprint arm's 3.50x on identical
 # code - so the sprints cannot see a regression a long race can, and would need about n=10 to try.
-GATING_CELLS = {"mon": 3, "spa12": 3}               # cell -> runs needed; these decide releasability
+GATING_CELLS = {"mon": 3, "spa12": 3, "sgf": 3}     # cell -> runs needed; these decide releasability
+
+# `sgf` IS THE SINGAPORE FORMULA CELL (decision 0035): singapore_2020, uniform 20-car SF70H, 5 laps, ai-level 100,
+# with NEW_LATERAL_GRIP_ESTIMATION=1 and FIX_GRIP_MULT=1 STATED EXPLICITLY on every row. It gates because the two
+# GT3 cells are structurally blind to the worst defect this project has found, twice over: the formula interaction
+# cannot appear on a GT3 field at any sample size (every Verve-ON GT3 row at key >= 1 retired zero cars, 0 of 12),
+# and every other gating row runs the keys at 0, which is the one configuration where the bug cannot exist. So a
+# build could take a default-CSP formula field from 12 retirements to 20 and the old suite would report PASS.
+# IT RUNS ON PC #1 ONLY - the keys do not exist on CSP 3465, so a 3465 suite cannot produce this cell in any form.
+# That is handled by completeness: `sgf` is in NEEDED_CELLS, so a suite without it is reported SHORT rather than
+# passing on the cells it managed, which is what decision 0035 requires.
+#
+# DELIBERATELY **NOT** IN BASELINE_ALIAS, and this is the part to read before adding one. The obvious candidates
+# (cspf1_dflt_on, cspf3_full, cspf4_full) are all disqualified by the 2026-10-15 drift finding: the stock arm of
+# this very cell read 9/4/9, then 4/7/9, then 10/11/13 across three queues whose `cmd` strings are identical
+# character-for-character with no commit between them. An alias must "differ from the new cell in NOTHING but the
+# code version", and a baseline drawn from one of those queues silently carries up to ~6 retirements of
+# between-queue movement. With no alias the cell lands in rep.refuse - "neither shows a regression nor rules one
+# out" - which is the honest state and NOT a pass. The baseline to wire here is cspf5's `full` arm once it lands,
+# because cspf5 interleaves full WITH stock in one queue, so the drift can be read instead of assumed.
 
 # A cell ADDED to the suite has no baseline under the suite's own naming, and never will. Decision 0027 created the
 # Spa 12-lap gating cell on 2026-10-13, so there is no rc16c_spa12_* and the comparison has to use the pre-existing
@@ -195,6 +214,21 @@ def cells_of(suite, prefix):
     return out
 
 
+def short_cells(counts):
+    """Which GATING cells the freshest suite has too few runs of, as "cell(n of m)" strings.
+
+    Pulled out of check_suite so the rule is testable without git or results.csv - see --selftest. The rule that
+    matters is what it does NOT look at: CHARACTER_CELLS never appear here, because decision 0027 demoted the
+    2-lap sprints and a sprint was previously able to refuse a whole release.
+    """
+    out = []
+    for c in sorted(NEEDED_CELLS):
+        n = counts.get(c, 0)
+        if n < NEEDED_CELLS[c]:
+            out.append("%s(%d of %d)" % (c, n, NEEDED_CELLS[c]))
+    return out
+
+
 def per_cell(byarm):
     """{cell: total runs} across arms, for the completeness count."""
     out = {}
@@ -247,11 +281,7 @@ def check_suite(rep, rows):
     counts = per_cell(cells_of(suite, fresh_prefix))
     # the character cells are reported for visibility and never block
     chars = ", ".join("%s x%d" % (c, counts.get(c, 0)) for c in sorted(CHARACTER_CELLS))
-    short = []
-    for c in sorted(NEEDED_CELLS):
-        n = counts.get(c, 0)
-        if n < NEEDED_CELLS[c]:
-            short.append("%s(%d of %d)" % (c, n, NEEDED_CELLS[c]))
+    short = short_cells(counts)
     if short:
         rep.fail("suite completeness", "freshest suite %s is short: %s" % (fresh_prefix, " ".join(short)))
     else:
@@ -437,7 +467,103 @@ def check_docs(rep):
         rep.fail("docs current", last[:90])
 
 
+def rule_checks():
+    """Every rule, as one list of failures. Seeded defects RE-RUN THIS, rather than a second copy of the logic.
+
+    That matters: cspf1's scorer was proven against four synthetic cases that all shared its own assumption, so
+    the test re-encoded the bug it was meant to catch. A seed must drive the real checker, not a paraphrase.
+    """
+    f = []
+    full = dict(NEEDED_CELLS)
+    if short_cells(full):
+        f.append("a complete suite was reported short: %s" % short_cells(full))
+    for c in full:
+        missing = dict((k, v) for k, v in full.items() if k != c)
+        if not any(s.startswith(c + "(") for s in short_cells(missing)):
+            f.append("a suite missing the gating cell %r was NOT reported short" % c)
+    with_chars = dict(full)
+    for c in CHARACTER_CELLS:
+        with_chars[c] = 0
+    if short_cells(with_chars):
+        f.append("a character cell at zero runs was treated as gating: %s" % short_cells(with_chars))
+    # THE DEPTH ITSELF, not just which cells. Found by a seeded defect: nothing here noticed the requirement being
+    # lowered to one run a cell, which would let a single race per cell satisfy the gate while every other check
+    # still passed. n>=3 is the project standard and a 12-lap cell's own spread is 1.40x, so one run has no range.
+    thin = sorted("%s=%d" % (c, n) for c, n in NEEDED_CELLS.items() if n < 3)
+    if thin:
+        f.append("a gating cell requires fewer than 3 runs: %s" % ", ".join(thin))
+    if MIN_SIDE < 3:
+        f.append("MIN_SIDE %d is below the project's n>=3 standard" % MIN_SIDE)
+
+    # a one-run baseline must refuse, never pass: "no range" is not "no regression"
+    rep = Report()
+    mk = lambda lab, inc: {"label": lab, "incidents": str(inc), "contact_events": "50", "file": "x"}
+    suite = [mk("rc99a_sgf_1", 20)] + [mk("rc99b_sgf_%d" % i, 20) for i in (1, 2, 3)]
+    check_not_worse(rep, suite, "rc99b", all_rows=suite)
+    verdicts = [v for v, n, d in rep.rows if "sgf" in n]
+    if "PASS" in verdicts:
+        f.append("a gating cell with a 1-run baseline PASSED: %s" % verdicts)
+    if "REFUSED" not in verdicts:
+        f.append("a gating cell with a 1-run baseline was not refused: %s" % verdicts)
+
+    for cell in list(GATING_CELLS) + list(CHARACTER_CELLS):
+        m = SUITE_RE.match("rc16c_%s_on_1" % cell)
+        if not m or m.group(2) != cell:
+            f.append("SUITE_RE does not match cell %r (got %r)" % (cell, m and m.group(2)))
+    m = SUITE_RE.match("rc16c_spa12_on_1")
+    if not m or m.group(2) != "spa12":
+        f.append("spa12 lost its precedence over spa in SUITE_RE")
+    return f
+
+
+def selftest():
+    """Check the gate's own rules, then break each rule and confirm the check complains.
+
+    THIS TOOL HAD NO SELFTEST UNTIL NOW, and it is the one place where that mattered most: it decides whether a
+    release is admissible, and five rule defects were found in it by hand on 2026-10-13. A gate that admits or
+    excludes evidence deserves more scrutiny than the measurement it gates, not less.
+
+    The rules checked are the ones whose failure would be SILENT: that every gating cell is required by
+    completeness (which is what makes a CSP-3465 suite report incomplete rather than passing on the cells it
+    managed, decision 0035); that character cells never gate (a 2-lap sprint could once refuse a whole release,
+    decision 0027); that a gating cell with a one-run baseline is refused rather than passed, which is the state
+    `sgf` sits in until cspf5 provides an interleaved baseline; and that the label grammar still matches each
+    cell token with spa12 winning over its own prefix spa.
+    """
+    fails = rule_checks()
+    print("=== release_check selftest ===")
+    for x in fails:
+        print("  FAIL %s" % x)
+    print("  %s" % ("every rule holds" if not fails else "RULES BROKEN"))
+
+    print("\n=== seeded rule defects (untrusted until each FAILS rule_checks) ===")
+    allok = True
+    seeds = [
+        ("a gating cell dropped from the requirement", "pop_sgf"),
+        ("a character cell promoted to gating", "promote_spa"),
+        ("the gating requirement lowered to 1 run", "loosen"),
+    ]
+    for name, kind in seeds:
+        saved_needed, saved_chars = dict(NEEDED_CELLS), dict(CHARACTER_CELLS)
+        if kind == "pop_sgf":
+            NEEDED_CELLS.pop("sgf", None)
+        elif kind == "promote_spa":
+            NEEDED_CELLS["spa"] = 3
+        else:
+            for k in list(NEEDED_CELLS):
+                NEEDED_CELLS[k] = 1
+        got = rule_checks()
+        NEEDED_CELLS.clear(); NEEDED_CELLS.update(saved_needed)
+        CHARACTER_CELLS.clear(); CHARACTER_CELLS.update(saved_chars)
+        print("  %-46s %s" % (name[:46], "caught" if got else "NOT CAUGHT"))
+        allok &= bool(got)
+    print("\n  %s" % ("every seeded defect caught" if allok else "SELFTEST NOT TRUSTWORTHY"))
+    return 0 if (not fails and allok) else 1
+
+
 def main():
+    if "--selftest" in sys.argv:
+        return selftest()
     base, head = "origin/main", "dev016"
     for i, a in enumerate(sys.argv):
         if a == "--base" and i + 1 < len(sys.argv):
