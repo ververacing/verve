@@ -87,12 +87,50 @@ def files_of(paths, unresolved=None):
             unresolved.append(p)
 
 
-def scan_text(label, text, rs):
-    """-> hit count. Scans a text blob line by line, printing where and which rule, never the match itself."""
+# Deliberate fake fixtures in THIS FILE's own selftest. They must match the rules - that is their job - so when
+# this file's source turns up inside a diff the tool detects its own canaries. Excused in DIFF MODE ONLY, never
+# when scanning fixtures directly, so selftest() still requires every one of them to fire.
+# The third entry is PROSE, not the path itself, on purpose. The docstring below explains the escaped-path bug
+# by quoting a path with four literal backslashes, and matching that by substring means counting backslashes
+# through two layers of escaping - which is the exact trap that makes this a rule of its own ("write files
+# directly; never generate them through nested escaping"). I got the count wrong on the first attempt and the
+# gate still reported one leak. The surrounding sentence is unambiguous and cannot be miscounted.
+OWN_FIXTURES = ("someone@example.org", "C:/Users/someone",
+                "with two backslashes and the rule never fired")
+
+
+def scan_text(label, text, rs, diff_mode=False):
+    """-> hit count. Scans a text blob line by line, printing where and which rule, never the match itself.
+
+    diff_mode changes two things, and both were found by running this tool over a real 130-commit release range
+    where it reported SIX leaks and every one was a false positive:
+
+      1. ONLY ADDED LINES ARE SCANNED. A `-` line is being DELETED by this range, so it is a FIX, not a leak -
+         the range removed an absolute path from harness.py and the tool reported that removal as a leak. The
+         already-pushed history still holds the old line either way, so a forward-looking gate cares only about
+         what the range ADDS.
+      2. THIS FILE'S OWN SELFTEST FIXTURES ARE EXCUSED (see OWN_FIXTURES). Three of the six were this tool's own
+         canaries appearing in its own diff, which is the self-match trap procs.py documents.
+
+    KNOWN LIMITATION, left deliberately: the OS-user-name rule fired on a racing reference table's driver name -
+    a real NASCAR competitor who happens to share a first name with the OS user. Those lines were removals so
+    (1) silenced them, but an ADDED reference row would fire again. Left strict on purpose: loosening a name
+    rule is exactly how a real name gets out, and the right response to a hit is to look at it.
+
+    AND THE NAME IS NOT REPEATED HERE, WHICH IS THE POINT. Documenting that false positive by quoting the name
+    put the OS user's own first name into this file and into a commit message, and the gate immediately flagged
+    both - correctly, because the rule is about the string leaving the machine, not about whose name it is. A
+    coincidence is not an exemption. Describe such a hit, never quote it.
+    """
     hits = 0
     for i, line in enumerate(text.split("\n"), 1):
         if "noreply@anthropic.com" in line or line.lstrip().lower().startswith("co-authored-by:"):
             continue
+        if diff_mode:
+            if not line.startswith("+") or line.startswith("+++"):
+                continue
+            if any(f in line for f in OWN_FIXTURES):
+                continue
         for name, rx in rs:
             if rx.search(line):
                 print("  LEAK  %s:%d  <- %s" % (label, i, name))
@@ -126,7 +164,9 @@ def check_range(rng, rs):
         if not r.stdout.strip():
             print("  REFUSED: the %s for %s is EMPTY - a vacuous pass is how this tool failed before" % (what, rng))
             return 1
-        out += scan_text("<%s %s>" % (what, rng), r.stdout, rs)
+        # The DIFF is scanned additions-only; the MESSAGES are scanned whole, because every commit message in
+        # the range is new text leaving the machine - there is no "removed" message.
+        out += scan_text("<%s %s>" % (what, rng), r.stdout, rs, diff_mode=(what == "diff"))
     print("leak_check range %s: %s" % (rng, "CLEAN (diff and commit messages)" if out == 0 else "%d LEAK(S)" % out))
     return 1 if out else 0
 
