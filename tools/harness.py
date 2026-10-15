@@ -1042,7 +1042,18 @@ def apply_assists(spec):
     if not spec or not os.path.exists(ASSISTS_INI):
         return None
     bak = ASSISTS_INI + ".harness-backup"
-    shutil.copy2(ASSISTS_INI, bak)
+    # NEVER OVERWRITE AN EXISTING BACKUP - the same defect fixed for apply_csp_overrides, in the file that
+    # matters MORE because it is the owner's damage, fuel and tyre settings. restore_assists uses os.replace,
+    # which CONSUMES the backup, so after any completed run no backup exists; one sitting here means the
+    # previous run never restored (a kill, a power cut, a reboot - none covered by the `finally` in main()).
+    # Copying over it would back up the ALREADY-MODIFIED file as the original. Concretely: a fuel-wear row sets
+    # FUEL_RATE=3 and TYRE_WEAR=4, so an interruption there followed by one more run would leave the owner
+    # racing at triple fuel burn and quadruple tyre wear, permanently and untraceably.
+    if os.path.exists(bak):
+        print("  !! assists.ini.harness-backup ALREADY EXISTS: a previous run did not restore. KEEPING it as\n"
+              "     the true original; cfg/assists.ini may still carry that run's DAMAGE/FUEL_RATE/TYRE_WEAR.")
+    else:
+        shutil.copy2(ASSISTS_INI, bak)
     lines = open(ASSISTS_INI, encoding="utf-8").read().splitlines(True)
     want = {str(k): str(v) for k, v in spec.items()}
     out, seen = [], set()
