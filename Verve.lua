@@ -410,6 +410,13 @@ function script.update(dt)
         if Diag then pcall(function() Diag.update(dt, { managed = 0 }) end) end
         Feed.ENABLED = G.raceFeed
         if G.raceFeed then pcall(Feed.update, dt, {}) end
+        -- (0.16) MEASUREMENT PARITY, not a behaviour change. feed.lua promotes a collision tap to an incident only
+        -- `if Contacts.available`, and Contacts.update was called ONLY below this return - so a Verve-OFF race
+        -- counted damage jumps while a Verve-ON race counted jumps PLUS taps, and NO feed incident number could
+        -- cross an ON/OFF boundary. contacts.lua only observes (it makes no physics writes), so running it here
+        -- changes nothing about the race. Called AFTER Feed.update to match the enabled path's order exactly
+        -- (that path does feed at :543 then contacts at :544), so the one-frame lag is identical in both arms.
+        if G.raceFeed then pcall(Contacts.update, dt) end
         pcall(Racecraft.offSwitch, false, false, Difficulty.stockLevel)   -- (0.15.1) switched off mid-session: hand the cars back, once
         pcall(Fuel.offTick)                                                 -- (0.15.1) off across the green: no green load later
         return
@@ -809,7 +816,9 @@ function script.windowMain()
     ui.text('Tuning')
     local iv = ui.slider('Variability intensity##iv', G.intensity, 0.0, 1.5, '%.2f')
     if iv ~= G.intensity then setG('intensity', iv) end
-    if ui.itemHovered() then ui.setTooltip('Per-driver spread: pace/consistency differences AND how much drivers vary in aggression, so the field isn\'t uniform. 0 = robotic/identical, 0.5 = subtle (default), 1.5 = dramatic.') end
+    if ui.itemHovered() then ui.setTooltip('Per-driver spread: pace/consistency differences AND how much drivers vary in aggression, so the field isn\'t uniform'
+        .. (Human.MV_INTENSITY and ', AND how often and how large their visible mistakes are' or '')
+        .. '. 0 = robotic/identical, 0.5 = subtle (default), 1.5 = dramatic.') end
     local rc = ui.slider('Racecraft intensity##rc', G.rcIntensity, 0.0, 1.5, '%.2f')
     if rc ~= G.rcIntensity then setG('rcIntensity', rc) end
     if ui.itemHovered() then ui.setTooltip('How hard the field attacks/defends. 0 = passive, 0.7 = default, 1.5 = elbows out.') end

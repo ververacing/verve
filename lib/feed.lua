@@ -272,9 +272,14 @@ function F.update(dt, stats)
                 end
             end
             local dd = c.dmg - p.dmg
+            -- (0.16) WHICH INSTRUMENT COUNTED THIS INCIDENT: 'dmg' is a damage jump, 'hit' is a collision tap
+            -- promoted just below. The two were indistinguishable after the fact, and a Verve-OFF arm counted only
+            -- 'dmg' because Contacts.update sat below the disabled return in Verve.lua - so every cross-arm
+            -- incident count, severity median and closing-speed median was comparing two different instruments.
+            local dsrc = 'dmg'
             if dd < INCIDENT_MIN and Contacts.available then     -- no damage jump: a collision event in the last second counts instead
                 local ev = Contacts.recent(i, 1.0)
-                if ev and ev.id ~= feedEvSeen[i] and ev.drop >= 3 then dd = math.max(INCIDENT_MIN, ev.drop); feedEvSeen[i] = ev.id end
+                if ev and ev.id ~= feedEvSeen[i] and ev.drop >= 3 then dd = math.max(INCIDENT_MIN, ev.drop); feedEvSeen[i] = ev.id; dsrc = 'hit' end
             end
             if dd >= INCIDENT_MIN and not c.pit then
                 local contact = {}
@@ -297,8 +302,8 @@ function F.update(dt, stats)
                     who = string.format(',"other":%d,"noseAhead":%s,"dLat":%.2f,"closing":%d',
                         other, tostring(otherSd > 0), po.lat - p.lat, math.floor(p.spd - po.spd))
                 end
-                event(t, 'incident', string.format('"car":%d,"spline":%.4f,"severity":%d,"contact":[%s],"solo":%s,"speed":%d%s',
-                    i, p.spline, math.floor(dd), table.concat(contact, ','), tostring(#contact == 0), math.floor(p.spd), who))
+                event(t, 'incident', string.format('"car":%d,"spline":%.4f,"severity":%d,"src":"%s","contact":[%s],"solo":%s,"speed":%d%s',
+                    i, p.spline, math.floor(dd), dsrc, table.concat(contact, ','), tostring(#contact == 0), math.floor(p.spd), who))
             end
             if math.abs(c.lat) > 1.3 and math.abs(p.lat) <= 1.3 and not c.pit then
                 event(t, 'off_track', string.format('"car":%d,"spline":%.4f', i, c.spline))
