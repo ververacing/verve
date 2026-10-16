@@ -18,8 +18,11 @@ racing, on **any** car and track. Toggle and tune everything in the in‑game pa
   pass on the side the defender isn't, and make one clean defensive move. Per‑class tactics (an
   F1 slipstreams from far and passes precisely; a touring car dive‑bombs the inside).
   Collision‑awareness stays on, so they position, not ram.
-- **Human errors** — occasional *gentle* bobbles on forgiving cars, never on high‑downforce
-  open‑wheelers. Grip changes are slew‑limited so an error never snaps a car into a spin.
+- **Human errors** — one visible mistake per driver every few laps: a late brake and lock‑up, a
+  missed apex, a snap and lift. The rate follows pace, so a rookie errs every two or three laps
+  while a class's quickest driver rarely does. Offs are rare and spins rarer — open‑wheelers,
+  prototypes and hypercars get half those odds, and on NASCAR and drift cars a mistake never
+  becomes an off or a spin.
 - **Self‑recovery** — spun or beached AI that aren't wrecked get themselves going again: gentle
   throttle + steering back to the line, reversing off walls and out of car‑to‑car locks, waiting
   for traffic before rejoining. Never touches the race start or pit exit.
@@ -43,13 +46,42 @@ detected class and set per‑car levels on the grid before the lights.
 1. **The difficulty slider is real.** 80 is a beginner field, 90 an intermediate one, 100 a strong club racer.
    Verve makes the launcher's number the truth for every car without a driver (Content Manager's per-car grid
    levels only keep their spread around it, unless you hand-set them more than 10 apart), so start where you
-   actually are — 100 is not the default, it's the top. A car you give a driver in the Drivers panel runs at
-   that driver's own pace instead, whatever the slider says: Rookie = difficulty 80, Midfielder = 90, Veteran
-   about 98, the fastest real drivers 99-100. Career events use their own difficulty curve.
+   actually are — 100 is not the default, it's the top. **Driver profiles are opt-in**: unless you hit
+   Randomize or assign one yourself, every car on the grid is governed by that slider.
+   A car you *do* give a driver runs at that driver's own pace instead, whatever the slider says. Roughly, on a
+   GT3 field: Rookie ≈ 83, Midfielder ≈ 87, Veteran ≈ 93, and the quickest named driver in a class runs at the
+   **full 100** — each class's best sits at the ceiling by design, so a profiled grid is led at expert pace and
+   strung out below it. The exact numbers shift by class (the same drivers on a formula field read about 82, 85,
+   90 and 100) because every class has its own difficulty curve. Career events use their own curve again.
 2. **Keep damage on, 50 % or more.** With damage off nothing ever retires, a wrecked car sits on the line all
    race, and the field never strings out the way a real one does.
 3. **Turn off other AI mods and CSP's AI rubber‑banding / adaptation.** They write the same AI values Verve
    does. Verve watches for this and says so in its window; when it does, switch the other one off.
+
+## Troubleshooting
+
+**My formula / open-wheel races fall apart — cars spinning and retiring everywhere.**
+Set `NEW_LATERAL_GRIP_ESTIMATION = 0` under `[AI_TWEAKS]` in Custom Shaders Patch's `new_behaviour.ini`.
+CSP's lateral-grip estimation and Verve's own grip control both adjust AI grip. Each is sensible on its own —
+CSP's setting genuinely *improves* stock AC — but together, on open-wheel cars, they can take a 20-car field
+down to a handful of finishers. In our own testing a 20-car formula grid lost 12–20 cars with the key at 1 and
+0–1 with it at 0. GT and touring cars are not affected, you do **not** need to change `FIX_GRIP_MULT`, and none
+of this applies to CSP 3465 or older, where the setting does not exist.
+
+**Cars retire or get parked more than I expect.**
+Two settings matter most. Leave **damage on** at a real value rather than zero — with damage off Verve cannot
+tell a wreck from a tap. And leave **Recovery on**: it is what clears a stricken car before the rest of the
+field arrives. Turning Recovery off makes races worse, not purer — a field that finished intact with it on lost
+five to seven cars of eighteen with it off, with roughly twice the incidents and no pace gained.
+
+**The AI feels slower than the difficulty I chose.**
+If you have assigned driver profiles, a profiled car sets its own pace and **ignores the slider** by design;
+expect the quickest driver in a class to run at the level you chose and the rest to sit below it. If you have
+not assigned any, every car follows the slider — see "Before you race" above for what each level means.
+
+**The app does not appear, or every car sits still at the lights.**
+That is Verve failing to load rather than a racing problem. Check CSP's Lua log for an error on startup, and
+make sure you copied the whole `Verve` folder, `lib` included.
 
 ## Notes
 - Verve controls AI grip via CSP's public physics API. If you also run another AI‑grip mod

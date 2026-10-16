@@ -801,7 +801,7 @@ function script.windowMain()
 
     ui.newLine()
     ui.text('Options')
-    toggle('Human errors', 'humanErrors', 'Occasional gentle bobbles on forgiving cars. Never on Formula/Prototype/Hypercar. Grip-slewed so it will not spin cars.')
+    toggle('Human errors', 'humanErrors', 'One visible mistake per driver every few laps: a late brake and lock-up, a missed apex, or a snap and lift. The rate follows pace, so a rookie errs every 2-3 laps, a midfielder every 4-5, a veteran every 9-15, and the quickest driver in a class less often still. Offs are rare and spins rarer. Formula, Prototype and Hypercar get half those off and spin odds, and on NASCAR and drift cars a mistake never becomes an off or a spin. Race sessions only, never the opening lap, never your own car.')
     toggle('Difficulty slider in lap-time steps (90 = +5%, 80 = +10%)', 'sliderCurve', 'AC\'s own level scale is not linear: on race cars 90 is 2% slower than 100 but 80 is 17% slower, and below that the AI gets erratic. On, the slider means measured lap-time steps for the car class you are racing: 100 = expert pace, 90 = +5%, 80 = +10%, 70 = +15%. Off, the raw AC level. A grid whose opponents were hand-set to different levels is always honoured as written.')
     toggle('Career: scale difficulty across the series', 'careerCurve', 'In AC career events the difficulty meter picks a pace band and each event moves you through it: soft first series, a real fight at the end, never leaving the band. Off = every career event at the meter\'s flat level. (Outside career the meter always applies as set.)')
     do
