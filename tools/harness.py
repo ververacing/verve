@@ -139,6 +139,44 @@ RACE_OUT = os.path.join(DOCS, "out", "race_out.json")
 VERVE = os.path.join(AC_DIR, "apps", "lua", "Verve")
 HARNESS_LUA = os.path.join(VERVE, "harness.lua")
 RESULTS_DIR = os.path.join(VERVE, "tools", "harness_results")
+
+
+def snapshot_configs(label):
+    """Copy the three config files THIS row is about to race with into harness_results/cfgsnap/.
+
+    Both files are rewritten every row, so after a queue finishes there is no way to see what any earlier row
+    actually ran. results.csv's csp_ai column records the effective AI_TWEAKS block and nothing records race.ini.
+    Called immediately before acs.exe launches, i.e. after every override has been applied, so what lands here is
+    what the race ran rather than what was staged.
+
+    Never fatal: a failed snapshot must not cost a race. The directory is created on demand.
+
+    ONLY THE FIRST LAUNCH SNAPSHOTS, AND THAT IS CORRECT - do not "fix" it. There are three Popen sites: the
+    first launch and two relaunch paths for a hung acs.exe. apply_csp_overrides and apply_assists run ONCE per
+    row, above this call, so the config a relaunch races with is the one already recorded. Adding a snapshot to
+    the relaunch paths would only overwrite the file with identical bytes.
+    """
+    try:
+        d = os.path.join(RESULTS_DIR, "cfgsnap")
+        if not os.path.isdir(d):
+            os.makedirs(d)
+        safe = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in str(label))[:60] or "unlabelled"
+        # Verve.ini is Verve's OWN persisted state (CSP's ac.storage backing file, hashed keys): the learned
+        # per-track trouble-spot map, telemetry counters and user overrides. It is read AND written by every row
+        # and nothing in `cmd` or the git tree records it, which is how it carried across every Singapore queue
+        # unnoticed. Recording what each row STARTED from is the only way to check that afterwards rather than
+        # assume it. The map itself is now neutralised per row by --troublespots {"FRESH":true}; this is the audit
+        # trail, not the fix.
+        for src, ext in ((RACE_INI, "race.ini"),
+                         (os.path.join(CSP_USER_CFG, "new_behaviour.ini"), "new_behaviour.ini"),
+                         (os.path.join(DOCS, "cfg", "extension", "state", "lua", "app", "Verve.ini"),
+                          "Verve.ini")):
+            # shutil.copy2, not a read-then-write: harness.py does not import io, and a byte copy cannot mangle
+            # an encoding or a line ending on the way through. shutil is already imported here.
+            if os.path.exists(src):
+                shutil.copy2(src, os.path.join(d, "%s.%s" % (safe, ext)))
+    except Exception as e:
+        print("  !! config snapshot failed (not fatal): %s" % e)
 # only written with --keep-replay now (the broadcast initiative is dropped). D: when that drive is there, else alongside the results.
 REPLAY_DIR = "D:/Verve/harness_replays" if os.path.isdir("D:/Verve") else os.path.join(RESULTS_DIR, "replays")
 
@@ -1156,6 +1194,7 @@ def run_once(args, arm, run_idx):
     assists_eff.update(arm.get("assists") or {})
     assists_bak = apply_assists(assists_eff)
     pure_bak = apply_pure_for_weather(getattr(args, "weather_type", None))
+    snapshot_configs(label)
     t_launch = time.time()
     proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
     OWNED["game"] = True
