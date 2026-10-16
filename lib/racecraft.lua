@@ -1805,13 +1805,33 @@ local evalBody = function()
 function R.evaluate(i_, dt_)
     if not R.ENABLED then return 0 end
     i, dt, caut, state = i_, dt_, 0, 0
-    pcall(evalBody)
+    local ok, err = pcall(evalBody)
+    if not ok then                                      -- (R.errN) the fault was always swallowed here
+        R.errN = R.errN + 1
+        if not R.errFirst then R.errFirst = tostring(err) end
+        if R.onError then R.onError('racecraft.evaluate', err) end
+    end
     if state == 1 then R.attacking = R.attacking + 1
     elseif state == 2 then R.defending = R.defending + 1 end
     return caut + (R.CAUT_BASE or 0)
 end
 end   -- (lean016) the evaluate do-block
 
+-- (R.errN) RACECRAFT ERRORS MADE LOUD. R.evaluate has always wrapped evalBody in a pcall and discarded the
+-- result. A fault anywhere inside evalBody means that car skips its remaining control writes for the frame -
+-- physics.setAIAggression is called near the END of evalBody - while R.evaluate still returns caut + CAUT_BASE
+-- with whatever PARTIAL caut had been assigned before the fault. So a race could drive differently from what the
+-- switches say and every number from it would look clean. This records it and changes nothing else: no rethrow,
+-- nothing shown to players, the partial return left exactly as it was. Whether a faulting car should instead get
+-- a safe default is a separate question and a separate commit.
+-- onError is set by Verve.lua to its own noteErr, which already counts, logs each DISTINCT message once and caps
+-- at 25 per session - one shared mechanism instead of a second logger. It stays nil when the module runs alone.
+-- The `where` string passed to it must be FIXED and must never include the car index: noteErr keys on
+-- `where .. ': ' .. err`, so a per-car `where` would make one bug on an 18-car grid look like 18 distinct
+-- messages and burn 18 of the shared cap. The car index belongs in errFirst, which is ours and uncapped.
+R.onError = nil             -- (R.errN) injected reporter; nil = run silently, for standalone use and tests
+R.errN = 0                  -- racecraft's OWN fault count: lua_errors is an aggregate over every module
+R.errFirst = nil            -- the first message seen this session, for the diag row
 R.NOSTATE = {}              -- (lean016) read-only stand-in for 'no recovery state': never write to it
 R.last = {}                 -- per-car applied values (offset/aggr/caution/state) -- diagnostics only
 function R.beginFrame()
@@ -2033,6 +2053,7 @@ function R.reset()
     cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {} }; R.cv2 = cv2
     R.crawlN = 0; R.topV = {}; R.aggV = {}
     R.roomN = 0; R.roomAct = 0; R.evalN = 0; R.fastTuckN = 0; R.yellowSlowN = 0; R.bgN = 0; R.bgPassN = 0
+    R.errN = 0; R.errFirst = nil   -- (R.errN) per SESSION, matching how Verve.lua zeroes luaErrors
     -- AGGR_BASE_FIX: the next session reads each car afresh; this session's capture and Verve's last write carry over for
     -- R.aggrBase's guard (empty while the switch is off: nothing happens)
     for k, b in pairs(R.baseAggr) do

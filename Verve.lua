@@ -66,6 +66,11 @@ local function pc(where, f, ...)                -- pcall that counts AND logs (n
     if not ok then noteErr(where, e) end
     return ok
 end
+-- (R.errN) racecraft's per-frame evalBody pcall used to discard its error, so a car could silently skip its
+-- control writes for a frame with nothing recorded. The module now reports through this hook, which means ONE
+-- counting-and-logging mechanism (noteErr: distinct message logged once, hard cap 25) rather than a second one
+-- inside racecraft. `pc` cannot be used there - it is a local here and a module cannot see it.
+Racecraft.onError = noteErr
 local shiftSet = {}                              -- per car: shift thresholds applied (see Racecraft.SHIFT_UP)
 local launchDone = {}                            -- per car: past 90 km/h once this session (Racecraft.LAUNCH_WRAP)
 local harnessStartT, harnessStarted = 0, false   -- "press Drive" on AC's pre-session screen (ac.tryToStart)
@@ -410,7 +415,10 @@ function script.update(dt)
         -- (0.16) contactRecent in the DISABLED branch too, so diag's contact ring - and results.csv
         -- `incidents` and `contact_events` derived from it - count taps identically in both arms.
         -- Contacts.update now runs here (84c1f02), so the accessor has data to return.
-        if Diag then pcall(function() Diag.update(dt, { managed = 0, contactRecent = Contacts.recent }) end) end
+        -- rcErr is passed on the DISABLED branch too, and is genuinely 0 here because racecraft is not running.
+        -- A field present in one branch and absent in the other is how 84c1f02/e96168d made two arms partly
+        -- instrument rather than effect (contactRecent); the column must exist in both or they stop comparing.
+        if Diag then pcall(function() Diag.update(dt, { managed = 0, contactRecent = Contacts.recent, rcErr = Racecraft.errN or 0 }) end) end
         Feed.ENABLED = G.raceFeed
         -- (0.16, decision 0031) SET THIS IN THE DISABLED BRANCH TOO. It used to be assigned only below this
         -- return, so with Verve off and sharing just unticked the flag kept its stale `true` and Telemetry.abort
@@ -536,6 +544,8 @@ function script.update(dt)
     if Diag then pcall(function()
         Diag.update(dt, {
             managed = managed, attacking = Racecraft.attacking, defending = Racecraft.defending,
+            rcErr = Racecraft.errN or 0,   -- (R.errN) per-row instrument flag: any row with rcErr > 0 is suspect
+
             recovering = Recovery.count, crashRepairs = Recovery.repairedCount,
             limpRepairs = Recovery.limpCount, retired = Recovery.retiredCount, crawlN = Racecraft.crawlN or 0,
             roomN = Racecraft.roomN or 0, roomAct = Racecraft.roomAct or 0, bgN = Racecraft.bgN or 0, bgPassN = Racecraft.bgPassN or 0, evalN = Racecraft.evalN or 0, fastTuckN = Racecraft.fastTuckN or 0, yellowSlowN = Racecraft.yellowSlowN or 0,
