@@ -158,6 +158,28 @@ def runs_a_script(cmdline):
     return script_run(cmdline, ".sh") is not None
 
 
+def bare_shell(cmd):
+    """True when a command line is JUST the executable, with no script, no -Command and no arguments.
+
+    The tell that a process is an idle shell rather than work in progress, and it does not depend on parentage.
+    Two powershell.exe sat on sweep's REPORT list for 38 hours labelled "may be a harness run whose exit hook
+    restores race.ini", and on 2026-10-15 that guess triggered a full read-only investigation before they turned
+    out to be this agent's OWN PowerShell tool shells - parent claude.exe, ~4 s of CPU across 38 hours, no
+    children. Killing one would have removed the agent's own tool.
+    Parentage was the first fix attempted and it does not work here: ancestors(os.getpid()) cannot resolve the
+    chain when the running python is absent from the wmic snapshot, and the tool shells are SIBLINGS of this
+    script rather than ancestors. The command line is the sound test instead - a harness exit hook always
+    carries a script path or -Command, so a bare executable cannot be running one, whoever its parent is.
+    """
+    if not cmd:
+        return True
+    s = cmd.strip()
+    if s.startswith('"'):                      # a quoted exe path: anything after the closing quote is an arg
+        end = s.find('"', 1)
+        return end != -1 and not s[end + 1:].strip()
+    return len(s.split()) == 1                 # unquoted: one token means no arguments
+
+
 def classify(r, mine, keep):
     """-> ('protected'|'report'|'stray'|'ok', reason)"""
     name, pid, ppid, age, cmd = r
@@ -169,6 +191,16 @@ def classify(r, mine, keep):
         s = script_run(cmd, ".py")
         if s in QUEUE_SCRIPTS:
             return "protected", "the live queue (%s)" % s
+        # A SIBLING TOOL SHELL OF THIS AGENT'S OWN HOST, which is not a harness run and must not be reported as
+        # one. `mine` holds this process and its ancestors, so a process whose PARENT is one of them was spawned
+        # by the same host - the Claude app's PowerShell/Bash tool shells are siblings of this script, not
+        # ancestors, which is why the `pid in mine` check above misses them. They sat reported for 38 hours and
+        # cost a full read-only investigation on 2026-10-15 before being identified: bare `powershell.exe` with
+        # NO -Command and no script path, parent claude.exe, ~4 s of CPU across that whole time, no children.
+        # KILLING ONE WOULD HAVE TAKEN OUT THE AGENT'S OWN PowerShell TOOL. An empty command line is the tell: a
+        # harness exit hook always carries a script or -Command.
+        if bare_shell(cmd):
+            return "protected", "an idle shell with NO command line: cannot be running an exit hook"
         return "report", "never killed: may be a harness run whose exit hook restores race.ini"
     if name in SHELLS and runs_a_script(cmd):
         return "protected", "a shell running a .sh - a chain or watcher"
@@ -262,10 +294,29 @@ def selftest():
           % ("yes" if k9 == "protected" else "NO - WOULD KILL AN ARMED WAITER", why9))
     ok &= k9 == "protected"
 
+    # THE INVARIANT IS "NEVER STRAY", NOT "ALWAYS report". This used to assert k3 == "report" exactly, and so it
+    # failed when a BARE shell became "protected" - even though protected and report both mean never killed, which
+    # is the only property that matters for safety. Asserting the mechanism instead of the property made a correct
+    # change look like a regression. Now it checks the invariant AND both arms of the bare/scripted split, so it
+    # would still catch the dangerous direction: a real exit hook being protected and therefore never surfaced.
     for nm in ("python", "powershell"):
         k3, _ = classify((nm, 7, 6, 999.0, "x"), mine, keep)
-        print("  %-11s is report-only, never stray?                %s" % (nm, "yes" if k3 == "report" else "NO"))
-        ok &= k3 == "report"
+        print("  %-11s is never STRAY (never killed)?              %s" % (nm, "yes" if k3 != "stray" else "NO"))
+        ok &= k3 != "stray"
+
+    bare = ("powershell", 7, 6, 999.0, os.path.join(
+        os.environ.get("SystemRoot", ""), "System32", "WindowsPowerShell", "v1.0",
+        "powershell.exe"))
+    kb, whyb = classify(bare, mine, keep)
+    print("  a BARE shell (no cmdline) is protected, not reported?     %s (%s)"
+          % ("yes" if kb == "protected" else "NO", whyb))
+    ok &= kb == "protected"
+
+    hook = ("powershell", 7, 6, 999.0, r'powershell.exe -Command "restore race.ini"')
+    kh, whyh = classify(hook, mine, keep)
+    print("  a shell WITH -Command is still REPORTED?                  %s (%s)"
+          % ("yes" if kh == "report" else "NO - A REAL HOOK WOULD BE HIDDEN", whyh))
+    ok &= kh == "report"
 
     queue = ("python", 11, 10, 95.0, 'C:/x/python.exe -u tools/batch.py batch_20261014_pc1_recov.txt')
     k7, why7 = classify(queue, mine, keep)
