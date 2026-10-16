@@ -71,6 +71,8 @@ end
 -- counting-and-logging mechanism (noteErr: distinct message logged once, hard cap 25) rather than a second one
 -- inside racecraft. `pc` cannot be used there - it is a local here and a module cannot see it.
 Racecraft.onError = noteErr
+Recovery.onError = noteErr
+Human.onError = noteErr
 local shiftSet = {}                              -- per car: shift thresholds applied (see Racecraft.SHIFT_UP)
 local launchDone = {}                            -- per car: past 90 km/h once this session (Racecraft.LAUNCH_WRAP)
 local harnessStartT, harnessStarted = 0, false   -- "press Drive" on AC's pre-session screen (ac.tryToStart)
@@ -418,7 +420,7 @@ function script.update(dt)
         -- rcErr is passed on the DISABLED branch too, and is genuinely 0 here because racecraft is not running.
         -- A field present in one branch and absent in the other is how 84c1f02/e96168d made two arms partly
         -- instrument rather than effect (contactRecent); the column must exist in both or they stop comparing.
-        if Diag then pcall(function() Diag.update(dt, { managed = 0, contactRecent = Contacts.recent, rcErr = Racecraft.errN or 0 }) end) end
+        if Diag then pcall(function() Diag.update(dt, { managed = 0, contactRecent = Contacts.recent, rcErr = Racecraft.errN or 0, recErr = Recovery.errN or 0, humErr = Human.errN or 0 }) end) end
         Feed.ENABLED = G.raceFeed
         -- (0.16, decision 0031) SET THIS IN THE DISABLED BRANCH TOO. It used to be assigned only below this
         -- return, so with Verve off and sharing just unticked the flag kept its stale `true` and Telemetry.abort
@@ -544,7 +546,7 @@ function script.update(dt)
     if Diag then pcall(function()
         Diag.update(dt, {
             managed = managed, attacking = Racecraft.attacking, defending = Racecraft.defending,
-            rcErr = Racecraft.errN or 0,   -- (R.errN) per-row instrument flag: any row with rcErr > 0 is suspect
+            rcErr = Racecraft.errN or 0, recErr = Recovery.errN or 0, humErr = Human.errN or 0,   -- (R.errN) per-row instrument flags: any row with any of these > 0 is suspect
 
             recovering = Recovery.count, crashRepairs = Recovery.repairedCount,
             limpRepairs = Recovery.limpCount, retired = Recovery.retiredCount, crawlN = Racecraft.crawlN or 0,

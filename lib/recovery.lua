@@ -106,6 +106,16 @@ local function scaleToTrack(len)
 end
 
 R.count = 0    -- how many cars are being actively recovered right now (for UI)
+-- (R.errN) RECOVERY ERRORS MADE LOUD, the same defect racecraft had in 49e9003: R.update wrapped the whole
+-- per-car carBody in a pcall and discarded the result, so a fault left that car with no recovery action for the
+-- frame and nothing recorded it - on the subsystem that LESSONS calls the project's central claim. Behaviour is
+-- unchanged: no rethrow, nothing shown to players. onError is set by Verve.lua to its own noteErr, so there is
+-- ONE counting-and-logging mechanism; the `where` it is given must stay FIXED ('recovery.carBody') and must never
+-- include the car index, because noteErr keys on `where .. ': ' .. err` and a per-car key would burn its cap of
+-- 25 on a single bug. The index goes in errFirst, which is ours and uncapped.
+R.onError = nil   -- injected reporter; nil = run silently (standalone use, tests)
+R.errN = 0        -- recovery's OWN fault count; lua_errors is an aggregate over every module
+R.errFirst = nil  -- first message this session, car index included, for the diag row
 
 -- crash repair: repair a stuck car IN PLACE (recovery then drives it out). No teleport, no pit.
 local REPAIR_SLOW       = 15.0 -- km/h: below this counts as stuck/crippled
@@ -1220,7 +1230,12 @@ function R.update(dt_)
     if R.pointToPoint then R.count = 0; return end
     for i_ = 0, sim.carsCount - 1 do          -- includes the player's car WHEN it's under AI control (Ctrl+C)
         i = i_
-        pcall(carBody)
+        local ok, err = pcall(carBody)
+        if not ok then                                  -- (R.errN) was discarded: a car could skip recovery silently
+            R.errN = R.errN + 1
+            if not R.errFirst then R.errFirst = 'car ' .. tostring(i_) .. ': ' .. tostring(err) end
+            if R.onError then R.onError('recovery.carBody', err) end
+        end
     end
     R.count = active
 end
@@ -1311,6 +1326,7 @@ function R.reset()
     R.settleUntil = os.clock() + R.SETTLE_S     -- see R.SETTLE_S: the next frames are still the old session's
     R.boxRescued = {}; R.boxRescueN = 0; R.boxSeenN = 0; R.boxTryN = 0; R.boxOkN = 0; R.safeHold = {}
     R.suspT = {}; R.suspPit = {}; R.suspPitCount = 0; R.suspFixN = 0; R.suspFixCar = {}; R.suspOwe = {}
+    R.errN = 0; R.errFirst = nil   -- (R.errN) per SESSION, matching how Verve.lua zeroes luaErrors
     R.pointToPoint = nil
     boxT = {}; boxFuel = {}
     ownLaps, ownSpline = {}, {}

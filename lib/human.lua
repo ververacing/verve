@@ -18,6 +18,15 @@ local H = {}
 H.ENABLED       = true
 H.INTENSITY     = 0.5      -- variability scale (0 = none, 1 = subtle, 1.5 = strong)
 H.HUMAN_VAR     = true     -- personality / drift / fade / pressure / slipstream
+-- (H.errN) HUMAN ERRORS MADE LOUD - the module's own faults, not the AI's driving mistakes. H.getModifiers
+-- wrapped the whole per-car modBody in a pcall and discarded the result, so a fault left that car's grip and
+-- caution unmodified for the frame with nothing recorded: the pace-variability subsystem could be silently
+-- absent while every number looked clean. Same defect as racecraft (49e9003) and recovery. Behaviour unchanged,
+-- no rethrow. onError is Verve.lua's noteErr, so ONE counting-and-logging mechanism; the `where` stays FIXED
+-- ('human.modBody') and never carries the car index, which would burn noteErr's cap of 25 on one bug.
+H.onError = nil            -- injected reporter; nil = run silently (standalone use, tests)
+H.errN = 0                 -- human's OWN fault count; lua_errors is an aggregate over every module
+H.errFirst = nil           -- first message this session, car index included, for the diag row
 H.HUMAN_ERRORS  = true     -- occasional gentle bobbles
 H.CLASS_PHYSICS = true     -- cold-tyre warm-up / wet / dirty air
 H.WILD_ERR      = 1.5      -- mistake-rate multiplier for a wild profile (the Wrecking Crew; off with Racecraft.WILD=false); lockups allowed; 1 = off
@@ -696,6 +705,7 @@ function H.reset()     -- session start: re-derive the per-track distances; the 
     for k in pairs(pers) do pers[k] = nil; cons[k] = nil; phase[k] = nil end   -- re-drawn with the new salt on first use
     for k in pairs(H.mv) do H.mv[k] = nil end          -- in place: racecraft holds this table (R.humanMv)
     H.mvSk, H.mvN, H.mvDrop, H.mvNear = {}, {}, {}, {}
+    H.errN = 0; H.errFirst = nil   -- (H.errN) per SESSION, matching how Verve.lua zeroes luaErrors
 end
 
 -- Returns additive (gripOffset, cautionOffset). Player / slow / recovering cars -> 0,0.
@@ -822,7 +832,12 @@ function H.getModifiers(i_)
     end
     pGrip, pCaut, mvG, mvC = 0, 0, 0, 0   -- mvG / mvC: H.MISTAKE_V2's dip and caution (full strength, outside the slew)
 
-    pcall(modBody)
+    local okM, errM = pcall(modBody)
+    if not okM then                                     -- (H.errN) was discarded: grip/caution silently unmodified
+        H.errN = H.errN + 1
+        if not H.errFirst then H.errFirst = 'car ' .. tostring(i_) .. ': ' .. tostring(errM) end
+        if H.onError then H.onError('human.modBody', errM) end
+    end
 
     local k = H.INTENSITY
     local gripTarget = vGrip * k + pGrip
