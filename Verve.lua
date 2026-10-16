@@ -407,7 +407,10 @@ function script.update(dt)
     if not G.enabled then
         -- (local dev diagnostics still log a DISABLED race, so a baseline run can be compared; the race feed is an
         -- observer and keeps running too, so a stock-AI race gets the same timing card as a Verve race)
-        if Diag then pcall(function() Diag.update(dt, { managed = 0 }) end) end
+        -- (0.16) contactRecent in the DISABLED branch too, so diag's contact ring - and results.csv
+        -- `incidents` and `contact_events` derived from it - count taps identically in both arms.
+        -- Contacts.update now runs here (84c1f02), so the accessor has data to return.
+        if Diag then pcall(function() Diag.update(dt, { managed = 0, contactRecent = Contacts.recent }) end) end
         Feed.ENABLED = G.raceFeed
         -- (0.16, decision 0031) SET THIS IN THE DISABLED BRANCH TOO. It used to be assigned only below this
         -- return, so with Verve off and sharing just unticked the flag kept its stale `true` and Telemetry.abort
@@ -555,6 +558,7 @@ function script.update(dt)
     pc('fault', Fault.update, dt)
     pc('watch', Watch.update, dt)
     Telemetry.ENABLED = G.shareData == true
+    pcall(Racecraft.cspLatGrip)   -- (0.16) reads CSP's AI grip key ONCE; cached, so this is a string compare
     Telemetry.VERSION = Update.LOCAL_VERSION or '0.0.0'
     Telemetry.UNATTENDED = Harness ~= nil and Harness.autopilot == true
     -- AC puts the camera back to cockpit when a weekend moves from practice to the race, and the chase camera

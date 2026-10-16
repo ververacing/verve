@@ -494,6 +494,38 @@ K.YELLOW_LAT = 1.3   -- a stopped car this far from the centre line still counts
 -- the stopped-car cap (a crawler passed at its speed + 40) on its own, and the tighter of that and the stopped-car yellow
 -- applies: a slow car queueing in front of a wreck must never hide the wreck and lift the cap.
 R.YELLOW_SLOW = 0             -- fraction of the road's typical speed, 0 = off (no map, nothing changes); 0.35 = a car under 35% of it is a yellow (Baku kink 2026-09-26)
+-- (0.16) CSP'S OWN AI GRIP KEY, read ONCE and cached. Read-only: Verve never writes a CSP config.
+-- WHY: at the shipped NEW_LATERAL_GRIP_ESTIMATION=1 a formula field running Verve retires 12-20 of 20 against
+-- stock AC's 4-9 (cspf1), and the key ALONE is enough (cspf2). Verve cannot warn about that without knowing
+-- the value. THREE STATES, because "absent" and "0" are different facts and neither is "could not look":
+--   'ok'      read; R.CSP_LATGRIP is its value
+--   'absent'  config readable, key not present - EXPECTED ON CSP 3465, where the key does not exist and
+--             PC #2 measures Verve as clean, so a warning here would be noise
+--   'noapi'   enum entry or config missing - we know nothing, and that must not read as 'absent'
+-- Any future warning fires ONLY on 'ok' with a non-zero value. 'noapi' and 'absent' are silence.
+R.CSP_LATGRIP = nil
+R.CSP_LATGRIP_STATE = 'unread'
+
+function R.cspLatGrip()
+    if R.CSP_LATGRIP_STATE ~= 'unread' then return R.CSP_LATGRIP, R.CSP_LATGRIP_STATE end
+    local state, val = 'noapi', nil
+    pcall(function()
+        local id = ac.CSPModuleID and ac.CSPModuleID.NewBehaviour
+        if id == nil then return end
+        local cfg = ac.INIConfig.cspModule(id)
+        if not cfg then return end
+        state = 'absent'                                   -- config readable; key may still be missing
+        local v = cfg:get('AI_TWEAKS', 'NEW_LATERAL_GRIP_ESTIMATION', -999)
+        if type(v) == 'number' and v ~= -999 then val, state = v, 'ok' end
+    end)
+    R.CSP_LATGRIP, R.CSP_LATGRIP_STATE = val, state
+    -- logged once, and the harness KEEPS AC's log.txt per run, so this is checkable against results.csv's
+    -- csp_ai across rows that set the key differently - testing the API instead of trusting it
+    pcall(ac.log, string.format('Verve csp: NEW_LATERAL_GRIP_ESTIMATION state=%s value=%s',
+        state, tostring(val)))
+    return val, state
+end
+
 R.YELLOW_LAT = 2.0            -- DEFAULT 0.16 (owner yes 8 Oct). How far off the centre line a stopped car still raises a yellow (half-widths);
                               -- 1.3 (K.YELLOW_LAT) was the old value. F1 cars stopped at 1.5-1.7 after a crash at Lesmo 2 fell outside 1.3, so no
                               -- yellow was raised for them at all and the next car arrived flat out (5 Oct analysis). Of the three yellow changes
