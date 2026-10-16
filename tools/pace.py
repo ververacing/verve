@@ -37,9 +37,12 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import paths  # noqa: E402  - the feed archive moves and may be absent; paths reports that instead of hiding it
+
 RESULTS = os.path.join(HERE, "harness_results", "results.csv")
 PACE_CSV = os.path.join(HERE, "harness_results", "pace.csv")
-FEEDDIR = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa", "verve_feed")
+FEEDDIR = paths.LIVE_FEED   # the LIVE feed directory only; use feed_files() to search live + archive
 
 MIN_LAPS = 3          # clean laps a car needs before its best counts as pace
 COLUMNS = ["label", "cars", "clean_laps", "best_s", "p50_s", "p90_s", "spread_s"]
@@ -199,13 +202,33 @@ def race_pace(path):
     return d
 
 
+def feed_files(warn=True):
+    """Every feed on this machine as a full path - live directory first, archive second.
+
+    WHY THIS EXISTS. pace.py hardcoded the live Documents folder, which holds a rolling window of about two days
+    (86 files when this was written) while the archive beside the harness results holds 2571. So the one tool meant
+    to give the release gate a pace number could only see the last two days of racing, and reported every older row
+    as "no pace (feed missing)" - which reads as "that race produced nothing" rather than "I did not look there".
+    paths.feed_dirs() was written for exactly this ("every tool used to hard-code D:/verve_archive in its own
+    list"), and pace.py was simply never converted; feed_pace.py already uses it. The archive also MOVES - it was
+    on the D: SSD until that drive was pulled on 8 Oct 2026 - which is why the location is resolved, never assumed.
+    """
+    out = []
+    for d in paths.feed_dirs(warn=warn):
+        try:
+            out.extend(os.path.join(d, f) for f in sorted(os.listdir(d)))
+        except OSError:
+            continue
+    return out
+
+
 def feed_for(label, rows, names):
+    """`names` is a list of full feed PATHS (feed_files()); matching is on the basename's stamp."""
     import re
     m = re.search(r"(\d{8}_\d{6})", (rows.get(label) or {}).get("file") or "")
     if not m:
         return None
-    hit = next((f for f in names if f.startswith(m.group(1))), None)
-    return os.path.join(FEEDDIR, hit) if hit else None
+    return next((f for f in names if os.path.basename(f).startswith(m.group(1))), None)
 
 
 def load_rows():
@@ -214,7 +237,7 @@ def load_rows():
 
 
 def measure(labels):
-    rows, names = load_rows(), os.listdir(FEEDDIR)
+    rows, names = load_rows(), feed_files()
     out = []
     for lb in labels:
         p = feed_for(lb, rows, names)
@@ -358,6 +381,33 @@ def selftest():
         print("  player car kept out of the clean-lap count?              %s (%s, want 18 of 21)"
               % ("yes" if rp and rp["clean_laps"] == 18 else "NO - BROKEN", rp and rp["clean_laps"]))
         ok &= bool(rp) and rp["clean_laps"] == 18
+
+        # THE ARCHIVE. A feed that lives only in the SECOND feed directory must still be found. Without the
+        # multi-directory search this returns None, which pace.py then reports as "no pace (feed missing)" - i.e.
+        # as though the race produced nothing, rather than as "I did not look in the archive". That is what it did
+        # to every row older than the live folder's ~2-day window, 2571 feeds' worth.
+        import shutil as _sh
+        d1, d2 = _tf.mkdtemp(), _tf.mkdtemp()
+        try:
+            stamp = "20260101_120000"
+            _sh.copy2(tmp0, os.path.join(d2, stamp + "_monza.jsonl"))   # archive only, NOT in d1
+            real = paths.feed_dirs
+            paths.feed_dirs = lambda warn=True: [d1, d2]
+            try:
+                found = feed_for("arch", {"arch": {"file": "diag_race_%s_monza_arch.jsonl" % stamp}}, feed_files())
+                only_live = feed_for("arch", {"arch": {"file": "diag_race_%s_monza_arch.jsonl" % stamp}},
+                                     [os.path.join(d1, f) for f in os.listdir(d1)])
+            finally:
+                paths.feed_dirs = real
+            print("  a feed only in the ARCHIVE still found?                  %s"
+                  % ("yes" if found else "NO - BROKEN, older races read as 'feed missing'"))
+            ok &= bool(found)
+            print("  and a live-only search genuinely misses it (teeth)?      %s"
+                  % ("yes" if only_live is None else "NO - this case proves nothing"))
+            ok &= only_live is None
+        finally:
+            _sh.rmtree(d1, ignore_errors=True)
+            _sh.rmtree(d2, ignore_errors=True)
 
         # a feed that marks nobody (an older build) must exclude NOTHING rather than guessing index 0
         recs[0] = {"v": 1, "t": 0, "type": "header", "track": "monza",
