@@ -71,8 +71,10 @@ def report(desk=DESK, now=None, stale_min=STALE_MIN):
     except OSError as e:
         return ["PC #2: status.md unreadable (%s) - ask BTeam directly" % e], True
 
-    state = next((l.strip() for l in text.splitlines()
-                  if l.strip() and not l.startswith("#") and not l.lower().startswith("updated:")), "(no state line)")
+    body = [l.strip() for l in text.splitlines()
+            if l.strip() and not l.startswith("#") and not l.lower().startswith("updated:")]
+    state = body[0] if body else "(no state line)"
+    extra = body[1:]
     stamp = parse_stamp(text)
     if stamp is None:
         lines.append("PC #2: %s" % state)
@@ -92,7 +94,39 @@ def report(desk=DESK, now=None, stale_min=STALE_MIN):
                      % stamp.strftime("%H:%M:%S"))
         return lines, False
     lines.append("PC #2: %s  (desk status %.0f min old)" % (state, max(0.0, age)))
-    return lines, False
+    hw, hw_problem = hardware(extra)
+    lines.extend(hw)
+    return lines, hw_problem
+
+
+# Lines BTeam added at my suggestion so the hourly needs no message at all: a storage/WHEA event count and free
+# space. PARSING SOMEONE ELSE'S FREE TEXT IS BRITTLE, so this is deliberately timid: every extra line is PRINTED
+# whatever it says, and only a confident match on a label plus an integer is allowed to decide anything. A label
+# we cannot parse is reported as unparseable and treated as a PROBLEM - never as zero. That is the blanks-are-not-
+# zeros rule: a hardware check that silently reads "unknown" as "fine" is worse than no hardware check, because
+# it manufactures reassurance. If BTeam changes the wording, this says so rather than going quietly green.
+HW_LABEL = re.compile(r"(whea|storage|disk|controller)", re.I)
+HW_COUNT = re.compile(r":\s*(\d+)\b")
+
+
+def hardware(extra):
+    out, problem = [], False
+    if not extra:
+        return ["   (no hardware lines on the desk yet - ask BTeam, or its chain has not written a poll since the"
+                " format changed)"], False
+    for line in extra:
+        out.append("   %s" % line)
+        if not HW_LABEL.search(line):
+            continue
+        m = HW_COUNT.search(line)
+        if not m:
+            out.append("   !! that hardware line carries no readable count - treating as UNKNOWN, not as zero")
+            problem = True
+        elif int(m.group(1)) > 0:
+            out.append("   !! NON-ZERO hardware events on PC #2 - this is the SATA path we have been watching."
+                       " Do not start a new queue there until it is explained.")
+            problem = True
+    return out, problem
 
 
 def selftest():
@@ -118,6 +152,32 @@ def selftest():
         lines, prob = report(d, now)
         good = (not prob) and any("rows 5/10" in l for l in lines)
         print("  a fresh status reads clean?                      %s" % ("yes" if good else "NO - BROKEN"))
+        ok &= good
+
+        # 1b. THE HARDWARE LINES. Printed whatever they say; only a confident parse decides anything.
+        base = "# PC#2 status\n\nupdated: 2026-10-16 03:58:00\nstarclimb2 running: rows 6/10 done\n"
+        write(STATUS, base + "storage/WHEA events (last 1h): 0\nC: free GB: 681.5\n")
+        lines, prob = report(d, now)
+        good = (not prob) and any("681.5" in l for l in lines) and any("WHEA" in l for l in lines)
+        print("  extra desk lines shown, zero events stays quiet?  %s" % ("yes" if good else "NO - BROKEN"))
+        ok &= good
+
+        write(STATUS, base + "storage/WHEA events (last 1h): 3\nC: free GB: 681.5\n")
+        lines, prob = report(d, now)
+        good = prob and any("NON-ZERO" in l for l in lines)
+        print("  a NON-ZERO event count raised loudly?             %s" % ("yes" if good else "NO - BROKEN, the SATA path is what we watch"))
+        ok &= good
+
+        write(STATUS, base + "storage/WHEA events: none seen\n")
+        lines, prob = report(d, now)
+        good = prob and any("UNKNOWN" in l for l in lines)
+        print("  an unreadable count = UNKNOWN, not zero?          %s" % ("yes" if good else "NO - BROKEN, it would manufacture reassurance"))
+        ok &= good
+
+        write(STATUS, base)
+        lines, prob = report(d, now)
+        good = (not prob) and any("no hardware lines" in l for l in lines)
+        print("  missing hardware lines noted but not alarming?    %s" % ("yes" if good else "NO - BROKEN"))
         ok &= good
 
         # 2. STALE -> must be a problem. This is the case BTeam cannot detect for itself.
