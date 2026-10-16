@@ -60,16 +60,18 @@ def lap_events(path):
     return out
 
 
-def best_clean_per_car(laps, min_laps=MIN_LAPS):
+def best_clean_per_car(laps, min_laps=MIN_LAPS, exclude=None):
     """-> ({car: best clean lap in ms}, total clean laps seen).
 
     `first` marks the lap-1 event that dev016 added; released feeds simply have no lap-1 event, so BOTH builds are
     handled by skipping it when present and never relying on it being there.
+
+    `exclude` drops one car index from both the dict AND the lap count (see player_car for why).
     """
     per = {}
     for e in laps:
         ms, i = e.get("lap_ms"), e.get("car")
-        if i is None or not ms or (e.get("cuts") or 0) > 0 or e.get("first"):
+        if i is None or not ms or (e.get("cuts") or 0) > 0 or e.get("first") or i == exclude:
             continue
         per.setdefault(i, []).append(ms)
     total = sum(len(v) for v in per.values())
@@ -126,13 +128,13 @@ def _states(path):
                 yield j.get("t"), cars
 
 
-def best_clear_per_car(path, min_laps=1, gap_s=CLEAR_GAP_S):
+def best_clear_per_car(path, min_laps=1, gap_s=CLEAR_GAP_S, exclude=None):
     """-> ({car: best CLEAR clean lap in ms}, number of clear clean laps). Needs only 1, clear laps being scarce."""
     clear = clear_laps(path, gap_s)
     per = {}
     for e in lap_events(path):
         ms, i, n = e.get("lap_ms"), e.get("car"), e.get("lap")
-        if i is None or not ms or (e.get("cuts") or 0) > 0 or e.get("first"):
+        if i is None or not ms or (e.get("cuts") or 0) > 0 or e.get("first") or i == exclude:
             continue
         if n not in clear.get(i, ()):
             continue
@@ -149,9 +151,35 @@ def pctl(vals, q):
     return s[max(0, min(len(s) - 1, k))]
 
 
+def player_car(path):
+    """The index of the player/autopilot car from the feed header, or None if the feed does not mark one.
+
+    WHY THIS EXISTS. In a harness race slot 0 is the autopilot player car, and it is NOT a member of the field being
+    measured: it ignores Verve's level and grip and starts on a fixed fuel load (CLAUDE.md), so it is not governed by
+    the difficulty slider and runs systematically off the AI's pace. Leaving it in moves p50_s, p90_s and spread_s
+    away from the AI pace they are supposed to describe, while leaving best_s untouched - the autopilot is never the
+    fastest car - which is exactly why this survived unnoticed until a slider-pace question needed the median.
+
+    Read from the header's own per-car `player` flag, never by assuming index 0: in a real player's race the player
+    can start anywhere on the grid, and a feed that marks nobody returns None so that nothing is excluded.
+    """
+    try:
+        with io.open(path, encoding="utf-8", errors="replace") as fh:
+            head = json.loads(fh.readline())
+    except (OSError, ValueError):
+        return None
+    if head.get("type") != "header":
+        return None
+    for c in head.get("cars") or ():
+        if c.get("player") and c.get("i") is not None:
+            return c.get("i")
+    return None
+
+
 def race_pace(path):
     """-> dict of pace figures for one feed, or None when the race cannot support a pace reading."""
-    best, clean = best_clean_per_car(lap_events(path))
+    skip = player_car(path)
+    best, clean = best_clean_per_car(lap_events(path), exclude=skip)
     if len(best) < 5:
         return None
     v = sorted(x / 1000.0 for x in best.values())
@@ -161,7 +189,7 @@ def race_pace(path):
     # The traffic-corrected pair. Reported alongside rather than instead, because the clear-lap sample is small and
     # a cell where few cars ever get clear track is itself worth seeing - that is the condition under which the
     # unfiltered field median stops being a pace number at all.
-    cb, cn = best_clear_per_car(path)
+    cb, cn = best_clear_per_car(path, exclude=skip)
     if len(cb) >= 5:
         cv = sorted(x / 1000.0 for x in cb.values())
         d.update(clear_cars=len(cv), clear_laps=cn, clear_best_s=round(cv[0], 3),
@@ -284,6 +312,69 @@ def selftest():
     print("  clean-lap count counts only clean laps?                  %s (%d, want 8)"
           % ("yes" if clean == 8 else "NO - BROKEN", clean))
     ok &= clean == 8
+
+    # THE PLAYER/AUTOPILOT CAR. It is not part of the field being measured and must not reach any figure.
+    # Every case below was CHECKED BY NEUTERING THE EXCLUSION AND WATCHING IT GO RED, and that exercise corrected
+    # this comment: a first draft asserted on p90_s, which does NOT move when the autopilot is included. With
+    # nearest-rank percentiles a single tail outlier sits past the p90 index (index 5 of 7 either way), so p90_s and
+    # spread_s are naturally robust to it - that assertion was vacuous and would have sat green for ever. The figures
+    # that really move are `cars`, `clean_laps` and p50_s, the last by a full second here, and p50_s is precisely the
+    # "median-of-best" reality.md compares against the human top-10%. Those are what is asserted.
+    bx, cx = best_clean_per_car(laps, exclude=1)
+    print("  an excluded car gone from the pace dict?                 %s"
+          % ("yes" if 1 not in bx else "NO - BROKEN"))
+    ok &= 1 not in bx
+    print("  an excluded car gone from the lap COUNT too?             %s (%d, want 4)"
+          % ("yes" if cx == 4 else "NO - BROKEN, sample size is overstated", cx))
+    ok &= cx == 4
+
+    import os as _os
+    import tempfile as _tf
+    fd0, tmp0 = _tf.mkstemp(suffix=".jsonl", text=True)
+    _os.close(fd0)
+    try:
+        # the autopilot (car 0, flagged player) is far slower than the field, like a 30 L start on a slider it ignores
+        cars = [{"i": 0, "model": "m", "class": "gt", "driver": "Autopilot", "player": True}]
+        cars += [{"i": i, "model": "m", "class": "gt", "driver": "AI %d" % i, "player": False} for i in range(1, 7)]
+        recs = [{"v": 1, "t": 0, "type": "header", "track": "monza", "cars": cars}]
+        recs += [{"type": "lap", "car": 0, "lap": n, "lap_ms": 120000, "cuts": 0} for n in (2, 3, 4)]
+        for i, ms in zip(range(1, 7), (95000, 96000, 97000, 98000, 99000, 100000)):
+            recs += [{"type": "lap", "car": i, "lap": n, "lap_ms": ms, "cuts": 0} for n in (2, 3, 4)]
+        with io.open(tmp0, "w", encoding="utf-8") as fh:
+            for r in recs:
+                fh.write(json.dumps(r) + "\n")
+
+        print("  player car found from the header flag?                   %s (%s, want 0)"
+              % ("yes" if player_car(tmp0) == 0 else "NO - BROKEN", player_car(tmp0)))
+        ok &= player_car(tmp0) == 0
+        rp = race_pace(tmp0)
+        print("  player car kept out of the car count?                    %s (%s, want 6 of 7)"
+              % ("yes" if rp and rp["cars"] == 6 else "NO - BROKEN", rp and rp["cars"]))
+        ok &= bool(rp) and rp["cars"] == 6
+        print("  player car kept out of the MEDIAN-of-best?               %s (p50 %s, want 97.0 not 98.0)"
+              % ("yes" if rp and rp["p50_s"] == 97.0 else "NO - BROKEN, the autopilot moved the field median",
+                 rp and rp["p50_s"]))
+        ok &= bool(rp) and rp["p50_s"] == 97.0
+        print("  player car kept out of the clean-lap count?              %s (%s, want 18 of 21)"
+              % ("yes" if rp and rp["clean_laps"] == 18 else "NO - BROKEN", rp and rp["clean_laps"]))
+        ok &= bool(rp) and rp["clean_laps"] == 18
+
+        # a feed that marks nobody (an older build) must exclude NOTHING rather than guessing index 0
+        recs[0] = {"v": 1, "t": 0, "type": "header", "track": "monza",
+                   "cars": [{"i": c["i"], "model": "m", "class": "gt", "driver": "d"} for c in cars]}
+        with io.open(tmp0, "w", encoding="utf-8") as fh:
+            for r in recs:
+                fh.write(json.dumps(r) + "\n")
+        rp2 = race_pace(tmp0)
+        print("  unmarked feed excludes nobody, scores all 7?             %s (%s, want 7)"
+              % ("yes" if player_car(tmp0) is None and rp2 and rp2["cars"] == 7 else "NO - BROKEN",
+                 rp2 and rp2["cars"]))
+        ok &= player_car(tmp0) is None and bool(rp2) and rp2["cars"] == 7
+    finally:
+        try:
+            _os.remove(tmp0)
+        except OSError:
+            pass
 
     # percentile must not interpolate: with 2 values it has to return one of them
     print("  percentile returns a real observation, not an average?   %s"
