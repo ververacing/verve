@@ -99,7 +99,7 @@ OWN_FIXTURES = ("someone@example.org", "C:/Users/someone",
                 "with two backslashes and the rule never fired")
 
 
-def scan_text(label, text, rs, diff_mode=False):
+def scan_text(label, text, rs, diff_mode=False, excuse_fixtures=False):
     """-> hit count. Scans a text blob line by line, printing where and which rule, never the match itself.
 
     diff_mode changes two things, and both were found by running this tool over a real 130-commit release range
@@ -136,7 +136,7 @@ def scan_text(label, text, rs, diff_mode=False):
         # everyone learns to wave through, which is worse than no gate. main() now calls this function instead.
         # SCOPED TO THIS FILE, not excused globally: a placeholder path or example.org address has a legitimate
         # reason to exist HERE and nowhere else in the app, so the same token in any other file still fires.
-        if (diff_mode or os.path.basename(str(label)).lower() == "leak_check.py") \
+        if (diff_mode or excuse_fixtures or os.path.basename(str(label)).lower() == "leak_check.py") \
                 and any(f in line for f in OWN_FIXTURES):
             continue
         for name, rx in rs:
@@ -179,6 +179,75 @@ def check_range(rng, rs):
     return 1 if out else 0
 
 
+def check_history(rng, rs):
+    """Gate a range the way it will actually be PUBLISHED: every commit's patch, ADDITIONS AND REMOVALS ALIKE.
+
+    WHY THIS EXISTS, and it is a correction to check_range's own reasoning. check_range scans `git diff <range>`
+    additions-only, on the stated grounds that a `-` line is a FIX and "the already-pushed history still holds
+    the old line either way". That is sound for history that is ALREADY PUBLIC and wrong for a range about to be
+    pushed: on push, every commit in the range becomes public, so a line this range REMOVES is a line it
+    PUBLISHES. The distinction that matters is not added-versus-removed, it is pushed-versus-unpushed.
+
+    AND THE BIGGER GAP IS `git diff` ITSELF: it reports the NET change. A path added in one commit and removed in
+    a later one of the SAME RANGE cancels out and appears in NEITHER side of the net diff. On 2026-10-16 exactly
+    that happened here - an absolute path carrying the OS user folder was committed, then fixed forward seven
+    commits later - and `leak_check --range` reported the push range "13 file(s) clean" while two commits in it
+    carried the name. `git log -p` is the only view that sees both. A fix-forward cannot un-publish a name; it
+    adds a second copy, as a removal line.
+
+    So this mode scans `git log -p` (patches AND messages in one stream) with NO additions-only filter. The
+    fixture excusal stays on, or this tool's own canaries fire out of its own history.
+    The remedy for a hit here is a squash or a rewrite, never another forward fix - and if the range is already
+    pushed, it is the owner's call, because it means rewriting public history.
+    """
+    # The commit hash is emitted INTO the stream so every hit can be attributed. Without it the scan can only
+    # give a line offset into a 60,000-line blob, which is useless for deciding what to rewrite - and "counts by
+    # commit" was the whole point of being asked for this.
+    MARK = "~~LEAKCHECK~COMMIT~~ "   # printable: a NUL here made git refuse with "embedded null character"
+    cmd = ["git", "log", "-p", "--format=" + MARK + "%H%n%B", rng]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+    except Exception as e:                                                # noqa: BLE001
+        print("  REFUSED: cannot read the history for %s (%s)" % (rng, e))
+        return 1
+    if r.returncode != 0:
+        print("  REFUSED: `%s` failed - not vouching for anything" % " ".join(cmd))
+        return 1
+    if not r.stdout.strip():
+        print("  REFUSED: the history for %s is EMPTY - a vacuous pass is how this tool failed before" % rng)
+        return 1
+
+    per, flagged = {}, [0]
+    cur = "(before the first commit marker)"
+    for line in r.stdout.split("\n"):
+        if line.startswith(MARK):
+            cur = line[len(MARK):].strip()[:12]
+            continue
+        if "noreply@anthropic.com" in line or line.lstrip().lower().startswith("co-authored-by:"):
+            continue
+        if any(f in line for f in OWN_FIXTURES):
+            continue
+        # EVERY matching rule is recorded, not just the first. Breaking on the first match hid the triage that
+        # matters: a line holding an install path and a line holding the user folder BOTH match "a Windows
+        # absolute path" first, so the user-fragment rule read ZERO on a branch that demonstrably carries it.
+        # Severity differs sharply between those two, so the report must be able to tell them apart.
+        hit = [name for name, rx in rs if rx.search(line)]
+        for name in hit:
+            per[(cur, name)] = per.get((cur, name), 0) + 1
+        if hit:
+            flagged[0] += 1
+    total = flagged[0]
+    if per:
+        print("  hits by COMMIT and RULE (the matched text is never printed):")
+        for (c, name), n in sorted(per.items(), key=lambda kv: (-kv[1], kv[0])):
+            print("    %-12s %-28s %d line(s)" % (c, name, n))
+    print("leak_check history %s: %s" % (rng, "CLEAN (patches and messages, additions AND removals)"
+                                         if total == 0 else
+                                         "%d FLAGGED LINE(S) across %d commit/rule pair(s) - squash or "
+                                         "rewrite, do NOT fix forward" % (total, len(per))))
+    return 1 if total else 0
+
+
 def selftest():
     """Canaries, including the exact form that slipped through. A rule is not trusted until it has been made to fire."""
     rs = rules()
@@ -202,6 +271,50 @@ def selftest():
         print("  %-38s %-12s %s" % (desc, "FIRES" if got else "silent",
                                     "ok" if good else ("WRONG - expected " + ("a hit" if want else "silence"))))
         ok &= good
+
+    # THE ADD-THEN-REMOVE REPO. The whole reason check_history exists, proven in a throwaway repo rather than
+    # asserted: commit a canary absolute path, then commit its removal. `git diff` over the range nets to
+    # nothing, so --range sees a clean tree and PASSES; --history reads every commit's patch and FAILS. If the
+    # old mode ever starts failing this repo, the net-diff blindness is gone and this case can be retired.
+    import shutil
+    import tempfile
+    repo = tempfile.mkdtemp(prefix="leakcheck_")
+    try:
+        G = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "-C", repo]
+        # The canary must actually MATCH a rule. My first attempt used C:\canary\... and the path rule requires
+        # Users|Program Files|Documents after the drive letter, so it matched nothing and the new mode reported a
+        # correct clean - a fixture that proves nothing, caught only because the result was implausible.
+        canary = "C:" + chr(92) + "Users" + chr(92) + "canaryname" + chr(92) + "probe.txt"
+        run = lambda a: subprocess.run(a, capture_output=True, text=True, timeout=60)   # noqa: E731
+        run(["git", "init", "-q", repo])
+        with open(os.path.join(repo, "f.txt"), "w", encoding="utf-8") as fh:
+            fh.write("clean first line\n")
+        run(G + ["add", "-A"]); run(G + ["commit", "-q", "-m", "base"])
+        with open(os.path.join(repo, "f.txt"), "w", encoding="utf-8") as fh:
+            fh.write("clean first line\nPATH = r\"%s\"\n" % canary)
+        run(G + ["add", "-A"]); run(G + ["commit", "-q", "-m", "adds the canary"])
+        # The third commit removes the canary AND adds an unrelated clean line. The second part matters: without
+        # it the net diff over the range is EMPTY, and check_range REFUSES on an empty diff rather than passing -
+        # so the fixture tested a refusal, not the gap. The real case had 13 files of genuine changes around the
+        # cancelled path, which is what let --range report clean. This now reproduces that.
+        with open(os.path.join(repo, "f.txt"), "w", encoding="utf-8") as fh:
+            fh.write("clean first line\nan unrelated clean change\n")
+        run(G + ["add", "-A"]); run(G + ["commit", "-q", "-m", "removes it, fixing forward"])
+        rng = "HEAD~2..HEAD"
+        me = os.path.abspath(__file__)
+        rr = subprocess.run([sys.executable, "-I", me, "--range", rng], capture_output=True, text=True,
+                            cwd=repo, timeout=120)
+        rh = subprocess.run([sys.executable, "-I", me, "--history", rng], capture_output=True, text=True,
+                            cwd=repo, timeout=120)
+        print("  --range PASSES an add-then-remove range (the gap)?      %s (exit %d)"
+              % ("yes" if rr.returncode == 0 else "NO - the gap is gone, retire this case", rr.returncode))
+        ok &= rr.returncode == 0
+        print("  --history CATCHES it?                                   %s (exit %d)"
+              % ("yes" if rh.returncode == 1 else "NO - BROKEN, the new mode does not see removals", rh.returncode))
+        ok &= rh.returncode == 1
+    finally:
+        shutil.rmtree(repo, ignore_errors=True)
+
     print("\n  %s" % ("all cases correct" if ok else "SELFTEST FAILED - do not trust this module"))
     return 0 if ok else 1
 
@@ -214,6 +327,8 @@ def main():
     for i, a in enumerate(sys.argv):
         if a == "--range" and i + 1 < len(sys.argv):
             return check_range(sys.argv[i + 1], rs)
+        if a == "--history" and i + 1 < len(sys.argv):
+            return check_history(sys.argv[i + 1], rs)
     if "--list" in sys.argv:
         print("leak_check looks for:")
         for name, _ in rs:

@@ -51,6 +51,17 @@ echo "-- preflight: identity gate (leak_check over the files this release publis
 LEAK_FILES="$(git diff --name-only "origin/$RELEASE_BRANCH..HEAD" 2>/dev/null || true)"
 [[ -n "$LEAK_FILES" ]] || LEAK_FILES="$(git ls-files 'lib/*.lua' '*.lua' README.md changelog.txt manifest.ini version.json)"
 python -I tools/leak_check.py $LEAK_FILES || fail "leak_check found identity material. Fix every line it names."
+# AND THE HISTORY, which the file scan above cannot see. On 2026-10-16 the file scan reported "13 file(s) clean"
+# on a range where two commits carried the OS user folder: a path was committed and then fixed forward, so the
+# NET diff cancelled it out and no file's current content held it. A push publishes every commit in the range,
+# so a line the range REMOVES is a line it PUBLISHES. --history reads `git log -p` and scans additions AND
+# removals. THE REMEDY FOR A HIT HERE IS A SQUASH OR A REWRITE, never another forward fix, which only adds a
+# second copy of the string as a removal line.
+if git remote get-url origin >/dev/null 2>&1; then
+    echo "-- preflight: identity gate over the HISTORY being pushed"
+    python -I tools/leak_check.py --history "origin/$RELEASE_BRANCH..HEAD" \
+        || fail "leak_check found identity material in the COMMIT HISTORY being pushed. A forward fix will not help: squash the range or rewrite the offending commits."
+fi
 
 # 0e. the release gate itself: suite freshness, completeness and not-worse.
 echo "-- preflight: release_check"
