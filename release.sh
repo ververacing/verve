@@ -62,6 +62,16 @@ if git remote get-url origin >/dev/null 2>&1; then
     python -I tools/leak_check.py --history "origin/$RELEASE_BRANCH..HEAD" \
         || fail "leak_check found identity material in the COMMIT HISTORY being pushed. A forward fix will not help: squash the range or rewrite the offending commits."
 fi
+# AND THE WHOLE TREE, because `git tag` below FREEZES IT AND SERVES IT FOR EVER. The two gates above look at a
+# DIFF and at a HISTORY; a tag publishes neither - it publishes every file at this commit, as a browsable tree
+# and a source download, whether or not the file was touched in this release. On 2026-10-16 a three-branch scan
+# passed while 24 published tags served identity material in their current content, because nothing had ever
+# scanned a tree. A string in an untouched file is invisible to a range gate and permanent in a tag.
+# This is also the LAST point a fix is cheap: once the tag is pushed, retagging or deleting a published tag is
+# the owner's call and anyone who already downloaded it keeps what they got.
+echo "-- preflight: identity gate over the TREE this tag will freeze"
+python -I tools/leak_check.py --tree HEAD \
+    || fail "leak_check found identity material in the TREE $TAG would publish. Fix the files it names and commit, then re-run - a tag cannot be fixed forward."
 
 # 0e. the release gate itself: suite freshness, completeness and not-worse.
 echo "-- preflight: release_check"

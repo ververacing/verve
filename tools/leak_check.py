@@ -179,6 +179,92 @@ def check_range(rng, rs):
     return 1 if out else 0
 
 
+TEXT_EXT = (".lua", ".md", ".ini", ".json", ".txt", ".py", ".sh", ".csv", ".cfg", ".yml", ".yaml", "")
+
+
+def refs_of(kind):
+    """Every ref of a kind, as git itself lists them - never a hand-kept list.
+
+    A hand-kept list is how the first scan of this repo came to cover three branches and MISS ALL 34 TAGS.
+    """
+    spec = {"branches": ["refs/remotes/origin"], "tags": ["refs/tags"],
+            "all": ["refs/remotes/origin", "refs/tags"]}[kind]
+    r = subprocess.run(["git", "for-each-ref", "--format=%(refname:short)"] + spec,
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if r.returncode != 0:
+        return []
+    out = [x.strip() for x in r.stdout.split("\n") if x.strip() and not x.strip().endswith("/HEAD")]
+    return out
+
+
+def check_tree(ref, rs, quiet=False):
+    """Scan the files a ref PUBLISHES - its TREE as someone checking it out sees it, not its history.
+
+    WHY THIS IS A SEPARATE MODE, and the gap it closes. --history answers "what does pushing this range
+    reveal?". It does NOT answer "what does someone who opens this tag see?" - and those differ, because a TAG
+    CARRIES ITS OWN TREE FOR EVER. A string removed from main on Monday is still in the current content of
+    every tag cut before Monday, and GitHub serves each tag as a browsable tree plus a source download. So a
+    repo can have a clean main, a clean push range, and still publish the string on 20 release pages.
+
+    Found by verve-47 on 2026-10-16: the three-branch scan this tool had just been given passed, while tags
+    carried identity material in the CURRENT CONTENT of three files. A tag is not history; it is a live page.
+    """
+    r = subprocess.run(["git", "ls-tree", "-r", "--name-only", ref],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if r.returncode != 0:
+        print("  REFUSED: cannot list the tree of %s - not vouching for anything" % ref)
+        return 1
+    paths = [p.strip() for p in r.stdout.split("\n") if p.strip()]
+    if not paths:
+        print("  REFUSED: the tree of %s is EMPTY - a vacuous pass is how this tool failed before" % ref)
+        return 1
+    hits = scanned = 0
+    for p in paths:
+        if not p.lower().endswith(TEXT_EXT):
+            continue
+        b = subprocess.run(["git", "show", "%s:%s" % (ref, p)],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if b.returncode != 0:
+            continue
+        scanned += 1
+        hits += scan_text("%s:%s" % (ref, p), b.stdout, rs, excuse_fixtures=True)
+    if not scanned:
+        print("  REFUSED: %s has no scannable text file - refusing a vacuous pass" % ref)
+        return 1
+    if not quiet:
+        print("  tree %-28s %s (%d file(s) scanned)"
+              % (ref, "%d FLAGGED LINE(S)" % hits if hits else "clean", scanned))
+    return 1 if hits else 0
+
+
+def check_refs(kind, mode, rs):
+    """Run the gate over EVERY ref of a kind and report per ref. Returns non-zero if any ref is dirty."""
+    refs = refs_of(kind)
+    if not refs:
+        print("  REFUSED: no %s refs found - refusing a vacuous pass" % kind)
+        return 1
+    print("leak_check over %d %s ref(s), mode=%s" % (len(refs), kind, mode))
+    dirty = []
+    for ref in refs:
+        bad = 0
+        if mode in ("tree", "both"):
+            bad += check_tree(ref, rs, quiet=False)
+        if mode in ("history", "both"):
+            bad += check_history(ref, rs)
+        if bad:
+            dirty.append(ref)
+    print("")
+    if dirty:
+        print("leak_check: %d of %d %s ref(s) carry identity material:" % (len(dirty), len(refs), kind))
+        for d in dirty:
+            print("    " + d)
+        print("  A TAG CANNOT BE FIXED FORWARD: it is a fixed tree. Retagging or deleting a published tag is")
+        print("  the owner's call, and anyone who already downloaded it keeps what they got.")
+        return 1
+    print("leak_check: all %d %s ref(s) clean (mode=%s)" % (len(refs), kind, mode))
+    return 0
+
+
 def check_history(rng, rs):
     """Gate a range the way it will actually be PUBLISHED: every commit's patch, ADDITIONS AND REMOVALS ALIKE.
 
@@ -312,6 +398,29 @@ def selftest():
         print("  --history CATCHES it?                                   %s (exit %d)"
               % ("yes" if rh.returncode == 1 else "NO - BROKEN, the new mode does not see removals", rh.returncode))
         ok &= rh.returncode == 1
+
+        # THE TAG CASE, and it is the one that matters most, because it is the asymmetry a branch scan cannot
+        # see: tag the commit that CARRIES the canary, leave the branch tip clean, and the tag must stay dirty
+        # for ever. This is the real defect found on 2026-10-16 - three branches scanned clean while published
+        # tags served identity material in their current content. A tag is a live page, not history.
+        run(G + ["tag", "v_dirty", "HEAD~1"])          # the commit that holds the canary
+        run(G + ["tag", "v_clean", "HEAD"])            # the fixed-forward tip
+        rtd = subprocess.run([sys.executable, "-I", me, "--tree", "v_dirty"], capture_output=True, text=True,
+                             cwd=repo, timeout=120)
+        rtc = subprocess.run([sys.executable, "-I", me, "--tree", "v_clean"], capture_output=True, text=True,
+                             cwd=repo, timeout=120)
+        rta = subprocess.run([sys.executable, "-I", me, "--refs", "tags", "--mode", "tree"],
+                             capture_output=True, text=True, cwd=repo, timeout=300)
+        print("  a CLEAN TIP still leaves the TAG dirty - caught?        %s (exit %d)"
+              % ("yes" if rtd.returncode == 1 else "NO - BROKEN, a published tag is unguarded", rtd.returncode))
+        ok &= rtd.returncode == 1
+        print("  the clean tag is NOT flagged (no crying wolf)?          %s (exit %d)"
+              % ("yes" if rtc.returncode == 0 else "NO - BROKEN, it flags a clean tree", rtc.returncode))
+        ok &= rtc.returncode == 0
+        print("  --refs tags finds it and NAMES the tag?                 %s (exit %d)"
+              % ("yes" if (rta.returncode == 1 and "v_dirty" in rta.stdout and "v_clean" not in
+                           rta.stdout.split("carry identity material")[-1]) else "NO - BROKEN", rta.returncode))
+        ok &= rta.returncode == 1 and "v_dirty" in rta.stdout
     finally:
         shutil.rmtree(repo, ignore_errors=True)
 
@@ -329,6 +438,20 @@ def main():
             return check_range(sys.argv[i + 1], rs)
         if a == "--history" and i + 1 < len(sys.argv):
             return check_history(sys.argv[i + 1], rs)
+        if a == "--tree" and i + 1 < len(sys.argv):
+            return check_tree(sys.argv[i + 1], rs)
+        if a == "--refs" and i + 1 < len(sys.argv):
+            mode = "both"
+            for j, b in enumerate(sys.argv):
+                if b == "--mode" and j + 1 < len(sys.argv):
+                    mode = sys.argv[j + 1]
+            if sys.argv[i + 1] not in ("branches", "tags", "all"):
+                print("  --refs takes branches, tags or all")
+                return 2
+            if mode not in ("tree", "history", "both"):
+                print("  --mode takes tree, history or both")
+                return 2
+            return check_refs(sys.argv[i + 1], mode, rs)
     if "--list" in sys.argv:
         print("leak_check looks for:")
         for name, _ in rs:
