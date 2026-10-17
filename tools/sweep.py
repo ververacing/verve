@@ -285,6 +285,15 @@ def sweep(do_kill=False):
     by_pid = {r[1]: r for r in all_rows}
     mine = ancestors(os.getpid(), by_pid)        # for the protected checks: never cut our own branch
     own = own_chain(os.getpid(), by_pid)         # for the TIE: cut below the host app, which Zeus shares
+    # FAIL CLOSED (verve-47, 2026-10-16). Both protections above depend on finding THIS process in the table,
+    # and on this machine the running python is ABSENT from the wmic snapshot - so `mine` is just {own pid} and
+    # the own-chain protection has been INERT since the day it was written. It has never mattered because the
+    # sweep has only ever run report-only, but a --kill run in that state could cut our own branch, and it also
+    # explains the "kept" reasons we had to withdraw. If we cannot see ourselves, we do not kill.
+    if do_kill and os.getpid() not in by_pid:
+        print("sweep: REFUSED to kill - this process is not in the process table, so the own-chain and tie "
+              "protections cannot be trusted. Re-run report-only, or fix the table read first.")
+        do_kill = False
     keep = keep_list()
     killed, kept, reported = [], 0, []
     for r in all_rows:
