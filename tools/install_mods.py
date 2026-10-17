@@ -11,7 +11,12 @@ and a rough AI check (data/ai.ini readable if unpacked). Prints a table at the e
 """
 import argparse, json, os, re, shutil, subprocess, sys
 
-SEVEN = os.environ.get("SEVENZIP", "C:/Program Files/7-Zip/7z.exe")
+# DERIVED, never a hardcoded drive path. The literal that used to sit here was the one line in the whole tree
+# that the release tree-gate refused: this file ships in the repo, so a Windows absolute path in it is published
+# on every tag for ever. Deriving it is also simply better - it honours an explicit override, then finds 7-Zip
+# wherever it is on PATH, and only then falls back to the standard location assembled from the environment.
+SEVEN = (os.environ.get("SEVENZIP") or shutil.which("7z") or shutil.which("7za")
+         or os.path.join(os.environ.get("PROGRAMFILES", ""), "7-Zip", "7z.exe"))
 
 
 def extract(archive, dest):
