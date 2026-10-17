@@ -180,6 +180,70 @@ def bare_shell(cmd):
     return len(s.split()) == 1                 # unquoted: one token means no arguments
 
 
+# (2026-10-16, the owner's new rule) ONLY CLOSE OUT WHAT A VERVE AGENT MADE. The owner is now running Zeus
+# agents - a central one plus a minion on EACH PC - so this machine carries processes from another project that
+# look exactly like what this sweep was built to clear: a stray grep, tail or sleep, or an old bash. Their words,
+# relayed by verve-47: "we should be careful to only close out anything directly created by Verve agents so we
+# don't accidentally take out anything from Zeus agents". So A TIE TO VERVE IS NOW A PRECONDITION OF KILLING,
+# not a consideration: no tie means REPORT, however stray it looks. This can only ever reduce what is killed,
+# which is why it was safe to add while the machine was paused.
+# The tie is deliberately narrow and positive: a process must NAME something of ours or descend from this
+# session. "It looks like a leftover" is not a tie - that is precisely the inference that would take out a
+# minion's shell. FOREIGN_MARKS wins outright, so anything naming claude or zeus is never killed even if it also
+# touches a Verve path (a Zeus minion reading our desk would).
+VERVE_MARKS = ("apps/lua/verve", "apps\\lua\\verve", "verve_desk", "verve_feed", "harness_results",
+               "batch.py", "harness.py", "wait_then_", "chain_", "pc2_queue", "video_profile", "sweep.py")
+FOREIGN_MARKS = ("zeus", "claude")
+
+
+OWN_KINDS = {"python", "py", "bash", "sh", "nohup", "powershell", "pwsh"}
+
+
+def own_chain(pid, by_pid):
+    """This process and its parents, CUT BELOW THE HOST APP - not `ancestors()`, which walks to the top.
+
+    ancestors() reaches the Claude desktop app and whatever is above it, and that is SHARED GROUND: a Zeus minion
+    running in the same app has tool shells with the SAME parent, so an uncut chain would tie a minion's bash or
+    grep as ours (verve-47, 2026-10-16). The walk therefore stops at the first process that is not one of our own
+    kinds, and the boundary process is NOT a member.
+    Currently near-degenerate and that is fine: the running python is absent from the wmic snapshot, so this
+    usually returns {own pid} alone. The cut is DEFENSIVE - it has to hold if that ever changes.
+    """
+    seen, cur = set(), pid
+    while cur and cur not in seen:
+        r = by_pid.get(cur)
+        if cur != pid and (not r or r[0] not in OWN_KINDS):
+            break
+        seen.add(cur)
+        if not r:
+            break
+        cur = r[2]
+    return seen
+
+
+def verve_tie(cmd, ppid, own, by_pid=None):
+    """True only when the process can be TIED to a Verve agent. Untied is the default, not the exception.
+
+    A LIVE PARENT MUST ITSELF BE OURS. The name tie alone is not sufficient while the parent is alive, because a
+    minion's `tail -f <our desk file>` carries no marker of its own - it just names a path of ours, and reading
+    our desk is a thing a minion plausibly does. My first version tied exactly that case, and the selftest only
+    passed because I had appended "(zeus minion)" to the fixture by hand: I wrote the evidence that made my own
+    rule look right (verve-47 caught it). With the parent DEAD there is nothing else to go on, so the name tie
+    stands as the only evidence available.
+    """
+    c = (cmd or "").lower()
+    if any(m in c for m in FOREIGN_MARKS):
+        return False
+    if by_pid is not None and ppid in by_pid:          # parent ALIVE
+        if ppid in own:
+            return True
+        pc = (by_pid[ppid][4] or "").lower()
+        if any(m in pc for m in FOREIGN_MARKS):
+            return False
+        return any(m in pc for m in VERVE_MARKS)
+    return any(m in c for m in VERVE_MARKS)            # parent dead: the name is all there is
+
+
 def classify(r, mine, keep):
     """-> ('protected'|'report'|'stray'|'ok', reason)"""
     name, pid, ppid, age, cmd = r
@@ -207,6 +271,10 @@ def classify(r, mine, keep):
     if name not in KILLABLE and name not in SHELLS:
         return "ok", "not a swept name"
     return ("ok", "parent alive and under %d min" % MAX_AGE_MIN)
+    # NOTE: the Verve-tie gate is NOT here. It lives at the kill decision in sweep(), because putting it in
+    # classify reclassified every YOUNG process with a live parent - things that were never kill candidates - and
+    # the first live run duly reported this script's own `tail -4`, age 0. A gate that creates an hourly report
+    # line from normal operation is how a report becomes noise and stops being read.
 
 
 def sweep(do_kill=False):
@@ -215,7 +283,8 @@ def sweep(do_kill=False):
         print("sweep: REFUSED - could not read the process table, nothing swept")
         return 1
     by_pid = {r[1]: r for r in all_rows}
-    mine = ancestors(os.getpid(), by_pid)
+    mine = ancestors(os.getpid(), by_pid)        # for the protected checks: never cut our own branch
+    own = own_chain(os.getpid(), by_pid)         # for the TIE: cut below the host app, which Zeus shares
     keep = keep_list()
     killed, kept, reported = [], 0, []
     for r in all_rows:
@@ -240,6 +309,14 @@ def sweep(do_kill=False):
             continue
         if not (orphan or age > MAX_AGE_MIN):
             kept += 1
+            continue
+        # THE OWNER'S 2026-10-16 GATE, at the only place it belongs: this process has now passed every test and
+        # is about to be killed. A TIE TO VERVE IS A PRECONDITION. No tie means report instead - however stray it
+        # looks, it may be a Zeus minion's, and the owner's rule is to close out only what a Verve agent made.
+        if not verve_tie(cmd, ppid, own, by_pid):
+            reported.append((name, pid, age, (cmd or "")[:90],
+                             "WOULD BE STRAY but has NO VERVE TIE: may belong to another agent (Zeus has a "
+                             "minion on this PC) - never killed (owner, 2026-10-16)"))
             continue
         line = "%s pid %d age %.0f min %s cmd %s" % (
             name, pid, age, "orphan" if orphan else "old", (cmd or "")[:110])
@@ -271,6 +348,47 @@ def selftest():
     """The case that matters: a chain with a dead parent, hours old, must NOT be classified stray."""
     ok = True
     mine, keep = {999}, {1234}
+
+    # THE OWNER'S 2026-10-16 RULE: only close out what a Verve agent made. verve_tie() is the gate and sweep()
+    # consults it at the kill decision, so it is tested directly as the unit it is. Every case was checked by
+    # reverting verve_tie to `return True` and watching it go red.
+    # A fake table for the tie cases. 900 is the HOST APP, which Zeus shares with us, and is deliberately not
+    # one of OWN_KINDS; 901 is a live parent belonging to neither project; 902 is our own batch.py.
+    FAKE = {900: ("claude", 900, 1, 999.0, "claude.exe"),
+            901: ("node", 901, 900, 999.0, "node server.js"),
+            902: ("python", 902, 900, 50.0, "python -u tools/batch.py q.txt"),
+            # 999 is US, and it must be IN the table or the "child of our own chain" case reads its parent as
+            # DEAD and falls through to the name tie - which is how that case first failed here.
+            999: ("python", 999, 902, 10.0, "python -I tools/sweep.py")}
+    TIE = [
+        # (label, cmd, ppid, expected)                                     parent state
+        ("a minion's grep naming zeus is NOT tied",      'grep.exe -r pat C:\\x\\zeus\\minion\\state', 1, False),
+        ("anything naming claude is NOT tied",           'sleep 60   # claude-code helper', 1, False),
+        ("an UNTAGGED bare orphan is NOT tied",          'sleep 60', 1, False),
+        ("dead parent + our path IS tied (name is all)", 'grep -c cspf5 tools/harness_results/results.csv', 1, True),
+        ("dead parent + batch.py IS tied",               'python -u tools/batch.py x.txt', 1, True),
+        ("dead parent + our waiter IS tied",             'bash /tmp/s/wait_then_d100c_a.sh', 1, True),
+        ("a child of our own cut chain IS tied",         'sleep 30', 999, True),
+        # verve-47's two cases, and they are the ones that matter
+        ("LIVE host-app parent, no marks, NOT tied",     'bash -c "x"', 900, False),
+        ("LIVE non-Verve parent + OUR desk path, NOT tied", 'tail -f C:\\x\\verve_desk\\state.md', 901, False),
+        # and the gate must not spare what our own queue spawned
+        ("LIVE batch.py parent IS tied",                 'grep foo', 902, True),
+    ]
+    for label, cmd, ppid, want in TIE:
+        got = verve_tie(cmd, ppid, {999}, FAKE)
+        print("  %-52s %s" % (label + "?", "yes" if got == want else "NO - BROKEN (got %s)" % got))
+        ok &= got == want
+
+    # the chain must be CUT: the host app is a boundary, not a member, or a minion's tool shell ties as ours
+    cut = own_chain(902, FAKE)
+    print("  %-52s %s (%s)" % ("own_chain stops below the host app?",
+                               "yes" if 900 not in cut else "NO - BROKEN, Zeus shares that parent", sorted(cut)))
+    ok &= 900 not in cut
+    # THE COST, stated so it is a known trade rather than a surprise: case 4 means an UNTAGGED orphan of our own
+    # - a bare `sleep 60` whose parent shell died - is no longer killed, only reported. That is a real reduction
+    # in reach, and it is the rule working as intended: when a process cannot be tied to Verve, "it looks like
+    # our leftover" is exactly the inference that would take out a minion.
     chain = ("bash", 25412, 21136, 433.0,
              '"C:\\x\\bash.exe" /tmp/scratch/chain.sh batch_prev.log batch_next.txt chain.log')
     k, why = classify(chain, mine, keep)
@@ -330,8 +448,11 @@ def selftest():
           % ("yes" if k8 == "report" else "NO - self-match, any -c mentioning a .py reads as infrastructure"))
     ok &= k8 == "report"
 
-    k4, _ = classify(("grep", 8, 1, 500.0, "grep foo"), mine, keep)
-    print("  a leaf utility is eligible?                               %s" % ("yes" if k4 == "ok" else "NO"))
+    # Was `grep foo` until 2026-10-16. That fixture now encodes behaviour the OWNER HAS FORBIDDEN: a bare
+    # `grep foo` cannot be tied to Verve, so it might be a Zeus minion's and must be spared. Re-pointed at a
+    # genuine Verve leftover - one that NAMES something of ours - so it still proves the sweep clears our strays.
+    k4, _ = classify(("grep", 8, 1, 500.0, "grep foo tools/harness_results/results.csv"), mine, keep)
+    print("  a leaf utility NAMING our paths is eligible?              %s" % ("yes" if k4 == "ok" else "NO"))
     ok &= k4 == "ok"
 
     k5, _ = classify(("tail", 999, 1, 999.0, "tail -f x"), mine, keep)
