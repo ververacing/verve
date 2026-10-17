@@ -23,6 +23,9 @@ import os
 import re
 import sys
 
+# Both paths are DERIVED, never written out. The first version hardcoded them, which put the machine's user
+# folder - the owner's real first name - into a committed file; leak_check flags exactly that, and I had not run
+# it on this file before committing. Deriving them also means the tool works on PC #2 and in a checkout.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))          # .../apps/lua/Verve
 RESULTS = os.path.join(ROOT, "tools", "harness_results", "results.csv")
 LESSONS = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa", "verve_desk", "docs", "LESSONS.md")
