@@ -12,7 +12,12 @@ The 2026-09-28 docs set drifted for 12 days because nothing noticed. This notice
      time, because length and freshness say nothing about recoverability. The daily "docs committed" line was only
      ever true of docs/. A check that cannot tell "versioned" from "merely present" will keep calling this fine.
 
-    python tools/docs_check.py
+  7. verve_desk/nightly/ has no file for today (from 08:00) or yesterday - the morning email never reached the desk.
+     Added 2026-10-19 after the mirror sat five days behind while the email went out daily from the cloud session:
+     six checks were green throughout because not one of them looked at nightly/.
+
+    python tools/docs_check.py              # the hourly check
+    python tools/docs_check.py --selftest    # check 7 against fixtures, including the real 5-day gap
 Exit code 0 = current, 1 = something to fix (the hourly check fixes it before anything else).
 """
 import json
@@ -20,6 +25,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -39,6 +45,77 @@ def mtime(p):
     except OSError:
         return 0
 
+
+def nightly_flags(nightly_dir, now_ts, desk_top="", desk=None):
+    """Check 7: is the morning email reaching the desk? Returns a list of flags.
+
+    The nightly/ mirror stopped on 2026-10-13 and nothing noticed for five days, while the email went out on every
+    one of them - it was being sent by the CLOUD session, so no step on this machine wrote it to the desk, and
+    checks 1-6 stayed green the whole time because not one of them looks at nightly/. What the owner was TOLD is
+    the only record here that cannot be rebuilt from the repo; for those five days it existed only in Gmail.
+
+    The DATE IN THE FILENAME is the test, not the mtime: five days of mirror recovered in one sitting all carry
+    today's mtime, so freshness-by-mtime would have called that gap current the moment it was patched.
+    """
+    out = []
+    try:
+        names = os.listdir(nightly_dir)
+    except OSError:
+        return ["verve_desk/nightly is missing - the morning email has nowhere to land"]
+    dates = sorted(f[:-3] for f in names if re.fullmatch(r"\d{4}-\d{2}-\d{2}\.md", f))
+    if not dates:
+        return ["verve_desk/nightly holds no YYYY-MM-DD.md - the morning email is not reaching the desk"]
+    lt = time.localtime(now_ts)
+    today = time.strftime("%Y-%m-%d", lt)
+    yesterday = time.strftime("%Y-%m-%d", time.localtime(now_ts - 86400))
+    # Before the morning send window there is legitimately no file for today, so today's is required only from
+    # 08:00 - late enough that a slow send cannot flap the check, early enough to catch a miss the same day.
+    want = today if lt.tm_hour >= 8 else yesterday
+    if dates[-1] < want:
+        out.append("verve_desk/nightly newest is %s, expected %s - mirror the morning email to the desk "
+                   "(CLAUDE.md step 8: one email a day, the same text to nightly/)" % (dates[-1], want))
+    newest = "nightly/%s.md" % dates[-1]
+    if desk_top and subprocess.run(["git", "ls-files", "--error-unmatch", newest], cwd=desk,
+                                   capture_output=True, text=True).returncode != 0:
+        out.append("%s is in no git - the record of what the owner was told has no history" % newest)
+    return out
+
+
+def selftest():
+    """Rule 4: a checking tool is not trusted until it has been MADE TO FAIL."""
+    noon = time.mktime((2026, 10, 19, 12, 0, 0, 0, 0, -1))
+    early = time.mktime((2026, 10, 19, 6, 30, 0, 0, 0, -1))
+    cases = [  # name, folder, files in it, create the folder?, now, must it flag?
+        ("no nightly folder", "nope", [], False, noon, True),
+        ("folder but empty", "empty", [], True, noon, True),
+        ("the real 5-day gap", "stale", ["2026-10-13.md"], True, noon, True),
+        ("yesterday, at noon", "yday", ["2026-10-18.md"], True, noon, True),
+        ("yesterday, at 06:30", "early", ["2026-10-18.md"], True, early, False),
+        ("today, at noon", "today", ["2026-10-19.md"], True, noon, False),
+        ("other files ignored", "other", ["2026-10-19.md", "notes.md", "README"], True, noon, False),
+        ("newest wins, not count", "many", ["2026-10-13.md", "2026-10-19.md"], True, noon, False),
+    ]
+    bad = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, folder, files, create, now, want in cases:
+            path = os.path.join(tmp, folder)
+            if create:
+                os.makedirs(path, exist_ok=True)
+                for f in files:
+                    open(os.path.join(path, f), "w").close()
+            got = nightly_flags(path, now)
+            if bool(got) != want:
+                print("SELFTEST FAIL: %s - expected %s, got %r" % (name, "a flag" if want else "clean", got))
+                bad += 1
+            else:
+                print("  ok  %-24s -> %s" % (name, "flags" if got else "clean"))
+    print("docs_check selftest: " + ("FAILED %d of %d" % (bad, len(cases)) if bad
+                                     else "all %d cases as expected" % len(cases)))
+    return 1 if bad else 0
+
+
+if "--selftest" in sys.argv:
+    sys.exit(selftest())
 
 flags = []
 
@@ -120,6 +197,9 @@ else:
     if dirty:
         flags.append("living documents changed but not committed: " + ", ".join(dirty)
                      + " - commit the desk repo")
+
+# 7. the morning email reached the desk (see nightly_flags; needs desk_top from check 6)
+flags += nightly_flags(os.path.join(DESK, "nightly"), time.time(), desk_top, DESK)
 
 if flags:
     print("DOCS DRIFT - fix before anything else:")
