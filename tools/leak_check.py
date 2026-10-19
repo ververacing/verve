@@ -9,7 +9,10 @@ race transcripts we push to the engineer's repo.
 
 THIS FILE LIVES IN A PUBLIC REPO, so it cannot contain the strings it hunts for - writing them down here would leak
 exactly what it exists to prevent. Instead it derives them at runtime from the machine (the OS user name, the home
-directory) and matches generic shapes (any drive-letter path, any email address, any Users\\<name> fragment). Extra
+directory) and matches generic shapes: any email address, any Users\\<name> fragment, and a drive-letter path ONLY
+where Users, Program Files or Documents follows the drive letter - a bare C:\\Windows\\Temp or D:\\New Volume PASSES,
+which is deliberate (see the canary comment in --selftest) and pinned by a selftest case. So "leak_check clean"
+NEVER means "no Windows path in here"; say which rules it checked. Extra
 terms - the old tags, anything else the owner wants barred - go one per line in tools/.identity_deny, which is
 gitignored and never read aloud: the report says WHICH RULE matched and the line number, never the matched text.
 
@@ -344,6 +347,13 @@ def selftest():
         ("plain single-separator path", "C:" + B + "Users" + B + "someone", True),
         ("forward-slash drive path", "C:/Users/someone", True),
         ("an email address", "someone@example.org", True),
+        # PINS THE SCOPE, does not endorse it: the path rule needs Users|Program Files|Documents after the drive
+        # letter, so these two PASS. If you deliberately widen the rule, change this case in the same commit -
+        # it exists so the narrowness can only ever be a decision, never a surprise. BTeam read the behaviour as
+        # "it flags paths carrying an identity string", which is wrong in both directions: Program Files carries
+        # none and IS flagged, while a bare Windows\Temp carries none and is NOT.
+        ("bare system path, NOT flagged", "C:" + B + "Windows" + B + "Temp was flat", False),
+        ("bare second drive, NOT flagged", "D:/New Volume/diag holds the overflow", False),
         ("synthetic POSIX fixture", "/apps/store/WindowsApps/python.exe -u tools/batch.py", False),
         ("a relative project path", "tools/harness_results/results.csv", False),
         ("the required attribution", "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>", False),
