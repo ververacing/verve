@@ -11,6 +11,12 @@ local T = {}
 T.ENABLED = false
 T.VERSION = '0.0.0'          -- set by Verve.lua from update.lua
 T.UNATTENDED = false         -- harness/autopilot run: flagged so human statistics can exclude it
+-- (item 11 T1) OFF = the corrected abort_reason: nil on a real finish, 'restart' only on an actual restart.
+-- ON restores the pre-fix behaviour, which labelled EVERY race 'restart'. Default OFF deliberately departs
+-- from "a switch defaults to today's behaviour": today's behaviour is a mislabel with no measurement resting
+-- on it, and defaulting to it would mean the fix never takes effect. The switch exists only so the old label
+-- can be restored without a code change if the receiving end turns out to depend on it.
+T.ABORT_LEGACY = false
 
 -- (0.16, decision 0031) ONLY A RACE IS REPORTED. The consent text says "after each race", but T.update
 -- built stats for ANY started session and T.abort had no session-type check, so quitting a PRACTICE or
@@ -377,7 +383,12 @@ function T.update(dt, ctx)
                 local leaderLaps = 0
                 for i = 0, sim.carsCount - 1 do local c = ac.getCar(i); if c and (c.lapCount or 0) > leaderLaps then leaderLaps = c.lapCount end end
                 local real = leaderLaps >= 1 and (os.time() - st.t0) >= 60     -- a 15 s 'finished' race is a restart artefact
-                local body = T.buildReport(sim, ctx, real, real and nil or 'restart')
+                -- (item 11 T1, 2026-10-22) `real and nil or 'restart'` ALWAYS yields 'restart': with real true
+                -- it is `nil or 'restart'`, with real false it is `false or 'restart'`. So every normally
+                -- finished race has been reported abort_reason "restart" since v0.14.1 (76f3f92), and anything
+                -- filtering that field discards the real finishes. `completed` was always correct, so the data
+                -- is recoverable - key on it, not on this field, for anything already collected.
+                local body = T.buildReport(sim, ctx, real, (not real) and 'restart' or (T.ABORT_LEGACY and 'restart' or nil))
                 post(body, function(ok2) if ok2 then S.sent = (S.sent or 0) + 1 else S.pending = body end end)
             end)
         end
