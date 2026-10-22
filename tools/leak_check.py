@@ -268,6 +268,59 @@ def check_refs(kind, mode, rs):
     return 0
 
 
+def check_identity(rng, rs, quiet=False):
+    """Item 12: gate the AUTHOR and COMMITTER fields of every commit a push would publish. -> hit count.
+
+    WHY THIS IS A SEPARATE CHECK rather than more text fed to scan_text: the public identity's own address WOULD
+    be flagged by the generic email rule, because `rules()` drops a rule only when it matches an allow-listed
+    string and 'tcverve' has no '@' in it. Pipe `%ae` through scan_text and every commit ever made flags - a gate
+    that always fails is a gate everyone waves through. So this check INVERTS the logic: it asks whether each
+    field IS the public identity, and reports the ones that are not, by FIELD NAME, never by value.
+
+    The allowance is deliberately narrow: a name equal to the public name or handle, and an email whose local
+    part is one of those handles, plus the forge/assistant no-reply addresses that commits legitimately carry.
+    Anything else is a hit - a personal address, a work address, a machine account, a real name - without this
+    file having to know what any of them look like.
+    """
+    fields = ("author name", "author email", "committer name", "committer email")
+    SEP = chr(31)
+    cmd = ["git", "log", "--format=%H" + SEP + "%an" + SEP + "%ae" + SEP + "%cn" + SEP + "%ce", rng]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
+    except Exception as e:                                                # noqa: BLE001
+        print("  REFUSED: cannot read the identity fields for %s (%s)" % (rng, e))
+        return 1
+    if r.returncode != 0:
+        print("  REFUSED: git log failed for %s" % rng)
+        return 1
+    handles = tuple(a.replace(" ", "") for a in ("tcverve", "ververacing"))
+    noreply = ("noreply@anthropic.com", "noreply@github.com")
+    hits, commits = 0, 0
+    for row in r.stdout.splitlines():
+        if not row.strip():
+            continue
+        parts = row.split(SEP)
+        if len(parts) != 5:
+            continue
+        commits += 1
+        sha, vals = parts[0], parts[1:]
+        for fname, val in zip(fields, vals):
+            v = (val or "").strip()
+            low = v.lower()
+            if "email" in fname:
+                ok = (low in noreply or low.endswith("@users.noreply.github.com")
+                      or low.split("@")[0] in handles)
+            else:
+                ok = low.replace(" ", "") in handles
+            if not ok:
+                print("  LEAK  %s %s  <- not the public identity" % (sha[:12], fname))
+                hits += 1
+    if not quiet:
+        print("  identity fields %-28s %s (%d commit(s))"
+              % (rng, "clean" if not hits else "%d FLAGGED FIELD(S)" % hits, commits))
+    return hits
+
+
 def check_history(rng, rs):
     """Gate a range the way it will actually be PUBLISHED: every commit's patch, ADDITIONS AND REMOVALS ALIKE.
 
@@ -334,7 +387,11 @@ def check_history(rng, rs):
                                          if total == 0 else
                                          "%d FLAGGED LINE(S) across %d commit/rule pair(s) - squash or "
                                          "rewrite, do NOT fix forward" % (total, len(per))))
-    return 1 if total else 0
+    # Item 12 rides on the push gate rather than on a flag of its own, so it cannot be forgotten: release.sh
+    # already calls --history before a push, and the author/committer fields are published by that same push.
+    # A field hit is as blocking as a line hit - a rewrite can fix the patch and leave the author untouched.
+    ident = check_identity(rng, rs)
+    return 1 if (total or ident) else 0
 
 
 def selftest():
