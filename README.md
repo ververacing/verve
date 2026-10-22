@@ -43,7 +43,7 @@ In game, open the **Verve AI** app from the app sidebar and enable it. You can r
 detected class and set per‑car levels on the grid before the lights.
 
 ## Before you race (three things that matter)
-1. **The difficulty slider is real.** 80 is a beginner field, 90 an intermediate one, 100 a strong club racer.
+1. **The difficulty slider is real.** 80 is a beginner field, 90 an intermediate one, 100 expert pace.
    Verve makes the launcher's number the truth for every car without a driver (Content Manager's per-car grid
    levels only keep their spread around it, unless you hand-set them more than 10 apart), so start where you
    actually are — 100 is not the default, it's the top. **Driver profiles are opt-in**: unless you hit
@@ -94,6 +94,37 @@ make sure you copied the whole `Verve` folder, `lib` included.
   without a driver (a car with a driver uses that driver's aggression).
 - Settings and per‑car overrides are stored via CSP app storage, so **updates never wipe your
   tuning**.
+
+## Anonymous race stats (off by default)
+
+**Verve sends nothing unless you tick "Send anonymous race stats to improve Verve."** It is off when you
+install it and stays off until you turn it on. Only races run **with Verve on** are reported — never practice
+or qualifying, and nothing at all is sent from a race you run with Verve switched off. If you turn the setting
+off, reporting stops immediately, including for a race already in progress.
+
+When it is on, one small summary is sent at the end of a race, including one you leave early. The full list of
+what it contains:
+
+- **The race** — track id, layout, length, session type, whether it was a career event and which one, lap
+  count, the AI level asked for and the level actually applied, car models and classes on the grid.
+- **How the field did** — finishers, cars still running at the end, retirements and how many of those Verve
+  retired, contact and solo incidents, crash and limp repairs, lead changes, field spread, repositions and
+  whether they succeeded, parked or frozen cars, pit stops.
+- **Your car** — grid and finish position, laps, best and median lap, incidents, worst damage, pit stops,
+  whether you finished.
+- **Every other car** — the same per‑car detail: model, class, best and median lap, incidents, damage, pit
+  stops, whether it retired.
+- **Conditions** — weather type and which weather controller was active, wet or dry, air and road
+  temperature, time of day.
+- **Your settings** — the Verve switches you are running and the applied difficulty, as a small JSON object.
+- **Performance** — average frame rate, Verve's own per‑frame cost, and a count of Lua errors.
+- **Versions** — the Verve version and the CSP build number.
+- **A random install number**, generated the first time you send a report, so repeat reports from one copy can
+  be grouped. It is not derived from your hardware or your account.
+- **Whether the race was unattended**, so automated test runs can be excluded from human statistics.
+
+**What is never sent:** your name, your Steam or gamer tag, any file path, any hardware id, anything about
+other software on your machine, and nothing at all from practice or qualifying.
 
 ## Updating
 The app checks a small `version.json` on load and shows a banner with a download link if a newer

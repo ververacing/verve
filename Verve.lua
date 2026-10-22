@@ -827,7 +827,13 @@ function script.windowMain()
     -- (0.16, decision 0032) The text now says what the code actually does: races only (which the session gate
     -- enforces), including one left early (T.abort sends it at the next launch), and the install number, which
     -- the owner chose to keep and describe rather than remove.
-    toggle('Send anonymous race stats to improve Verve', 'shareData', 'After each race, including one you leave early, send one small anonymous summary (track, cars, laps, difficulty, finishers, incidents, repairs, your positions and lap times), plus a random install number so repeat reports from the same copy can be grouped. Never practice or qualifying. No names, no gamer tag, no paths, no hardware ids. Off by default.')
+    -- (item 11 T4/T3, 2026-10-22, decision 0032) The old text named six categories and the report sends far
+    -- more: conditions, your settings, performance, build numbers and per-car detail were all unlisted. It also
+    -- said "After each race", which overstated WHEN - with Verve off, Telemetry.update never runs, so `st` is
+    -- nil and even Telemetry.abort returns early: nothing is sent at all from a Verve-off race. Both are fixed
+    -- in the TEXT rather than the behaviour, which is the safe direction for a consent string. The full field
+    -- list lives in the README; this stays a summary by category, but an honest one.
+    toggle('Send anonymous race stats to improve Verve', 'shareData', 'Only races run WITH Verve on - never practice or qualifying, and nothing at all is sent from a race you run with Verve switched off. One small anonymous summary per race, including one you leave early: the race (track, layout, session type, car models and classes, laps, difficulty, career event), how the field did (finishers, retirements and how many of them Verve retired, contact and solo incidents, repairs, lead changes, field spread, repositions, parked or frozen cars), your own car (grid and finish position, laps, best and median lap, incidents, damage, pit stops), the same per-car detail for every other car, the conditions (weather type and controller, wet or dry, air and road temperature, time of day), your Verve settings and applied difficulty, performance (average fps, Verve\'s own frame time, a count of Lua errors), the Verve and CSP build numbers, and a random install number so repeat reports from one copy can be grouped. No names, no gamer tag, no file paths, no hardware ids. Off by default - the full field list is in the README.')
     toggle('Formula DRS discipline', 'drsDiscipline', 'On Formula cars, close DRS when the game says it is not available (outside a DRS zone or not within range). In-zone DRS is left to the game.')
     if ui.checkbox('Advanced', G.showAdvanced) then setG('showAdvanced', not G.showAdvanced) end
     if G.showAdvanced then
