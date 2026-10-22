@@ -45,6 +45,11 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 FEEDS = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa", "verve_feed")
+# Housekeeping archives feeds after 2 days and a glob over a missing directory returns NOTHING rather than
+# raising, so globbing FEEDS alone answered any question about an older race from a fraction of the data, with no
+# warning. paths.track_feeds() reads live + archive, de-duplicated. (2026-10-22; 13 more tools still to migrate.)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # python -I drops the script dir from sys.path
+import paths                                                     # noqa: E402
 
 try:                                     # one implementation of the label lookup, not two (see excursions.py)
     from excursions import label_for
@@ -127,7 +132,7 @@ def main():
         if a == "--label" and i + 1 < len(sys.argv):
             want = sys.argv[i + 1]
     rows = []
-    for p in sorted(glob.glob(os.path.join(FEEDS, "*" + track + "*.jsonl"))):
+    for p in paths.track_feeds(track):
         lab = label_for(os.path.basename(p)[:15])
         if want and want not in lab:
             continue

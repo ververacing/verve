@@ -39,6 +39,43 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERVE = os.path.dirname(HERE)
 DOCS = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa")
 FEEDS = os.path.join(DOCS, "verve_feed")
+# Housekeeping moves feeds older than harness.py's KEEP_DAYS (2.0) to the archive, so a tool that globs only the
+# live directory can answer an ON/OFF question about last week with an empty set and no error. 2026-10-22: that is
+# exactly what happened - 2690 archived feeds were invisible here while this file was treated as the definition of
+# the metric. tools/paths.py was written for this exact defect and already resolves the archive wherever it is
+# (D:, E:, or the local folder) and warns when it cannot find one; USE IT rather than hardcoding a path here,
+# which is how the problem started. FEEDS_ARCH stays as a name for the selftest to rebind.
+sys.path.insert(0, HERE)           # python -I drops the script directory from sys.path; batch.py and
+import paths                       # harness.py insert it for the same reason. Without this the tool works
+                                   # under a plain run and dies under an isolated one.
+FEEDS_ARCH = paths.archive_feed_dir() or os.path.join(HERE, "harness_results", "archive", "verve_feed")
+
+
+def _collect(dirs, track):
+    """The feeds for a track across the given directories, each race exactly once, first directory winning.
+
+    Takes `dirs` as an argument on purpose: the de-duplication assertion in selftest() was disarmed twice by
+    edits to the directory-list code when it depended on that code to produce a duplicate. Handing this helper
+    the same directory twice forces the condition, and no change to the caller can take it away.
+    """
+    seen, out = set(), []
+    for d in dirs:
+        if not d or not os.path.isdir(d):
+            continue
+        for p in sorted(glob.glob(os.path.join(d, "*" + track + "*.jsonl"))):
+            b = os.path.basename(p)
+            if b in seen:          # a file mid-archive exists in both; counting it twice doubles its race
+                continue
+            seen.add(b)
+            out.append(p)
+    return sorted(out, key=os.path.basename)
+
+
+def feed_paths(track):
+    """Every feed for a track, live and archived, each race exactly once."""
+    dirs = [d for d in paths.feed_dirs() if d != FEEDS_ARCH]
+    dirs.append(FEEDS_ARCH)        # named explicitly so the selftest can point it elsewhere
+    return _collect(dirs, track)
 
 ABS_KMH = 90.0
 REL_FRAC = 0.60
@@ -164,6 +201,9 @@ def label_for(stem):
         return hit
     # no results row (a race still running, or scored elsewhere): strip the track the diag header names, not a guess
     for pat in (os.path.join(VERVE, "diag_race_" + stem + "*"),
+                # the archive keeps diag files in a 'diag' subdirectory; without it every archived race fell
+                # through to the bare stem and joined nothing (found 2026-10-22)
+                os.path.join(VERVE, "tools", "harness_results", "archive", "diag", "diag_race_" + stem + "*"),
                 os.path.join(VERVE, "tools", "harness_results", "archive", "diag_race_" + stem + "*")):
         for d in glob.glob(pat):
             b = os.path.basename(d).replace("diag_race_", "").replace(".jsonl", "")
@@ -180,7 +220,60 @@ def label_for(stem):
     return stem
 
 
+def selftest():
+    """Asserts the two things that were broken, plus the hazard the fix introduces (double counting)."""
+    global FEEDS_ARCH          # declared here because the de-duplication check below rebinds it; Python needs
+    ok = True                  # the declaration before the first reference anywhere in the function
+    if not os.path.isdir(FEEDS_ARCH):
+        print("selftest: archive feed dir missing (%s) - cannot check the thing that was broken" % FEEDS_ARCH)
+        ok = False
+    else:
+        n = len(glob.glob(os.path.join(FEEDS_ARCH, "*.jsonl")))
+        if n == 0:
+            print("SELFTEST FAIL: archive feed dir has no feeds; the glob is pointing at the wrong place")
+            ok = False
+        # the whole point: a track with archived races must be found even when the live dir has none of them
+        found = feed_paths("spa")      # NOT named 'paths': that shadowed the paths MODULE and broke the
+        if not any(os.path.dirname(p) == FEEDS_ARCH for p in found):   # checks further down this function
+            print("SELFTEST FAIL: feed_paths() returned no ARCHIVED feed for spa (%d total)" % len(found))
+            ok = False
+    # NO RACE COUNTED TWICE, and the duplicate condition is FORCED by handing _collect the same directory twice.
+    # Two earlier versions of this check were disarmed without anyone noticing: one hoped a monza feed would
+    # happen to sit in both directories, the other rebound FEEDS_ARCH and was then neutralised by a refactor that
+    # filtered the live directory out of the list. Both passed on the mutant with the de-duplication deleted.
+    probe_dirs = [d for d in paths.feed_dirs() if glob.glob(os.path.join(d, "*monza*.jsonl"))]
+    if not probe_dirs:
+        print("SELFTEST FAIL: no directory holds a monza feed, so de-duplication cannot be exercised at all")
+        ok = False
+    else:
+        d = probe_dirs[0]
+        names = [os.path.basename(p) for p in _collect([d, d], "monza")]
+        if len(names) != len(set(names)):
+            print("SELFTEST FAIL: _collect() returned the same race twice (%d paths, %d distinct)"
+                  % (len(names), len(set(names))))
+            ok = False
+    # THE ASSERTION THAT BITES: label_for must resolve a stem that ONLY the archive can answer. This stem is one
+    # of the 2175 archived diags absent from results.csv, so the results.csv branch cannot reach it and the
+    # archive glob is the only path left. Asserting that archive/diag merely EXISTS passes through any mutation
+    # of the code that reads it, which is the difference between a selftest and a comment.
+    ad = os.path.join(VERVE, "tools", "harness_results", "archive", "diag")
+    if os.path.isdir(ad) and not glob.glob(os.path.join(ad, "diag_race_*")):
+        print("SELFTEST FAIL: archive/diag exists but holds no diag_race_* files")
+        ok = False
+    probe = "20260917_000240"
+    if glob.glob(os.path.join(ad, "diag_race_" + probe + "*")):
+        got = label_for(probe)
+        if got != "n17_reg_spa_3":
+            print("SELFTEST FAIL: label_for(%s) = %r, expected 'n17_reg_spa_3' - the archived diag was not read"
+                  % (probe, got))
+            ok = False
+    print("selftest: %s" % ("PASS" if ok else "FAIL"))
+    return 0 if ok else 1
+
+
 def main():
+    if "--selftest" in sys.argv:
+        return selftest()
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if not args:
         print(__doc__.strip().splitlines()[0])
@@ -191,7 +284,7 @@ def main():
         if a == "--label" and i + 1 < len(sys.argv):
             want = sys.argv[i + 1]
     rows = []
-    for p in sorted(glob.glob(os.path.join(FEEDS, "*" + track + "*.jsonl"))):
+    for p in feed_paths(track):
         lab = label_for(os.path.basename(p)[:15])
         if want and want not in lab:
             continue
