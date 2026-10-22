@@ -243,6 +243,16 @@ R.settleUntil = 0
 R.DROP_SAFE_T = 4.0        -- DEFAULT 0.14.4; s: no drop while a car behind would reach the spot within this at its speed (0 = DROP_BEHIND only)
 R.DROP_SAFE_HOLD = 8.0     -- s: how long a FORCED drop also waits for that gap before it goes regardless
 R.safeHold = {}            -- per car: when a forced drop started waiting for the gap
+-- (item 11 R1, 2026-10-22) ON clears R.safeHold when an EPISODE ends, not only when a drop goes ahead or the
+-- session resets. OFF is today's behaviour, and today's behaviour is a silent bug: safeHold[i] is set when a
+-- forced drop starts waiting (:672) and cleared only at :675 (the drop proceeded) and at session reset. endRec
+-- and the moving-again reset both leave it, so a car that waited once and then ended its episode another way
+-- carries a stale timestamp. On a LATER episode `os.clock() - safeHold[i]` is already past DROP_SAFE_HOLD, so
+-- the traffic wait is skipped on the first frame and the car is dropped without ever looking for a gap.
+-- DEFAULT OFF per decision 0027: this changes on-track outcomes, so it needs the Monza and Spa gating cells
+-- before the default moves, and races are held. I recommend flipping it once those run - the thing being
+-- "preserved" at OFF is a defeated safety wait, not a tuning choice.
+R.SAFEHOLD_PER_EPISODE = false
 R.DROP_API = 'car'         -- 'car' = physics.setCarPosition, 'ai' = physics.setAICarPosition (A/B 2026-09-14: same lap counting; 'car' rejoined cleaner)
 R.gateMoves = 0            -- drops moved back before the last timing split so AC counts the lap (see gateSafe)
 R.GATE_MODE = 'back'       -- 'back' = drop on a straight just before the last split; 'twostep' = touch down before the split for a
@@ -459,6 +469,7 @@ local function endRec(i)
     releaseControls(i)
     recT[i] = nil; checkT[i] = nil; lastErr[i] = nil; knot[i] = nil
     stallRef[i] = nil; stallT[i] = nil; backupT[i] = nil
+    if R.SAFEHOLD_PER_EPISODE then R.safeHold[i] = nil end   -- (R1) the gap wait is per EPISODE, not per session
     -- NOTE: `reported` is intentionally NOT cleared here. Clearing it every time a recovery attempt
     -- ends let one wreck be re-reported as a fresh incident each cycle (dozens of "incidents" from a
     -- single crash, poisoning the trouble-spot map). It's cleared only when the car genuinely moves
@@ -896,6 +907,7 @@ local carBody = function()
                 handedBack[i] = nil; reported[i] = nil                       -- genuinely moving again -> a future stop is a NEW episode
                 episodeT[i] = nil
                 rescueN[i] = nil; rescueWaitT[i] = nil; rescued[i] = nil   -- rescues are per EPISODE (a lap-8 crash gets them again)
+                if R.SAFEHOLD_PER_EPISODE then R.safeHold[i] = nil end     -- (R1) so is the forced-drop gap wait
                 hopeless[i] = nil
                 -- A car doing racing speed is NOT in recovery, whatever the rejoin checks below say. Without
                 -- this, a car that got going with traffic close behind ("danger") never handed back: recovery
@@ -949,7 +961,12 @@ local carBody = function()
                         -- is genuinely broken and parking it is then the honest outcome.
                         local tries = R.boxRescued[i] or 0
                         R.boxTryN = R.boxTryN + 1
-                        if R.BOX_RESCUE and tries < R.BOX_RESCUE_MAX and R.forceRecover(i) then
+                        -- (R2) `auto` is passed so forceRecover does not clear dropFailed on this AUTOMATIC
+                        -- path; dropsAllowed is checked only when the switch is on, so OFF is byte-identical
+                        -- to today. Both halves matter: the check stops the bypass, `auto` stops the erasure.
+                        local okDrops = (not R.BOX_RESCUE_RESPECTS_DROPS) or dropsAllowed(i)
+                        if R.BOX_RESCUE and tries < R.BOX_RESCUE_MAX and okDrops
+                                and R.forceRecover(i, R.BOX_RESCUE_RESPECTS_DROPS) then
                             R.boxOkN = R.boxOkN + 1
                             R.boxRescued[i] = tries + 1
                             R.boxRescueN = (R.boxRescueN or 0) + 1
@@ -1250,6 +1267,17 @@ end   -- (lean016) the recovery update do-block
 R.SUSP_LIMP = 0; R.SUSP_LIMP_T = 20.0; R.SUSP_LIMP_SPD = 60.0; R.SUSP_PIT_T = 90.0
 R.BOX_RESCUE = true        -- a car AC abandoned in its box is repaired and put back on track...
 R.BOX_RESCUE_MAX = 2       -- ...at most this many times, then it is parked for real
+-- (item 11 R2, 2026-10-22) ON makes the AUTOMATIC box rescue respect the drop bars. OFF is today's behaviour.
+-- The bug is subtler than "a missing check": R.forceRecover is the MANUAL unstick, and it clears dropFailed[i]
+-- on purpose - "a manual unstick is the driver's call: always allowed". The box rescue is automatic and reuses
+-- that function, so it inherits a bypass meant for a human: R.dropsOff is ignored, DROP_MAX_PER_CAR is ignored,
+-- and dropFailed is not merely skipped but CLEARED, which silently re-arms automatic drops for a car that had
+-- already failed one. Compare :987, :1114 and :1188, which all gate on dropsAllowed(i).
+-- DEFAULT OFF per decision 0027: it changes on-track outcomes and races are held, so the gating cells decide.
+-- Note the direction of risk if it is turned ON: fewer rescues means more cars parked in their box, so this is
+-- NOT obviously an improvement - it trades a bypassed user setting for retirements, which is exactly the kind
+-- of trade the Monza and Spa cells exist to price.
+R.BOX_RESCUE_RESPECTS_DROPS = false
 R.boxRescued = {}          -- per-car rescue count
 R.boxSeenN = 0             -- cars seen stationary in their own box (the condition that starts the timer)
 R.boxTryN = 0              -- rescues attempted
@@ -1413,7 +1441,9 @@ end
 -- places it back on the racing line at its current progress facing forward (with the small forward push
 -- so it sets off cleanly), and clears its recovery state so nothing fights the reset. Does NOT touch fuel.
 -- Meant to be pressed while stuck (a retired car can't be brought back). Returns true if it repositioned.
-function R.forceRecover(i)
+-- `auto` (item 11 R2): true when an AUTOMATIC path called this, which suppresses the dropFailed clear below.
+-- The manual unstick passes nothing, so the driver's button keeps its deliberate bypass.
+function R.forceRecover(i, auto)
     if type(i) ~= 'number' or i < 0 then return false end
     local ok, sim = pcall(ac.getSim)
     if not ok or not sim then return false end
@@ -1438,7 +1468,8 @@ function R.forceRecover(i)
         overriding[i] = true; releaseControls(i)             -- whatever we last wrote to its controls, let go
         recT[i] = nil; stuckT[i] = nil; repaired[i] = nil; repairRecT[i] = nil
         rescued[i] = nil; handedBack[i] = nil; limpT[i] = nil; limpDone[i] = nil; hasMoved[i] = true
-        dropFailed[i] = nil                                   -- a manual unstick is the driver's call: always allowed
+        if not auto then dropFailed[i] = nil end              -- a MANUAL unstick is the driver's call: always allowed.
+                                                              -- (R2) an automatic caller must not erase the bar.
         if parked[i] then     -- un-park: release the brake/throttle hold we put on a car we retired
             parked[i] = nil
             pcall(function() physics.setAIStopCounter(i, 0); physics.setAIThrottleLimit(i, 1); physics.setAITopSpeed(i, 1e9) end)   -- (and R.holdParked's top-speed cap)
