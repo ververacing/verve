@@ -268,6 +268,41 @@ def check_refs(kind, mode, rs):
     return 0
 
 
+def already_public(ref, rs, timeout=600):
+    """-> set of hashes of every rule-matching line ALREADY in `ref`'s history, or None if it cannot be read.
+
+    WHY THIS EXISTS. After a history rewrite, `--history` over the rewritten span re-reports every flagged line
+    in it, including ones that have been public for weeks - on 2026-10-22 it blocked a push on 15 such lines:
+    selftest fixtures with a synthetic user component, and a standard third-party install path. None was
+    identity, none was new, and the current tree was clean of all of them.
+
+    The two obvious ways out are both bad. Loosening a name rule to let a push through is how a real name
+    escapes, and the file says so. Hand-listing the fixture strings in OWN_FIXTURES rebuilds the maintained list
+    whose forgetting is the failure mode we keep hitting elsewhere - a list only ever covers what someone
+    thought to name.
+
+    So this answers the question the gate actually means: does this push publish anything barred that is NOT
+    ALREADY OUT THERE? A flagged line whose exact text is already in the remote's history is not newly
+    published by a rewrite that carries it forward unchanged. Matching is on the LINE TEXT, deliberately
+    context-free: the question is whether the string is already public, not where it sits.
+
+    Returns None rather than an empty set when the remote cannot be read, so the caller can fail CLOSED - an
+    unreachable remote must never read as "nothing is public yet", which would excuse everything.
+    """
+    try:
+        r = subprocess.run(["git", "log", "-p", "--format=%H", ref], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=timeout)
+    except Exception:                                                     # noqa: BLE001
+        return None
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    seen = set()
+    for line in r.stdout.split("\n"):
+        if any(rx.search(line) for _, rx in rs):
+            seen.add(hash(line.rstrip()))
+    return seen
+
+
 def check_identity(rng, rs, quiet=False):
     """Item 12: gate the AUTHOR and COMMITTER fields of every commit a push would publish. -> hit count.
 
@@ -321,7 +356,7 @@ def check_identity(rng, rs, quiet=False):
     return hits
 
 
-def check_history(rng, rs):
+def check_history(rng, rs, against=None):
     """Gate a range the way it will actually be PUBLISHED: every commit's patch, ADDITIONS AND REMOVALS ALIKE.
 
     WHY THIS EXISTS, and it is a correction to check_range's own reasoning. check_range scans `git diff <range>`
@@ -359,7 +394,13 @@ def check_history(rng, rs):
         print("  REFUSED: the history for %s is EMPTY - a vacuous pass is how this tool failed before" % rng)
         return 1
 
-    per, flagged = {}, [0]
+    # `against` names a ref whose history is already public. A flagged line already there is reported as
+    # PRE-EXISTING instead of blocking. None (the default) keeps the old strict behaviour, and an unreadable
+    # ref also yields None, so the gate fails CLOSED rather than excusing everything.
+    public = already_public(against, rs) if against else None
+    if against and public is None:
+        print("  NOTE: cannot read %s - every flagged line will BLOCK, including any already public" % against)
+    per, flagged, pre = {}, [0], [0]
     cur = "(before the first commit marker)"
     for line in r.stdout.split("\n"):
         if line.startswith(MARK):
@@ -374,6 +415,12 @@ def check_history(rng, rs):
         # absolute path" first, so the user-fragment rule read ZERO on a branch that demonstrably carries it.
         # Severity differs sharply between those two, so the report must be able to tell them apart.
         hit = [name for name, rx in rs if rx.search(line)]
+        if hit and public is not None and hash(line.rstrip()) in public:
+            # Already public in the comparison ref, so this rewrite does not newly publish it. Counted and
+            # reported separately - never silently dropped, because "it was already out" is a reason to stop
+            # BLOCKING, not a reason to stop SAYING.
+            pre[0] += 1
+            continue
         for name in hit:
             per[(cur, name)] = per.get((cur, name), 0) + 1
         if hit:
@@ -383,6 +430,8 @@ def check_history(rng, rs):
         print("  hits by COMMIT and RULE (the matched text is never printed):")
         for (c, name), n in sorted(per.items(), key=lambda kv: (-kv[1], kv[0])):
             print("    %-12s %-28s %d line(s)" % (c, name, n))
+    if pre[0]:
+        print("  %d flagged line(s) were ALREADY PUBLIC in %s - reported, not blocking" % (pre[0], against))
     print("leak_check history %s: %s" % (rng, "CLEAN (patches and messages, additions AND removals)"
                                          if total == 0 else
                                          "%d FLAGGED LINE(S) across %d commit/rule pair(s) - squash or "
@@ -504,7 +553,13 @@ def main():
         if a == "--range" and i + 1 < len(sys.argv):
             return check_range(sys.argv[i + 1], rs)
         if a == "--history" and i + 1 < len(sys.argv):
-            return check_history(sys.argv[i + 1], rs)
+            # --against <ref> reports a flagged line that is ALREADY in that ref's history instead of blocking
+            # on it. Omit it and every flagged line blocks, which stays the default.
+            against = None
+            for j, b in enumerate(sys.argv):
+                if b == "--against" and j + 1 < len(sys.argv):
+                    against = sys.argv[j + 1]
+            return check_history(sys.argv[i + 1], rs, against=against)
         if a == "--tree" and i + 1 < len(sys.argv):
             return check_tree(sys.argv[i + 1], rs)
         if a == "--refs" and i + 1 < len(sys.argv):
