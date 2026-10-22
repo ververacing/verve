@@ -96,6 +96,32 @@ if worst >= 120:
     sys.exit(1)
 PY
 rm -f dist_upv.txt
+
+# 0g. (item 11 P1) THE UPDATE NOTICE MUST POINT AT THE BRANCH BEING RELEASED. update.lua fetches
+#     version.json from a hard-coded branch; release.sh commits the bumped version.json to whatever branch it
+#     is run on. Release from a branch the notice does not read, and every existing install keeps seeing the
+#     old version until someone remembers to move the other branch - players get no update banner for a
+#     release that shipped. dev016 has been 76+ commits ahead of main, so this was live, not theoretical.
+#     Derived from the source rather than restated, so the two cannot drift apart again: the branch is parsed
+#     out of U.VERSION_URL, and a URL shape this cannot parse is a REFUSAL, not a pass.
+echo "-- preflight: the update notice reads the branch being released"
+NOTIFY_BRANCH="$(python -I - <<'PY'
+import io, re, sys
+src = io.open("lib/update.lua", encoding="utf-8").read()
+m = re.search(r'U\.VERSION_URL\s*=\s*"([^"]+)"', src)
+if not m:
+    sys.stderr.write("cannot find U.VERSION_URL in lib/update.lua\n"); sys.exit(1)
+u = m.group(1)
+b = re.search(r"raw\.githubusercontent\.com/[^/]+/[^/]+/([^/]+)/", u)
+if not b:
+    sys.stderr.write("cannot parse a branch out of U.VERSION_URL\n"); sys.exit(1)
+print(b.group(1))
+PY
+)" || fail "could not determine which branch the update notice reads. Fix lib/update.lua or this gate."
+[[ -n "$NOTIFY_BRANCH" ]] || fail "the update-notice branch came back empty."
+echo "   update.lua reads: $NOTIFY_BRANCH   releasing from: $RELEASE_BRANCH"
+[[ "$NOTIFY_BRANCH" == "$RELEASE_BRANCH" ]] || fail "update.lua fetches version.json from '$NOTIFY_BRANCH' but this release ships from '$RELEASE_BRANCH', so no installed copy would see it. Merge into '$NOTIFY_BRANCH' and release from there, or point U.VERSION_URL at '$RELEASE_BRANCH'."
+
 echo "-- preflight: PASSED. Building $TAG."
 # =============================================================================================
 
