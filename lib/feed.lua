@@ -185,12 +185,28 @@ function F.update(dt, stats)
             local r = rc[i] or {}
             local dmg = 0
             pcall(function() local d = c.damage; if d then for k = 0, 4 do local v = d[k]; if type(v) == 'number' and v > dmg then dmg = v end end end end)
+            -- (0.16, F2) MEASUREMENT ONLY: the worst wheel slip on the car, longitudinal and lateral, for the
+            -- exit-off-track question. Both stay nil when CSP does not expose the field, and nil is SERIALISED AS
+            -- ABSENT rather than 0 - no module here has ever read slipRatio/slipAngle, so a 0 would be
+            -- indistinguishable from a car with perfect traction and the seed test could not tell them apart.
+            local slipR, slipA
+            pcall(function()
+                if not c.wheels then return end
+                for k = 0, 3 do
+                    local w = c.wheels[k]
+                    local sr = w and w.slipRatio
+                    local sa = w and w.slipAngle
+                    if type(sr) == 'number' then local a = math.abs(sr); if slipR == nil or a > slipR then slipR = a end end
+                    if type(sa) == 'number' then local a = math.abs(sa); if slipA == nil or a > slipA then slipA = a end end
+                end
+            end)
             local e = {
                 i = i, lap = c.lapCount or 0, pos = c.racePosition or 0, spline = c.splinePosition or 0, spd = c.speedKmh or 0,
                 pit = c.isInPitlane == true, ret = c.isRetired == true, dmg = dmg, lat = lat01(c.position),
                 st = r.state or 0, yl = r.yield == true, bl = (r.block or 0) ~= 0, rec = st.rec == true, park = st.parked == true, mv = r.mv or 0,
                 wd = r.wild,   -- a chaos driver: 'calm' / 'tilt' (racecraft R.WILD); nil for every other car
                 tyre = (c.wheels and c.wheels[0] and c.wheels[0].tyreCoreTemperature) or 0,
+                slipR = slipR, slipA = slipA,   -- nil = CSP gave us nothing; 0 = measured and the car is planted
             }
             cars[#cars + 1] = e
             if not e.ret and not e.park then running[#running + 1] = e end
@@ -226,8 +242,10 @@ function F.update(dt, stats)
             if c.spd > 5 then local gs = d * trackLen / (c.spd / 3.6); gapAhead[c.i] = gs; g = string.format('%.2f', gs) end
         end
         local stName = (c.st == 1) and 'attack' or ((c.st == 2) and 'defend' or 'cruise')
-        parts[#parts + 1] = string.format('{"i":%d,"pos":%d,"lap":%d,"spline":%.4f,"spd":%d,"gap_ahead_s":%s,"pit":%s,"ret":%s,"dmg":%d,"tyre":%d,"verve":{"state":"%s","yield":%s,"block":%s,"recovering":%s%s}}',
-            c.i, c.pos, c.lap, c.spline, math.floor(c.spd), g, tostring(c.pit), tostring(c.ret), math.floor(c.dmg), math.floor(c.tyre),
+        local slipF = (c.slipR and string.format(',"slipR":%.3f', c.slipR) or '')
+            .. (c.slipA and string.format(',"slipA":%.3f', c.slipA) or '')   -- absent, not 0, when CSP has neither
+        parts[#parts + 1] = string.format('{"i":%d,"pos":%d,"lap":%d,"spline":%.4f,"spd":%d,"gap_ahead_s":%s,"pit":%s,"ret":%s,"dmg":%d,"tyre":%d%s,"verve":{"state":"%s","yield":%s,"block":%s,"recovering":%s%s}}',
+            c.i, c.pos, c.lap, c.spline, math.floor(c.spd), g, tostring(c.pit), tostring(c.ret), math.floor(c.dmg), math.floor(c.tyre), slipF,
             stName, tostring(c.yl), tostring(c.bl), tostring(c.rec), c.wd and (',"wild":"' .. c.wd .. '"') or '')   -- "wild" only on a chaos driver
     end
     local leaderLap = (#running > 0) and running[1].lap or 0
