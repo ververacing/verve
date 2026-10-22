@@ -823,7 +823,7 @@ function script.windowMain()
         if ui.itemHovered() then ui.setTooltip('How the AI launches and takes the first lap. Calm: staggered release and extra spacing into the first corners (the fewest first-lap pile-ups). Racing: half of that - backmarkers go for it, expect the occasional turn-1 tangle, as in real life. Stock: none of it, AC\'s own start.') end
     end
     toggle('Repair damage on track', 'repairOnTrack', 'On: a stuck or wrecked AI car is set back on the racing line with its body repaired (keeps the field alive; the default). Off: it is set back on the line but keeps its damage and pits for repairs like stock AC.')
-    toggle('Tactics: set-up passes, late-brake lunges, switchbacks', 'strategy', 'Planned manoeuvres on top of the reactive racecraft, per class (a GT driver out-brakes, a formula driver sets it up on the straight, a stock car slingshots). Unlocked from 90 on the difficulty meter; a driver\'s pace rating decides how much of the playbook they use (a Rookie never switchbacks, a Veteran does).')
+    toggle('Tactics: set-up passes, late-brake lunges, switchbacks', 'strategy', 'Planned manoeuvres on top of the reactive racecraft, per class (a GT driver out-brakes, a formula driver sets it up on the straight, a stock car slingshots). On at any difficulty whenever this is ticked; each car\'s own pace decides how much of the playbook it uses (a Rookie never switchbacks, a Veteran does).')
     -- (0.16, decision 0032) The text now says what the code actually does: races only (which the session gate
     -- enforces), including one left early (T.abort sends it at the next launch), and the install number, which
     -- the owner chose to keep and describe rather than remove.

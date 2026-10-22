@@ -7,7 +7,10 @@
 --            back underneath them on the way out
 --   SLINGSHOT oval/draft racing: run right up in the tow, then pull out at the last moment
 -- Each class has its own playbook (a GT driver out-brakes, a formula driver sets it up on the straight, a
--- stock car slingshots). They are UNLOCKED by difficulty and by driver skill: below UNLOCK_METER nobody
+-- stock car slingshots). (item 11 S1, 2026-10-22) SINCE 0.15.0 THE DIFFICULTY GATE IS OFF BY DEFAULT: with
+-- S.TIER_MODE = 1 the tier comes from S.moveTier, which gates on S.ENABLED alone, so EVERY car plans at any
+-- slider setting. S.UNLOCK_METER and S.tierOf are reachable only at TIER_MODE 0 and are dead code at the
+-- default. The old behaviour, described below, is what TIER_MODE 0 still does: below UNLOCK_METER nobody
 -- uses them (the field races honestly but simply); from there, a driver's pace rating decides the tier --
 -- a Rookie never switchbacks, a Veteran does. A manoeuvre is a short state machine per car; it returns
 -- overrides for the racecraft offset / caution / aggression and clears itself when done or aborted.
@@ -18,7 +21,8 @@ local Career     = require('lib.career')
 
 local S = {}
 S.ENABLED      = true
-S.UNLOCK_METER = 90     -- launcher / quick-race meter at or above which the strategy layer is on at all
+S.UNLOCK_METER = 90     -- TIER_MODE 0 ONLY: meter at or above which the layer is on. UNREACHABLE at the
+                        -- default TIER_MODE 1 - do not cite it as a live gate (item 11 S1)
 S.last         = {}     -- per car: manoeuvre code this frame (diagnostics): 0 none, 1 switchback, 2 lunge, 3 set-up, 4 slingshot
 S.attempts     = 0      -- session tally (UI / diagnostics)
 S.ok           = 0      -- ...of which gained a place within 8 s of finishing (judged in S.tick)
