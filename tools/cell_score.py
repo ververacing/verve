@@ -73,7 +73,8 @@ def strandings(path, events):
         if isinstance(c, int) and t is not None:
             by_car.setdefault(c, []).append(float(t))
     n = n2 = 0
-    for car, t, l2 in events:
+    for car, t, l2 in [(e[0], e[1], e[2]) for e in events]:   # events gained a 4th field (band) 2026-10-22:
+        # unpack positionally so a future widening does not break this the way the retire_why arity change did
         for rt in by_car.get(car, []):
             if t is not None and 0 <= rt - float(t) <= STRAND_S:
                 n += 1

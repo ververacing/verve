@@ -164,7 +164,10 @@ def classify(path):
         if is_abs:
             out["exc_abs"][b] += 1
             l2 = lap_at(t) >= 2
-            out["exc_events"].append((car, t, l2))
+            # the BAND travels with the event: `exc_abs` is band->count and `abs_l2` is a lap-2+ total, so
+            # neither can answer "how many of the LAP-2+ excursions were at this corner" - which is the split
+            # between "Verve runs wide at one corner" and a class-wide effect (asked 2026-10-22).
+            out["exc_events"].append((car, t, l2, b))
             if l2:
                 out["abs_l2"] += 1
         if is_rel:
