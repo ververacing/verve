@@ -1540,6 +1540,19 @@ def main():
     global SKIN_MATCH, AI_AGGRESSION
     SKIN_MATCH = getattr(args, "skin_match", None)
     AI_AGGRESSION = str(max(0, min(100, int(getattr(args, "ai_aggression", 0) or 0))))
+    # (2026-10-23) --track IS NOT A PATH, and getting that wrong costs a whole queue silently. build_race_ini
+    # writes TRACK from --track and CONFIG_TRACK from --layout, so `--track ks_highlands/layout_short` reaches AC
+    # as a folder named "ks_highlands/layout_short" and CSP refuses with "track is damaged" - a message that
+    # sounds like broken content. TWO queues died this way in one morning (Highlands at 06:56, then COTA at
+    # 09:52, 28 minutes of them spent waiting on a race that could never start) and it nearly sent the owner to
+    # verify a 60 GB install. What misled me: results.csv's `track` COLUMN prints "track/layout", which is a
+    # display, not an invocation. Fail loudly at parse time instead.
+    if args.track and ("/" in args.track or "\\" in args.track):
+        _t, _, _l = args.track.replace("\\", "/").partition("/")
+        raise SystemExit("--track is not a path: %r\n"
+                         "    the layout has its own flag:  --track %s --layout %s\n"
+                         "race.ini takes TRACK from --track and CONFIG_TRACK from --layout; a slash reaches AC as "
+                         "a folder name and CSP answers \"track is damaged\"." % (args.track, _t, _l or "<layout>"))
     if args.career and args.weather:
         raise SystemExit("--weather is not applied to --career events: the career race.ini is built from the template and never "
                          "pinned (build_race_ini returns before the weather block), so the row would be mislabelled. Drop one.")
