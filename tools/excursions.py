@@ -224,18 +224,27 @@ def selftest():
     """Asserts the two things that were broken, plus the hazard the fix introduces (double counting)."""
     global FEEDS_ARCH          # declared here because the de-duplication check below rebinds it; Python needs
     ok = True                  # the declaration before the first reference anywhere in the function
+    # THREE STATES, and only one of them is a failure. A machine with NO archive is not a machine with a broken
+    # archive lookup - paths.py's own docstring calls a missing archive "a normal answer: the drive may simply
+    # not be attached". The first version of this check failed on PC #2 for having all its feeds live, which is
+    # a selftest crying wolf, and the stop-and-ask habit it would train away is the one worth keeping.
     if not os.path.isdir(FEEDS_ARCH):
-        print("selftest: archive feed dir missing (%s) - cannot check the thing that was broken" % FEEDS_ARCH)
-        ok = False
+        print("selftest: NOTE - no feed archive on this machine (%s). Nothing to check there, and nothing is"
+              % FEEDS_ARCH)
+        print("          wrong: feeds are read from the live directory alone, which is correct when every feed")
+        print("          is live. This is a PASS - the archive assertions are SKIPPED, not satisfied.")
     else:
         n = len(glob.glob(os.path.join(FEEDS_ARCH, "*.jsonl")))
         if n == 0:
-            print("SELFTEST FAIL: archive feed dir has no feeds; the glob is pointing at the wrong place")
-            ok = False
-        # the whole point: a track with archived races must be found even when the live dir has none of them
-        found = feed_paths("spa")      # NOT named 'paths': that shadowed the paths MODULE and broke the
-        if not any(os.path.dirname(p) == FEEDS_ARCH for p in found):   # checks further down this function
-            print("SELFTEST FAIL: feed_paths() returned no ARCHIVED feed for spa (%d total)" % len(found))
+            print("selftest: NOTE - the archive directory exists but holds no feeds; archive assertions skipped")
+        else:
+            # the whole point: a track with archived races must be found even when the live dir has none of them
+            found = feed_paths("spa")      # NOT named 'paths': that shadowed the paths MODULE and broke the
+            if not any(os.path.dirname(p) == FEEDS_ARCH for p in found):   # checks further down this function
+                print("SELFTEST FAIL: feed_paths() returned no ARCHIVED feed for spa (%d total)" % len(found))
+                ok = False
+        if FEEDS_ARCH not in paths.feed_dirs(warn=False):
+            print("SELFTEST FAIL: the archive exists but paths.feed_dirs() does not return it")
             ok = False
     # NO RACE COUNTED TWICE, and the duplicate condition is FORCED by handing _collect the same directory twice.
     # Two earlier versions of this check were disarmed without anyone noticing: one hoped a monza feed would

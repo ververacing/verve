@@ -121,7 +121,72 @@ def heavy(xs, bar=20):
     return 100.0 * sum(1 for x in xs if x >= bar) / len(xs) if xs else 0.0
 
 
+def collect(feed_paths, want=None):
+    """-> [(label, solo, con, closing, raw, slot0, pairs)] for every readable feed, INCLUDING clean ones.
+
+    Takes the paths as an argument so the selftest can hand it one zero-incident feed. That matters: the first
+    selftest written for this function asserted something about read() instead, which the bug never touched, so
+    a mutant restoring the drop passed it. An assertion has to sit on the code that was wrong.
+    """
+    out = []
+    for p in feed_paths:
+        lab = label_for(os.path.basename(p)[:15])
+        if want and want not in lab:
+            continue
+        r = read(p)
+        if not r:
+            continue
+        solo, con, closing, _, raw, slot0, pairs = r
+        # A RACE WITH NO INCIDENTS IS STILL A RACE. This used to `continue`, which dropped the cleanest races out
+        # of "POOLED n races" - so every per-race average was computed over a denominator that excluded exactly
+        # the races that would pull it down. Found 2026-10-22: excursions.py pooled 12 rs16 races and this pooled
+        # 11, and the missing one was the only race in the queue with zero incidents of either kind.
+        out.append((lab, solo, con, closing, raw, slot0, pairs))
+    return out
+
+
+def selftest():
+    """Asserts the defect that was there: a zero-incident race must survive into the row list."""
+    import json
+    import tempfile
+    ok = True
+    fd, p = tempfile.mkstemp(suffix=".jsonl")
+    os.close(fd)
+    with io.open(p, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"v": 1, "t": 0, "type": "header", "track": "selftest",
+                            "cars": [{"i": 0}, {"i": 1}]}) + "\n")
+        for t in range(6):
+            f.write(json.dumps({"v": 1, "t": float(t), "type": "state", "cars": [
+                {"i": 0, "pos": 1, "lap": 0, "spline": 0.5, "spd": 100, "pit": False, "ret": False, "dmg": 0},
+                {"i": 1, "pos": 2, "lap": 0, "spline": 0.5, "spd": 100, "pit": False, "ret": False, "dmg": 0}]}) + "\n")
+        f.write(json.dumps({"v": 1, "t": 9.0, "type": "race_end", "results": []}) + "\n")
+    r = read(p)
+    if r is None:
+        print("SELFTEST FAIL: a readable feed with zero incidents returned None, so it can never be counted")
+        ok = False
+    else:
+        solo, con = r[0], r[1]
+        if solo or con:
+            print("SELFTEST FAIL: a feed with no incident records produced incidents: %r / %r" % (solo, con))
+            ok = False
+    # THE ASSERTION THAT GUARDS THE ACTUAL FIX: the clean race must survive into the row list. Asserting
+    # something about read() left the bug - which lived in the collection loop - completely untested.
+    kept = collect([p])
+    if len(kept) != 1:
+        print("SELFTEST FAIL: collect() dropped a zero-incident race (%d rows, expected 1) - "
+              "every per-race average would be computed over a denominator missing the cleanest races" % len(kept))
+        ok = False
+    try:
+        os.unlink(p)
+    except OSError:
+        pass
+    print("selftest: %s" % ("PASS" if ok else "FAIL"))
+    return 0 if ok else 1
+
+
 def main():
+    if "--selftest" in sys.argv:
+        return selftest()
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if not args:
         print(__doc__.strip().splitlines()[0])
@@ -131,18 +196,7 @@ def main():
     for i, a in enumerate(sys.argv):
         if a == "--label" and i + 1 < len(sys.argv):
             want = sys.argv[i + 1]
-    rows = []
-    for p in paths.track_feeds(track):
-        lab = label_for(os.path.basename(p)[:15])
-        if want and want not in lab:
-            continue
-        r = read(p)
-        if not r:
-            continue
-        solo, con, closing, _, raw, slot0, pairs = r
-        if not solo and not con:
-            continue
-        rows.append((lab, solo, con, closing, raw, slot0, pairs))
+    rows = collect(paths.track_feeds(track), want)
     if not rows:
         print("incident_split: no %s feeds matched%s" % (track, " --label " + want if want else ""))
         return 1
@@ -162,8 +216,11 @@ def main():
         ps += solo; pc += con
     if len(rows) > 1 or "--pool" in sys.argv:
         print()
-        print("  POOLED %d races: %d incidents = %d solo (%.0f%%) + %d car-to-car"
-              % (len(rows), tot["n"], tot["solo"], 100.0 * tot["solo"] / max(tot["n"], 1), tot["con"]))
+        clean = sum(1 for r in rows if not r[1] and not r[2])
+        print("  POOLED %d races: %d incidents = %d solo (%.0f%%) + %d car-to-car%s"
+              % (len(rows), tot["n"], tot["solo"], 100.0 * tot["solo"] / max(tot["n"], 1), tot["con"],
+                 ("   (%d of those races had NO incidents at all and ARE counted in the denominator)" % clean)
+                 if clean else ""))
         print("  severity: solo median %.0f, heavy>=20 %.0f%% | car-to-car median %.0f, heavy>=20 %.0f%%"
               % (med(ps), heavy(ps), med(pc), heavy(pc)))
         print("  (a pooled severity can be one race: check the per-race rows before quoting it)")
