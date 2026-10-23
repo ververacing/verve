@@ -35,6 +35,7 @@ import retire_why as RW                                                         
 
 BAND_OF_INTEREST = 0.16          # 5 of 8 rs16 excursions and 30 of 56 TCR excursions sat in this spline band
 STRAND_S = 60.0                  # an excursion whose car retires within this is the same event, counted twice
+_ARITY_WARNED = False            # the version-mismatch warning fires once per run, not once per race
 
 
 def strandings(path, events):
@@ -47,12 +48,25 @@ def strandings(path, events):
     retirements are a separate outcome and never folded into the excursion rate; without this they are folded
     in by the metric's own definition. Raised by verve-47 against F2's GT3 leg.
     """
+    # ARITY CHECKED, NEVER ASSUMED. `except ValueError: return 0, 0` was the first version of this and it is a
+    # SILENT NULL: on a machine whose retire_why still returns two values, every arm reported zero strandings and
+    # printed no stranding line, which is indistinguishable from "this arm has none". Found by BTeam on PC #2 the
+    # same evening, in the fix for a silent null. A mismatch now warns once and the arm says NOT COMPUTED.
     try:
-        _fin, rets, _mx = RW.scan(path)
-    except (OSError, ValueError):
-        return 0, 0
+        res = RW.scan(path)
+    except OSError:
+        return 0, 0, False
+    if not isinstance(res, tuple) or len(res) != 3:
+        global _ARITY_WARNED
+        if not _ARITY_WARNED:
+            _ARITY_WARNED = True
+            print("  !! retire_why.scan() returned %d value(s), expected 3 (finished, retirements, distance)."
+                  " THE STRANDING ADJUSTMENT IS NOT RUNNING - install retire_why 1e9e111b or newer alongside"
+                  " this file. Figures below are UNADJUSTED." % (len(res) if isinstance(res, tuple) else 1))
+        return 0, 0, False
+    _fin, rets, _mx = res
     if not rets:
-        return 0, 0
+        return 0, 0, True
     by_car = {}
     for d in rets:
         c, t = d.get("car"), d.get("t")
@@ -66,7 +80,7 @@ def strandings(path, events):
                 if l2:
                     n2 += 1
                 break
-    return n, n2
+    return n, n2, True
 
 
 def cars_in(path):
@@ -140,7 +154,9 @@ def arm(track, prefix):
         if rcl is None:
             rcl, rcl2 = c["carlaps"], c["carlaps_l2"]
             nominal_used += 1
-        sn, sn2 = strandings(path, c.get("exc_events") or [])
+        sn, sn2, sok = strandings(path, c.get("exc_events") or [])
+        if not sok:
+            t["strand_blind"] += 1
         races.append({"label": lab, "laps": c["maxlap"], "cars": cars, "exc": ea, "exc_l2": c["abs_l2"],
                       "band": band, "carlaps": rcl, "carlaps_l2": rcl2, "off": c["n_off"],
                       "nominal": c["carlaps"], "strand": sn, "strand_l2": sn2})
@@ -152,7 +168,7 @@ def arm(track, prefix):
             "exc": t["exc"], "exc_l2": t["exc_l2"], "band": t["band"], "off": t["off"],
             "carlaps": t["carlaps"], "carlaps_l2": t["carlaps_l2"], "starts": t["starts"],
             "nominal": t["nominal"], "nominal_used": nominal_used,
-            "strand": t["strand"], "strand_l2": t["strand_l2"],
+            "strand": t["strand"], "strand_l2": t["strand_l2"], "strand_blind": t["strand_blind"],
             "per_100cl_l2_nostrand": (100.0 * max(0, t["exc_l2"] - t["strand_l2"]) / max(t["carlaps_l2"], 1)),
             "per_100cl": 100.0 * t["exc"] / max(t["carlaps"], 1),
             "per_100cl_l2": 100.0 * t["exc_l2"] / max(t["carlaps_l2"], 1),
@@ -198,6 +214,10 @@ def show(a):
           % (a["exc"], a["exc_l2"], BAND_OF_INTEREST, a["band"], a["off"]))
     print("      per 100 car-laps %6.2f   LAP2+ %6.2f (PRIMARY)   per race-start %5.3f   per race %5.2f"
           % (a["per_100cl"], a["per_100cl_l2"], a["per_start"], a["per_race"]))
+    if a.get("strand_blind"):
+        print("      STRANDINGS NOT COMPUTED for %d of %d race(s) - retire_why is the wrong version here, so"
+              " these figures are UNADJUSTED and are NOT comparable with adjusted ones."
+              % (a["strand_blind"], a["n"]))
     if a.get("strand"):
         print("      OF WHICH STRANDINGS: %d excursions (%d lap2+) are a car that RETIRED within %.0f s - the"
               " same failure as a retirement, counted twice." % (a["strand"], a["strand_l2"], STRAND_S))
