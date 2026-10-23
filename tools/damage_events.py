@@ -32,6 +32,8 @@ V = os.path.dirname(HERE)
 JUMP = 8          # feed.lua:22 INCIDENT_MIN
 NEAR_M = 15.0     # the PC #2 rule for "the same contact"
 BAND = 0.02       # excursions.py's own band width, so bands are comparable across tools
+BANDS = None      # --bands=lo:hi, the pre-registered window (COTA primary: 0.02:0.06)
+LAPS = None       # --laps=lo:hi  (COTA primary: 0:1)
 TRACK_M = {"monza": 5793.0, "spa": 7004.0, "singapore_2020": 5063.0, "acu_unitedstates": 5513.0,
            "barcelona": 4655.0, "imola": 4909.0}
 
@@ -40,8 +42,14 @@ def band_of(s):
     return round(s / BAND) * BAND
 
 
-def events(path, track_m):
-    """[(car, t_rel, delta, band, two_car)] for every damage jump after the first snapshot."""
+def events(path, track_m, bands=None, laps=None):
+    """[(car, t_rel, delta, band, two_car)] for every damage jump after the first snapshot.
+
+    `bands` = (lo, hi) keeps only events whose band falls in [lo, hi]; `laps` = (lo, hi) keeps only events where
+    the damaged car's own lap is in [lo, hi]. Added 2026-10-23 for COTA's PRE-REGISTERED primary - lap-1 Turn 1,
+    bands 0.02 to 0.06 on laps 0 and 1 - so the primary is cut from the same instrument as the whole-race figure
+    rather than from a second script that could drift from it.
+    """
     snaps = []
     try:
         for ln in io.open(path, encoding="utf-8", errors="replace"):
@@ -68,11 +76,17 @@ def events(path, track_m):
                 if dmg == 0 and d0 > 0:
                     pass                           # a repair
                 elif dmg - d0 >= JUMP:
-                    hits.append((i, dmg - d0, (c.get("spline") or 0) / 1000.0))
+                    hits.append((i, dmg - d0, (c.get("spline") or 0) / 1000.0, c.get("lap")))
             prev[i] = dmg
-        for i, delta, spl in hits:
+        for i, delta, spl, lap in hits:
+            # THE WINDOW IS APPLIED AFTER PAIRING, so a two-car hit at the window's edge is still recognised as
+            # two-car even when only one of the pair is inside it.
+            if bands is not None and not (bands[0] - 1e-9 <= band_of(spl) <= bands[1] + 1e-9):
+                continue
+            if laps is not None and not (lap is not None and laps[0] <= lap <= laps[1]):
+                continue
             two = False
-            for j, _d2, spl2 in hits:
+            for j, _d2, spl2, _l2 in hits:
                 if j == i:
                     continue
                 gap = abs(spl - spl2)
@@ -117,10 +131,10 @@ def carlaps_for(track, prefix):
     return total if found else None
 
 
-def arm(track, prefix, track_m):
+def arm(track, prefix, track_m, bands=None, laps=None):
     rows = []
     for p in sorted(glob.glob(os.path.join(V, "diag_race_*%s*.jsonl" % prefix))):
-        ev, n = events(p, track_m)
+        ev, n = events(p, track_m, bands, laps)
         lab = os.path.basename(p)[10:-6]
         lab = lab[16:] if len(lab) > 16 else lab
         rows.append({"label": lab, "ev": ev, "snaps": n})
@@ -135,7 +149,11 @@ def show(prefix, rows, carlaps=None):
     tot = len(allev)
     two = sum(1 for e in allev if e[4])
     lone = tot - two
-    coll = collisions(allev)
+    # SUM THE PER-RACE COLLISIONS, never collapse the arm's events together. `collisions()` keys on the event's
+    # time, which is RACE-RELATIVE: two races whose contacts happen at the same t+N would merge into one. Caught
+    # 2026-10-23 on the COTA Turn 1 window, where the arm total read 1 while the per-race values were [1,0,0,1] -
+    # an internal contradiction visible only because the per-race line is printed beside the total.
+    coll = sum(collisions(r["ev"]) for r in rows)
     print("  ARM %-22s %3d damage events  (two-car %d = %d distinct collisions, lone %d)"
           % (prefix, tot, two, coll, lone))
     if carlaps:
@@ -213,6 +231,15 @@ def selftest():
     if len([e for e in ev if e[4]]) == collisions(ev):
         print("SELFTEST FAIL: two-car events and collisions are equal, so the pairing collapse is inert")
         ok = False
+    # AND THE ARM TOTAL MUST BE THE SUM OF THE RACES, not a collapse across them: two races whose contacts fall
+    # at the same race-relative time must still count as two collisions.
+    two_races = [{"ev": ev}, {"ev": ev}]
+    if sum(collisions(r["ev"]) for r in two_races) != 2:
+        print("SELFTEST FAIL: the same race counted twice gives %d collisions, expected 2"
+              % sum(collisions(r["ev"]) for r in two_races)); ok = False
+    if collisions([e for r in two_races for e in r["ev"]]) != 1:
+        print("SELFTEST FAIL: the flat collapse of two identical races should give 1 - if it does not, the"
+              " arm-total bug this guards against cannot be demonstrated"); ok = False
     os.remove(p)
     print("selftest: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
@@ -223,9 +250,14 @@ def main():
         return selftest()
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     tm = None
+    global BANDS, LAPS
     for a in sys.argv:
         if a.startswith("--track-m="):
             tm = float(a.split("=", 1)[1])
+        elif a.startswith("--bands="):
+            lo, hi = a.split("=", 1)[1].split(":"); BANDS = (float(lo), float(hi))
+        elif a.startswith("--laps="):
+            lo, hi = a.split("=", 1)[1].split(":"); LAPS = (int(lo), int(hi))
     if len(args) < 2:
         print(__doc__.strip().splitlines()[0])
         return 2
@@ -239,7 +271,7 @@ def main():
     print("  NOT A SECOND FINDING: this is the `incidents` column re-derived from the raw per-snapshot damage."
           "\n  The SPLIT (two-car against lone) and the BAND are the new information.\n")
     for pre in prefixes:
-        show(pre, arm(track, pre, track_m), carlaps_for(track, pre))
+        show(pre, arm(track, pre, track_m, BANDS, LAPS), carlaps_for(track, pre))
         print()
     return 0
 
