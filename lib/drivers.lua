@@ -721,7 +721,21 @@ function D.applyPace(i, base)
         else
             D.slewT[i] = nil
         end
-        if lastApplied[i] ~= lvl then physics.setAILevel(i, lvl); lastApplied[i] = lvl end   -- only on change (18 cars x 60 Hz otherwise)
+        if lastApplied[i] ~= lvl then
+            -- (2026-10-23) THE BLIP HUNT. A level that moves AFTER its first write is the thing being chased: two
+            -- cars went to 0.80 inside one 8 s window at Monza (s44_blip_1) while every other car held, and 0.80
+            -- is above the `base` of one of them, which no branch here can produce - so the 8 s snapshot cannot
+            -- say what did. `prev` non-nil means this is not the first write, which is the rare case (2 writes in
+            -- 782 car-samples). Bounded at 40 lines a session so a legitimate ramp can never flood the log.
+            if prev and (D.lvlLogN or 0) < 40 then
+                D.lvlLogN = (D.lvlLogN or 0) + 1
+                pcall(ac.log, string.format(
+                    'Verve lvlwrite car %d: %.3f -> %.3f  base %.3f  en %s  pace %.2f  wild %s  fmp %.2f  abs %s',
+                    i, prev, lvl, base or -1, tostring(Difficulty.ENABLED), (st and st.pace) or -1,
+                    tostring((st and st.wild) or false), fieldMaxPace or -1, tostring(D.PACE_ABS)))
+            end
+            physics.setAILevel(i, lvl); lastApplied[i] = lvl
+        end   -- only on change (18 cars x 60 Hz otherwise)
     end)
 end
 
