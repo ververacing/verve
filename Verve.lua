@@ -172,6 +172,10 @@ local function sessionReset(restart)
     pcall(Watch.reset)
     -- driver profiles are session-only: wipe every race. NOT on a restart: the picks should survive it, and
     -- the AI-level overrides persist in physics across a restart, so the remembered base levels stay valid
+    -- (0042) the AI levels Verve wrote do NOT survive a restart - AC puts the race.ini value back - so forget
+    -- what was applied or applyPace will see no change from its own memory and never write the level again.
+    -- The driver picks DO survive, which is what the block below is about.
+    if restart then pcall(Drivers.forgetApplied) end
     if not restart then
         -- a driver grid set up in practice survives qualifying and the race: keep the picks when the grid is the
         -- same weekend (same track, car count and model per slot); a different grid wipes them as before

@@ -53,7 +53,10 @@ local CURVES = {
 local CURVE_OF = { formula = 'formula', formula_jr = 'formula', prototype = 'gt', hypercar = 'gt', gt = 'gt', nascar = 'gt',
                    touring = 'touring', road = 'road', vintage = 'road', drift = 'road', kart = 'road', rally = 'road' }
 local LEVEL_MIN = 0.72
-D.SLIDER_CURVE = true         -- user option sliderCurve: outside career the slider is lap-time steps (else the raw AC level)
+D.SLIDER_CURVE = false        -- user option sliderCurve: outside career the slider is lap-time steps. OFF since
+                              -- decision 0042 - THE SLIDER IS THE AI LEVEL. On, it maps the SLIDER through the
+                              -- class curve and the per-car shift is taken from the mapped value, so slider 90
+                              -- means "+5 % off expert pace" rather than "AI level 90".
 D.SLIDER_PCT_PER_POINT = 0.5  -- 100 -> 0 %, 90 -> +5 %, 80 -> +10 %, 70 -> +15 %
 local function curveFor(i)
     local key = 'gt'
@@ -95,7 +98,6 @@ end
 -- a car's level -> % off expert pace on ITS class curve (the inverse of levelForPct); Drivers.paceOf reads an unprofiled car's pace from it
 function D.pctOf(i, level) return D.levelToPct(level, (curveFor(i))) end
 
-local DELIB_SPREAD = 10   -- per-car levels further apart than this were set by hand in the grid: honoured as written
 D.sliderOverride = nil    -- one-line notice for the UI when the slider overrode the grid's per-car levels
 local cache = {}          -- [i] = level
 local cachedFor = nil
@@ -128,26 +130,42 @@ local function compute(i)
     -- The field runs at the slider; the per-car numbers only keep their relative spread around it. The one exception is
     -- a grid whose per-car levels are DELIBERATELY spread (more than DELIB_SPREAD apart): that is someone hand-setting
     -- opponents in the grid, and it is honoured as written.
-    local lo, hi, sum, cnt = 1e9, -1e9, 0, 0
-    for k, v in pairs(Career.carLevels) do if k > 0 and v and v > 0 then sum = sum + v; cnt = cnt + 1; if v < lo then lo = v end; if v > hi then hi = v end end end
-    local meter = Career.meter or 100
-    local deliberate = cnt > 0 and (hi - lo) > DELIB_SPREAD
-    local rel = 1.0
-    if cnt > 0 and not deliberate and iniLevel > 0 then rel = iniLevel / (sum / cnt) end
-    if D.SLIDER_CURVE and not deliberate and meter < 100 then
-        -- the slider as lap-time steps: 90 = +5 %, 80 = +10 % ... on THIS class's measured curve
-        local pct = (100 - meter) * D.SLIDER_PCT_PER_POINT
-        local pts, key = curveFor(i)
-        local lvl = pctToLevel(pct, pts)
-        D.sliderOverride = string.format('slider %d = field +%.0f%% off expert pace (%s curve, AI level %.0f)', meter, pct, key, lvl * 100)
-        return math.max(LEVEL_MIN, math.min(1.2, lvl * rel))
+    -- (0042) NO SLIDER AT ALL - GT Life writes a per-car level for every opponent and no race-wide one, so
+    -- Career.meterSource is 'per-car median'. Each car runs ITS OWN level exactly as written, at any spread,
+    -- with no curve and no re-centring: there is no slider on screen to follow.
+    local own = Career.carLevels[i]
+    local meter = Career.meter
+    if Career.meterSource ~= 'race.ini' or not meter then
+        D.sliderOverride = nil
+        return math.max(LEVEL_MIN, math.min(1.2, iniLevel / 100.0))
     end
-    if cnt > 0 and not deliberate and math.abs(sum / cnt - meter) > 0.5 then
-        D.sliderOverride = string.format('grid levels %d-%d, slider %d: field at the slider', lo, hi, meter)
-        return math.max(LEVEL_MIN, math.min(1.2, meter / 100.0 * rel))
+    -- (0042) THE SLIDER SETS THE AI LEVEL. The per-car numbers supply the VARIATION, the slider supplies the
+    -- LEVEL:   level_i = slider - (max(per-car) - level_i)
+    -- Identity when the fastest car is already at the slider, so a launcher that writes its variation BELOW the
+    -- slider passes through untouched and we need to know nothing about any launcher's convention. A grid whose
+    -- fastest car is not at the slider moves - up or down - with its spacing preserved, and no car ever ends up
+    -- above what the player set. A flat grid lands every car on the slider, which is the owner's own case:
+    -- slider 80 with every car at 100 ran at 100 before this.
+    local hi, cnt = -1e9, 0
+    for k, v in pairs(Career.carLevels) do
+        if k > 0 and v and v > 0 then cnt = cnt + 1; if v > hi then hi = v end end
     end
-    D.sliderOverride = nil
-    return math.max(LEVEL_MIN, math.min(1.2, iniLevel / 100.0))
+    -- the slider's own value, unless sliderCurve reads it as lap-time steps on this class's measured curve -
+    -- in which case the per-car shift below is taken from the MAPPED level, so the two features compose.
+    local em = meter
+    if D.SLIDER_CURVE and meter < 100 then
+        em = pctToLevel((100 - meter) * D.SLIDER_PCT_PER_POINT, (curveFor(i))) * 100
+    end
+    local lvl = (cnt > 0 and own) and (em - (hi - own)) or em
+    -- %.0f everywhere, never %d: a slider can be fractional (97.5) and so can a per-car level.
+    if cnt > 0 and math.abs(hi - em) > 0.5 then
+        D.sliderOverride = string.format('grid levels up to %.0f, slider %.0f: field shifted to the slider (this car %.0f)', hi, meter, lvl)
+    elseif D.SLIDER_CURVE and meter < 100 then
+        D.sliderOverride = string.format('slider %.0f = +%.0f%% off expert pace = level %.0f', meter, (100 - meter) * D.SLIDER_PCT_PER_POINT, em)
+    else
+        D.sliderOverride = nil
+    end
+    return math.max(LEVEL_MIN, math.min(1.2, lvl / 100.0))
 end
 
 -- the level car i should run at this session (nil = leave AC's own)

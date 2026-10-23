@@ -726,6 +726,15 @@ function D.applyPace(i, base)
 end
 
 function D.appliedLevel(i) return lastApplied[i] end
+-- (0042) A SESSION RESTART DOES NOT KEEP VERVE'S AI LEVELS, whatever sessionReset's comment used to assume: the
+-- car comes back at the race.ini value while lastApplied still holds what Verve wrote, so applyPace computes the
+-- same target, compares it with its own memory, sees no change and never writes again. Observed in the owner's
+-- own race - level 83 replaced by 100 for twelve laps. Forget only what was APPLIED; the profile picks survive a
+-- restart on purpose.
+function D.forgetApplied()
+    lastApplied = {}
+    D.slewT = {}
+end
 -- (0.15.1) Verve switched off: the launcher's level back (lvl nil = leave it), and forget what Verve wrote, so that switching Verve
 -- back on writes the profile level again (applyPace only writes on a change)
 function D.handBack(i, lvl)
