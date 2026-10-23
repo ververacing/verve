@@ -191,8 +191,23 @@ def bracket(a, b):
         return ("NOT SEPARABLE at this n",
                 "the two normalisations disagree (lap-2+ per 100 car-laps %+.2f, per race-start %+.2f), which is"
                 " exactly the case the bracket exists to catch - neither is picked" % (d_lap, d_start))
+    note = ""
+    na, nb = a.get("exc_l2"), b.get("exc_l2")
+    if na is not None and nb is not None and min(na, nb) < 10:
+        # THE MEASURED NULL, 2026-10-22: s42_gate_mon against d100b_mon_on is the same cell at ai-level 100 where
+        # 0042's code is identical by construction, n=3 each side - and this function called a winner on 4
+        # lap-2+ excursions against 8, with both normalisations agreeing. The bracket guards the survival gap and
+        # says NOTHING about n, so the counts have to travel with the verdict.
+        hi, lo = max(na, nb), min(na, nb)
+        ratio = (float(hi) / lo) if lo else float("inf")
+        note = ("\n  !! SMALL COUNTS: this verdict rests on %d against %d lap-2+ excursions, a %.1fx ratio."
+                " THE MEASURED NULL for comparison: identical code at the Monza GT3 12-lap cell, n=3 a side,"
+                " gave 4 against 8 - a 2.0x ratio - and this function called a winner on it with both"
+                " normalisations agreeing (2026-10-22). The bracket guards the survival gap and says nothing"
+                " about n." % (na, nb, ratio))
     return ("%s is worse" % worse,
-            "both normalisations agree (lap-2+ per 100 car-laps %+.2f, per race-start %+.2f)" % (d_lap, d_start))
+            "both normalisations agree (lap-2+ per 100 car-laps %+.2f, per race-start %+.2f)%s"
+            % (d_lap, d_start, note))
 
 
 def show(a):
