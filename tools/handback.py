@@ -42,11 +42,24 @@ DOCS = os.path.join(os.path.expanduser("~"), "Documents", "Assetto Corsa")
 CFG = os.path.join(DOCS, "cfg")
 BASELINE = os.path.join(DOCS, "verve_desk", "racecraft", "owner_files_baseline.json")
 
+# (name, path, how to hand it back). "replace" consumes the backup, as the harness's own restore does.
+# "copy" leaves the backup in place, and race.ini MUST be copy - see below.
 FILES = [
-    ("assists.ini", os.path.join(CFG, "assists.ini"), True),
-    ("race.ini", os.path.join(CFG, "race.ini"), False),          # checked, never restored - see the docstring
-    ("new_behaviour.ini", os.path.join(CFG, "extension", "new_behaviour.ini"), True),
-    ("video.ini", os.path.join(CFG, "video.ini"), True),
+    ("assists.ini", os.path.join(CFG, "assists.ini"), "replace"),
+    # race.ini: CORRECTED TWICE within the hour, and the second correction matters more than the first.
+    # First I wrote it unrestorable ("nothing owns an original"). The disk refuted that: the surviving
+    # race.ini.harness-backup described CONFIG_TRACK=east with CARS=10 - the OWNER'S COTA East grid - while the
+    # live file held the harness's 20-car GP row, so the backup IS theirs and the live file is ours.
+    # Then I nearly made it "replace" like the others, WHICH WOULD HAVE BEEN A REAL BUG: harness.py:1193 builds
+    # every row's race.ini FROM that backup as its TEMPLATE, and there is no race.ini restore anywhere in the
+    # harness at all. os.replace would CONSUME the template; the next run would find no backup, copy the
+    # harness's own race.ini as "the original", and every later row would be built from our file instead of
+    # theirs - the 14 Oct cascade, caused by the tool meant to prevent it.
+    # So: hand it back by COPY, never touch the backup. A surviving race.ini backup is NORMAL and PERMANENT by
+    # design, and is NOT evidence of a failed restore (unlike the other three, where os.replace consumes it).
+    ("race.ini", os.path.join(CFG, "race.ini"), "copy"),
+    ("new_behaviour.ini", os.path.join(CFG, "extension", "new_behaviour.ini"), "replace"),
+    ("video.ini", os.path.join(CFG, "video.ini"), "replace"),
 ]
 
 
@@ -79,39 +92,42 @@ def load_baseline():
 
 def report(do_restore):
     base = load_baseline()
-    lines, bad = [], 0
-    for name, path, restorable in FILES:
+    lines, bad, left = [], 0, []
+    for name, path, how in FILES:
         bak = path + ".harness-backup"
         has_bak = os.path.exists(bak)
         cur = sha(path)
         want = base.get(name)
-        state = "MATCHES the recorded owner value"
+        note = ""
+        if has_bak and do_restore:
+            try:
+                if how == "copy":
+                    shutil.copy2(bak, path)          # race.ini: the backup is the harness's TEMPLATE. Keep it.
+                    note = "   (handed back by COPY; the backup is the harness's template and is kept)"
+                else:
+                    os.replace(bak, path)            # the harness's own call; consumes the backup
+                    has_bak = False
+                cur = sha(path)
+            except OSError as e:
+                lines.append("  %-18s RESTORE FAILED: %s" % (name, e))
+                bad += 1
+                continue
         if cur is None:
             state = "ABSENT"
             bad += 1
         elif want is None:
-            state = "no recorded value (run --baseline when the game is closed and no backup exists)"
-        elif cur != want:
+            state = "no recorded value (run --baseline when the game is closed and no backup needs restoring)"
+        elif cur == want:
+            state = "MATCHES the recorded owner value"
+        else:
             state = "DIFFERS from the recorded owner value"
             bad += 1
-        if has_bak and restorable and do_restore:
-            try:
-                os.replace(bak, path)                # same call the harness uses; consumes the backup
-                cur = sha(path)
-                state = ("RESTORED from the backup, now matches" if cur == want
-                         else "RESTORED from the backup, still differs from the recorded value")
-                has_bak = False
-                if cur != want:
-                    bad += 1
-                else:
-                    bad -= 1 if bad else 0
-            except OSError as e:
-                state = "RESTORE FAILED: %s" % e
-                bad += 1
-        lines.append("  %-18s %s%s%s" % (name, state,
-                                         "   [.harness-backup PRESENT]" if has_bak else "",
-                                         "" if restorable else "   (checked, never restored)"))
-    return lines, bad
+        # A surviving race.ini backup is normal and by design; the others surviving means a run did not restore.
+        if has_bak and how != "copy":
+            left.append(name)
+        lines.append("  %-18s %s%s%s" % (name, state, note,
+                                         "   [.harness-backup PRESENT]" if has_bak else ""))
+    return lines, bad, left
 
 
 def main():
@@ -135,23 +151,24 @@ def main():
     if args.baseline:
         # THE GUARD THAT MATTERS: never record a value while a backup exists. That is how the 14 Oct cascade
         # happened - a modified file was backed up as "the original" and the real one was lost.
-        stale = [name for name, path, _ in FILES if os.path.exists(path + ".harness-backup")]
+        stale = [name for name, path, how in FILES
+                 if how != "copy" and os.path.exists(path + ".harness-backup")]
         if stale:
             print("REFUSING to take a baseline: a .harness-backup exists for %s, so the live file may still "
                   "carry a test value. Restore first, then baseline. (time of read %s)" % (", ".join(stale), now))
             return 2
-        data = {name: sha(path) for name, path, _ in FILES if sha(path)}
+        data = {name: sha(path) for name, path, _how in FILES if sha(path)}
         os.makedirs(os.path.dirname(BASELINE), exist_ok=True)
         io.open(BASELINE, "w", encoding="utf-8").write(json.dumps(data, indent=2, sort_keys=True))
         print("baseline recorded for %d files -> %s  (time of read %s)" % (len(data), BASELINE, now))
         return 0
 
-    lines, bad = report(do_restore=not args.check)
+    lines, bad, left = report(do_restore=not args.check)
     print("HANDBACK %s   time of read %s" % ("CHECK" if args.check else "RESTORE", now))
     for l in lines:
         print(l)
-    left = [name for name, path, _ in FILES if os.path.exists(path + ".harness-backup")]
-    print("  no .harness-backup left: %s" % ("yes" if not left else "NO - " + ", ".join(left)))
+    print("  no consuming .harness-backup left: %s" % ("yes" if not left else "NO - " + ", ".join(left)))
+    print("  (race.ini.harness-backup is the harness's build template and is kept on purpose)")
     print("VERDICT: %s" % ("the owner's game is as they left it" if not bad and not left
                            else "NOT CLEAN - %d file(s) off their recorded value%s"
                                 % (bad, ", backups left" if left else "")))
@@ -168,13 +185,15 @@ def selftest():
     if len(FILES) != 4:
         print("SELFTEST FAIL: expected 4 files, found %d" % len(FILES))
         ok = False
-    # race.ini must be checked but NOT restorable, or a hand-back would clobber a definition nothing owns
-    rest = {f[0]: f[2] for f in FILES}
-    if rest.get("race.ini"):
-        print("SELFTEST FAIL: race.ini is marked restorable; there is no original to restore")
+    # race.ini must be handed back by COPY: harness.py:1193 builds every row from that backup as its template,
+    # so consuming it would make the next run adopt a harness file as the owner's original.
+    how = {f[0]: f[2] for f in FILES}
+    if how.get("race.ini") != "copy":
+        print("SELFTEST FAIL: race.ini must be handed back by COPY, not replace - os.replace consumes the "
+              "backup that harness.py:1193 uses as its build template")
         ok = False
-    if not all(rest[n] for n in ("assists.ini", "new_behaviour.ini", "video.ini")):
-        print("SELFTEST FAIL: a file that HAS an original is marked unrestorable")
+    if any(how[n] != "replace" for n in ("assists.ini", "new_behaviour.ini", "video.ini")):
+        print("SELFTEST FAIL: these three must consume their backup, as the harness does")
         ok = False
     # the negative control: a baseline must be refused while a backup exists. Prove the guard by faking one.
     probe = os.path.join(CFG, "assists.ini") + ".harness-backup"
