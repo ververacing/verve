@@ -135,7 +135,11 @@ def classify(path):
     cars = max(ncars, 1)
     out = dict(maxlap=maxlap, ncars=ncars, n_off=len(offs), wide=0, unjoined=0,
                exc_abs=collections.Counter(), exc_rel=collections.Counter(), abs_l2=0, rel_l2=0,
-               carlaps=maxlap * cars, carlaps_l2=max(0, maxlap - 2) * cars, bands=bmed)
+               carlaps=maxlap * cars, carlaps_l2=max(0, maxlap - 2) * cars, bands=bmed,
+               # (car, t, lap>=2) per ABS excursion, so a caller can ask which of them are STRANDINGS: a car
+               # that goes off and stops is below threshold forever and is therefore an excursion BY
+               # CONSTRUCTION, which means this metric is not independent of the retirement outcome.
+               exc_events=[])
 
     def lap_at(t):
         best = 0
@@ -159,7 +163,9 @@ def classify(path):
         is_rel = ref is not None and a < REL_FRAC * ref and n < REL_FRAC * ref
         if is_abs:
             out["exc_abs"][b] += 1
-            if lap_at(t) >= 2:
+            l2 = lap_at(t) >= 2
+            out["exc_events"].append((car, t, l2))
+            if l2:
                 out["abs_l2"] += 1
         if is_rel:
             out["exc_rel"][b] += 1

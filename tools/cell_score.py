@@ -31,8 +31,42 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import excursions as X                                                                       # noqa: E402
+import retire_why as RW                                                                      # noqa: E402
 
 BAND_OF_INTEREST = 0.16          # 5 of 8 rs16 excursions and 30 of 56 TCR excursions sat in this spline band
+STRAND_S = 60.0                  # an excursion whose car retires within this is the same event, counted twice
+
+
+def strandings(path, events):
+    """How many of these excursions are the first half of a retirement, and how many of those are lap-2+.
+
+    An excursion is "below threshold at the off and still below it 3-8 s later", so a car that goes off and
+    STOPS satisfies it by construction. Every one of F2's gt3_k0_off retirements had an off-track 15-25 s
+    before it, so that arm's excursion count contains its own DNFs: an ON/OFF comparison in which only OFF
+    strands counts the same failure twice, once as a retirement and once as an excursion. The spec says
+    retirements are a separate outcome and never folded into the excursion rate; without this they are folded
+    in by the metric's own definition. Raised by verve-47 against F2's GT3 leg.
+    """
+    try:
+        _fin, rets, _mx = RW.scan(path)
+    except (OSError, ValueError):
+        return 0, 0
+    if not rets:
+        return 0, 0
+    by_car = {}
+    for d in rets:
+        c, t = d.get("car"), d.get("t")
+        if isinstance(c, int) and t is not None:
+            by_car.setdefault(c, []).append(float(t))
+    n = n2 = 0
+    for car, t, l2 in events:
+        for rt in by_car.get(car, []):
+            if t is not None and 0 <= rt - float(t) <= STRAND_S:
+                n += 1
+                if l2:
+                    n2 += 1
+                break
+    return n, n2
 
 
 def cars_in(path):
@@ -106,9 +140,11 @@ def arm(track, prefix):
         if rcl is None:
             rcl, rcl2 = c["carlaps"], c["carlaps_l2"]
             nominal_used += 1
+        sn, sn2 = strandings(path, c.get("exc_events") or [])
         races.append({"label": lab, "laps": c["maxlap"], "cars": cars, "exc": ea, "exc_l2": c["abs_l2"],
                       "band": band, "carlaps": rcl, "carlaps_l2": rcl2, "off": c["n_off"],
-                      "nominal": c["carlaps"]})
+                      "nominal": c["carlaps"], "strand": sn, "strand_l2": sn2})
+        t["strand"] += sn; t["strand_l2"] += sn2
         t["exc"] += ea; t["exc_l2"] += c["abs_l2"]; t["band"] += band
         t["carlaps"] += rcl; t["carlaps_l2"] += rcl2; t["off"] += c["n_off"]
         t["nominal"] += c["carlaps"]; t["starts"] += cars
@@ -116,6 +152,8 @@ def arm(track, prefix):
             "exc": t["exc"], "exc_l2": t["exc_l2"], "band": t["band"], "off": t["off"],
             "carlaps": t["carlaps"], "carlaps_l2": t["carlaps_l2"], "starts": t["starts"],
             "nominal": t["nominal"], "nominal_used": nominal_used,
+            "strand": t["strand"], "strand_l2": t["strand_l2"],
+            "per_100cl_l2_nostrand": (100.0 * max(0, t["exc_l2"] - t["strand_l2"]) / max(t["carlaps_l2"], 1)),
             "per_100cl": 100.0 * t["exc"] / max(t["carlaps"], 1),
             "per_100cl_l2": 100.0 * t["exc_l2"] / max(t["carlaps_l2"], 1),
             "per_start": float(t["exc"]) / max(t["starts"], 1),
@@ -145,7 +183,10 @@ def show(a):
     lost = a.get("nominal", 0) - a["carlaps"]
     tag = ""
     if lost > 0:
-        tag = "  (%d car-laps LOST to retirements against the nominal %d)" % (lost, a["nominal"])
+        # NOT "lost to retirements": these arms often have none. A car a lap down drives fewer laps than the
+        # leader, and the nominal figure counts every car as having gone the full distance. (verve-47 caught the
+        # old label, which would have had a reader infer DNFs that did not happen.)
+        tag = "  (%d short of the nominal %d: lapped cars, plus any retirements)" % (lost, a["nominal"])
     if a.get("nominal_used"):
         tag += "  [%d race(s) had no race_end: nominal denominator used for those]" % a["nominal_used"]
     print("  %-18s n=%d  %5d car-laps ACTUAL (%5d lap2+), %3d starts%s"
@@ -157,6 +198,11 @@ def show(a):
           % (a["exc"], a["exc_l2"], BAND_OF_INTEREST, a["band"], a["off"]))
     print("      per 100 car-laps %6.2f   LAP2+ %6.2f (PRIMARY)   per race-start %5.3f   per race %5.2f"
           % (a["per_100cl"], a["per_100cl_l2"], a["per_start"], a["per_race"]))
+    if a.get("strand"):
+        print("      OF WHICH STRANDINGS: %d excursions (%d lap2+) are a car that RETIRED within %.0f s - the"
+              " same failure as a retirement, counted twice." % (a["strand"], a["strand_l2"], STRAND_S))
+        print("      LAP2+ EXCLUDING STRANDINGS %6.2f per 100 car-laps - compare arms on BOTH, because a"
+              " stranding is a real off-track too." % a["per_100cl_l2_nostrand"])
     for r in a["races"]:
         print("        %-24s %2d laps  %3d cars  exc %2d (l2 %2d)  offs %3d"
               % (r["label"], r["laps"], r["cars"], r["exc"], r["exc_l2"], r["off"]))
