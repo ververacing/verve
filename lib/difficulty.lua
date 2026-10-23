@@ -125,11 +125,13 @@ local function compute(i)
         local rel = (mean > 0 and iniLevel > 0) and (iniLevel / mean) or 1.0
         return math.max(LEVEL_MIN, math.min(1.2, base * rel))
     end
-    -- outside career: THE SLIDER IS THE TRUTH (owner 2026-09-18). Content Manager writes a per-car AI level for every
-    -- opponent from an older slider value or a grid preset (Sochi: slider 80, per-car 97-104, so the field ran at 100).
-    -- The field runs at the slider; the per-car numbers only keep their relative spread around it. The one exception is
-    -- a grid whose per-car levels are DELIBERATELY spread (more than DELIB_SPREAD apart): that is someone hand-setting
-    -- opponents in the grid, and it is honoured as written.
+    -- outside career: THE SLIDER IS THE TRUTH (owner 2026-09-18, restated and widened 2026-10-22 as decision
+    -- 0042: "make sure that cars get set at what difficulty users put on that main slider"). Content Manager
+    -- writes a per-car AI level for every opponent from an older slider value or a grid preset (Sochi: slider
+    -- 80, per-car 97-104, so the field ran at 100). The field runs at the slider and the per-car numbers supply
+    -- the variation around it. **There is no longer any exemption for a widely-spread grid** - DELIB_SPREAD and
+    -- its "a hand-set grid is honoured as written" rule went with 0042, because that was one of the three paths
+    -- by which a player's slider was being ignored.
     -- (0042) NO SLIDER AT ALL - GT Life writes a per-car level for every opponent and no race-wide one, so
     -- Career.meterSource is 'per-car median'. Each car runs ITS OWN level exactly as written, at any spread,
     -- with no curve and no re-centring: there is no slider on screen to follow.

@@ -89,8 +89,11 @@ local DEFAULTS = {
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
     crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
-    careerCurve = true, shareData = false, strategy = true, raceStart = 'calm', sliderCurve = true, repairOnTrack = true,
+    careerCurve = true, shareData = false, strategy = true, raceStart = 'calm', sliderCurve = false, repairOnTrack = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
+    -- sliderCurve DEFAULT false since 0042 (owner 2026-10-22): THE SLIDER IS THE AI LEVEL. On, the slider is
+    -- read as lap-time steps, which mapped slider 80 to level 83 and slider 99 to 94 on a GT car. The schema
+    -- bump below turns it off once for installs that already stored `true`, or the decision never reaches them.
     timedFuel = true,    -- DEFAULT 0.14.6 (lib/fuel.lua): fuel a TIMED race's AI for the clock, stop AC's empty-tank pit loop
     paceAbs = true,      -- DEFAULT 0.14.8 (lib/drivers.lua D.PACE_ABS): a driver profile sets the car's pace outright
     ratingV2 = true,     -- DEFAULT 0.14.9; harness switch (lib/drivers.lua D.RATING_V2): real drivers rated as pros around a Veteran (owner 2026-09-29)
@@ -104,7 +107,7 @@ local S = ac.storage({
     enabled = true, controlGrip = true, humanVar = true, humanErrors = true,
     classPhys = true, racecraft = true, recovery = true, drsDiscipline = true,
     crashRepair = true, troubleSpots = true, raceFeed = false, showAdvanced = false,
-    careerCurve = true, shareData = false, strategy = true, raceStart = 'calm', sliderCurve = true, repairOnTrack = true,
+    careerCurve = true, shareData = false, strategy = true, raceStart = 'calm', sliderCurve = false, repairOnTrack = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     timedFuel = true,
     paceAbs = true,
@@ -116,6 +119,13 @@ local S = ac.storage({
 -- A/B showed crash repair is the single biggest thing Verve does). A stored "false" from an older install
 -- would silently keep them off, so bump them once.
 if (S.schema or 1) < 2 then S.crashRepair = true; S.troubleSpots = true; S.schema = 2 end
+-- 0042 (owner 2026-10-22): the main difficulty slider sets the AI level, so `sliderCurve` - which reads the
+-- slider as lap-time steps instead - defaults OFF. A stored `true` from any earlier install would silently keep
+-- the old mapping (slider 80 -> level 83 on a GT car), and the OWNER'S OWN config is one of those, so the
+-- decision would never reach the person who asked for it. Measured 2026-10-22: the validation race at
+-- --ai-level 80 applied 83 with the module default already flipped, because Verve.lua reassigns
+-- SLIDER_CURVE from the store every frame. Same shape as the 0.12 bump above. The option stays in the UI.
+if (S.schema or 1) < 3 then S.sliderCurve = false; S.schema = 3 end
 local drsCd = {}
 local G = {}
 for k in pairs(DEFAULTS) do G[k] = S[k] end
@@ -818,7 +828,7 @@ function script.windowMain()
     ui.newLine()
     ui.text('Options')
     toggle('Human errors', 'humanErrors', 'One visible mistake per driver every few laps: a late brake and lock-up, a missed apex, or a snap and lift. The rate follows pace, so a rookie errs every 2-3 laps, a midfielder every 4-5, a veteran every 9-15, and the quickest driver in a class less often still. Offs are rare and spins rarer. Formula, Prototype and Hypercar get half those off and spin odds, and on NASCAR and drift cars a mistake never becomes an off or a spin. Race sessions only, never the opening lap, never your own car.')
-    toggle('Difficulty slider in lap-time steps (90 = +5%, 80 = +10%)', 'sliderCurve', 'AC\'s own level scale is not linear: on race cars 90 is 2% slower than 100 but 80 is 17% slower, and below that the AI gets erratic. On, the slider means measured lap-time steps for the car class you are racing: 100 = expert pace, 90 = +5%, 80 = +10%, 70 = +15%. Off, the raw AC level. A grid whose opponents were hand-set to different levels is always honoured as written.')
+    toggle('Difficulty slider in lap-time steps (90 = +5%, 80 = +10%)', 'sliderCurve', 'AC\'s own level scale is not linear: on race cars 90 is 2% slower than 100 but 80 is 17% slower, and below that the AI gets erratic. On, the slider means measured lap-time steps for the car class you are racing: 100 = expert pace, 90 = +5%, 80 = +10%, 70 = +15%. Off, the raw AC level. Since 0042 the field always follows the slider: a grid whose opponents sit at other levels keeps its spacing and is shifted so the fastest car is at the slider.')
     toggle('Career: scale difficulty across the series', 'careerCurve', 'In AC career events the difficulty meter picks a pace band and each event moves you through it: soft first series, a real fight at the end, never leaving the band. Off = every career event at the meter\'s flat level. (Outside career the meter always applies as set.)')
     do
         local names = { calm = 'Calm', racing = 'Racing', stock = 'Stock' }

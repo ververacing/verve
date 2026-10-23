@@ -754,15 +754,33 @@ def race_state(diag):
         return None
 
 
-def force_ai_level(ini, level):
-    """Overwrite AI_LEVEL on every CAR_n (n >= 1) and in [RACE]: the calibration runs need one known level."""
-    if not level:
+def force_ai_level(ini, level, car_level=0, car_spread=0):
+    """Overwrite AI_LEVEL in [RACE] and on every CAR_n (n >= 1): the calibration runs need one known level.
+
+    `car_level` writes a DIFFERENT number on the CAR_n entries than in [RACE], which is the only way to test
+    what a launcher actually does: Content Manager writes a per-car level for every opponent from an older
+    slider value or a grid preset, so [RACE] 80 with CAR_n 100 is the owner's own race (decision 0042). With
+    car_level 0 the behaviour is exactly as before - one level everywhere.
+
+    `car_spread` then fans the CAR_n values out by +-spread/2 across the grid, so a VARIED launcher grid can be
+    tested too (the shift rule keeps the spacing and moves the fastest car to the slider). Without this every
+    harness race is a flat grid and the non-identity branch of the shift never runs in the game at all.
+    """
+    if not level and not car_level:
         return
-    ini.set("RACE", "AI_LEVEL", str(int(level)))
+    if level:
+        ini.set("RACE", "AI_LEVEL", str(int(level)))
+    base = int(car_level or level)
+    ks = []
     k = 1
     while ini.has_section(f"CAR_{k}"):
-        ini.set(f"CAR_{k}", "AI_LEVEL", str(int(level)))
+        ks.append(k)
         k += 1
+    for n, k in enumerate(ks):
+        v = base
+        if car_spread and len(ks) > 1:
+            v = base - int(round(car_spread * (len(ks) - 1 - n) / float(len(ks) - 1)))
+        ini.set(f"CAR_{k}", "AI_LEVEL", str(int(v)))
 
 
 RACE_OUT = os.path.join(DOCS, "out", "race_out.json")
@@ -1173,7 +1191,8 @@ def run_once(args, arm, run_idx):
     if pinned:
         print('  ' + pinned)
     ini, ncars = build_race_ini(args, backup if args.grid is None else RACE_INI)
-    force_ai_level(ini, getattr(args, "ai_level", 0))
+    force_ai_level(ini, getattr(args, "ai_level", 0), getattr(args, "car_level", 0),
+                   getattr(args, "car_spread", 0))
     if ini.has_section("CAR_0"):
         ini.set("CAR_0", "DRIVER_NAME", player_name(arm.get("profiles"), ncars))   # never the owner's own name
     write_ini(ini, RACE_INI)
@@ -1512,6 +1531,8 @@ def main():
     ap.add_argument("--ab", nargs=2, metavar=("A.json", "B.json"), help="two arm files; runs alternate A,B,A,B...")
     ap.add_argument("--lap-budget-s", type=int, default=150, help="seconds allowed per lap before a run is killed")
     ap.add_argument("--ai-level", type=int, default=0, help="force every AI car's AI_LEVEL (career events and --models grids alike); 0 = as configured")
+    ap.add_argument("--car-level", type=int, default=0, help="write THIS on the CAR_n entries while [RACE] keeps --ai-level: tests what a launcher does (slider 80, per-car 100). 0 = same as --ai-level")
+    ap.add_argument("--car-spread", type=int, default=0, help="fan the CAR_n levels out by this many points across the grid, slowest first; needs --car-level or --ai-level")
     ap.add_argument("--base148", action="store_true", help="a build cut before v0.14.8 (wild0151, dev0152) run on the v0.14.8 defaults: merges "
                     "AGGR_BASE_FIX into --racecraft, GATE_FAIL_RETRY into --recovery and paceAbs into --settings (a key given explicitly wins); "
                     "the merged values land in results.csv's arm column")
