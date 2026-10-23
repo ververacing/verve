@@ -49,14 +49,24 @@ def _args_only(cmd):
 
 
 def races():
-    """How many races are actually running. The only trustworthy count: acs.exe is one process per race, with no
-    shim, no subshell, and no way for this script to match itself."""
-    try:
-        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq acs.exe"],
-                             capture_output=True, text=True, timeout=30).stdout
-    except Exception:  # noqa: BLE001
-        return -1
-    return out.lower().count("acs.exe")
+    """How many races are actually running. The only trustworthy count: one game process per race, with no
+    shim, no subshell, and no way for this script to match itself.
+
+    BOTH EXECUTABLES ARE COUNTED (2026-10-23). The install ships `acs.exe` AND `acs_x86.exe`, and an exact
+    IMAGENAME filter on the first is blind to the second - so a 32-bit launch would read as "no race running".
+    That blind spot was never hit by the harness, which launches the 64-bit exe, but this count is also used to
+    decide whether the OWNER is mid-race before touching the app folder or starting heavy reads, and being wrong
+    about that costs them a race rather than costing us a row. `acs_x86.exe` does not contain the substring
+    `acs.exe`, so the two counts cannot double-count each other."""
+    n = 0
+    for img in ("acs.exe", "acs_x86.exe"):
+        try:
+            out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq %s" % img],
+                                 capture_output=True, text=True, timeout=30).stdout
+        except Exception:  # noqa: BLE001
+            return -1
+        n += out.lower().count(img)
+    return n
 
 
 def queues():
