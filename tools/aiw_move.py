@@ -51,6 +51,15 @@ def games_running():
     return n
 
 
+# The mutating path calls GAMES_RUNNING, not games_running, SO THE SELFTEST CAN SUBSTITUTE IT AND EXERCISE THE
+# GUARD AGAINST A FIXTURE. On 2026-10-23 I "tested" the guard by invoking --out against the REAL AIWhisperer
+# folder and reporting that it refused. Two unrelated guards happened to stand in the way (a live race and a
+# missing manifest); had either been absent, or had games_running() undercounted - exactly the defect fixed in
+# procs.py hours earlier, where an exact IMAGENAME filter was blind to acs_x86.exe - that call would have moved
+# the owner's app with no authorisation. A guard is tested on a fixture or it is not tested.
+GAMES_RUNNING = games_running
+
+
 def hash_tree(root):
     """-> {relative_path: sha256}. Sorted, so two runs are comparable line for line."""
     out = {}
@@ -123,7 +132,7 @@ def compare(where):
 
 
 def move(out):
-    n = games_running()
+    n = GAMES_RUNNING()
     if n != 0:
         print("REFUSING: %d game process(es) running. Close the game first." % n)
         return 2
@@ -188,10 +197,42 @@ def selftest():
         os.remove(os.path.join(root, "sub", "b.lua"))
         if "sub/b.lua" in hash_tree(root):
             print("SELFTEST FAIL: a removed file still appears"); ok = False
-        # the guards: --out must refuse without a manifest, and both must refuse with the game up
-        if os.path.exists(MANIFEST):
-            print("  (note: a manifest already exists at %s)" % MANIFEST)
-        print("  guard check: games_running() = %d (both --out and --back refuse unless 0)" % games_running())
+        # THE GUARDS, EXERCISED ON A FIXTURE - never by calling the real move on the owner's real folder.
+        # Every path the mutating code touches is redirected into the temp tree first.
+        global APP, PARKED_ROOT, MANIFEST, GAMES_RUNNING
+        real = (APP, PARKED_ROOT, MANIFEST, GAMES_RUNNING)
+        try:
+            APP = os.path.join(d, "apps", "lua", "AIWhisperer")
+            PARKED_ROOT = os.path.join(d, "_verve_parked")
+            MANIFEST = os.path.join(d, "manifest.json")
+            os.makedirs(APP)
+            io.open(os.path.join(APP, "x.lua"), "w", encoding="utf-8").write("return 1\n")
+
+            GAMES_RUNNING = lambda: 1                                          # noqa: E731
+            if move(out=True) != 2 or not os.path.isdir(APP):
+                print("SELFTEST FAIL: --out did not refuse with a game running"); ok = False
+            else:
+                print("  guard OK (fixture): --out refused with a game running, folder untouched")
+
+            GAMES_RUNNING = lambda: 0                                          # noqa: E731
+            if move(out=True) != 2 or not os.path.isdir(APP):
+                print("SELFTEST FAIL: --out did not refuse with no manifest"); ok = False
+            else:
+                print("  guard OK (fixture): --out refused with no manifest, folder untouched")
+
+            # and with both satisfied it must ACTUALLY move, or the guards are the only thing that works
+            record()
+            if move(out=True) != 0 or os.path.isdir(APP) or not glob_parked():
+                print("SELFTEST FAIL: --out did not move with both guards satisfied"); ok = False
+            else:
+                print("  positive control OK (fixture): --out moved the tree when allowed")
+                if move(out=False) != 0 or not os.path.isdir(APP):
+                    print("SELFTEST FAIL: --back did not restore the fixture"); ok = False
+                else:
+                    print("  positive control OK (fixture): --back restored it and verified identical")
+        finally:
+            APP, PARKED_ROOT, MANIFEST, GAMES_RUNNING = real
+        print("  live guard state, read only: games_running() = %d" % games_running())
     finally:
         shutil.rmtree(d, ignore_errors=True)
     print("aiw_move selftest: " + ("PASSED" if ok else "FAILED"))
