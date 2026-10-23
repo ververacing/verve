@@ -727,11 +727,18 @@ function D.applyPace(i, base)
             -- is above the `base` of one of them, which no branch here can produce - so the 8 s snapshot cannot
             -- say what did. `prev` non-nil means this is not the first write, which is the rare case (2 writes in
             -- 782 car-samples). Bounded at 40 lines a session so a legitimate ramp can never flood the log.
-            if prev and (D.lvlLogN or 0) < 40 then
+            -- (2026-10-23) THE FIRST WRITE PER CAR IS LOGGED TOO, and the `prev and` guard that used to skip it
+            -- is gone, because its absence made the log unreadable in the one case that matters. A quali session
+            -- followed by a race reverts 11 of 19 cars to race.ini's level 8 s in (LESSONS dab3a44) and produced
+            -- ZERO lvlwrite lines - which is equally consistent with "Verve never wrote again" and with "Verve
+            -- wrote once after D.reset cleared lastApplied, and AC's write landed last". Those need different
+            -- fixes, and no artefact we keep could tell them apart. `prev` nil now prints as -1, and `t` places
+            -- every write against the session-change line in the same log.
+            if (D.lvlLogN or 0) < 60 then                 -- 60, not 40: a 20-car grid spends 20 on first writes
                 D.lvlLogN = (D.lvlLogN or 0) + 1
                 pcall(ac.log, string.format(
-                    'Verve lvlwrite car %d: %.3f -> %.3f  base %.3f  en %s  pace %.2f  wild %s  fmp %.2f  abs %s',
-                    i, prev, lvl, base or -1, tostring(Difficulty.ENABLED), (st and st.pace) or -1,
+                    'Verve lvlwrite car %d: %.3f -> %.3f  t %.1f  base %.3f  en %s  pace %.2f  wild %s  fmp %.2f  abs %s',
+                    i, prev or -1, lvl, os.clock(), base or -1, tostring(Difficulty.ENABLED), (st and st.pace) or -1,
                     tostring((st and st.wild) or false), fieldMaxPace or -1, tostring(D.PACE_ABS)))
             end
             physics.setAILevel(i, lvl); lastApplied[i] = lvl
