@@ -44,6 +44,35 @@ def cars_in(path):
         return 0
 
 
+def real_carlaps(path):
+    """(car-laps actually driven, lap-2+ of them) from the race_end standings, or (None, None).
+
+    `excursions.classify()` reports car-laps as `maxlap * cars` - the leader's distance times the grid size -
+    which is NOMINAL: it counts a car that retired on lap 0 as having driven the full race. That matters here
+    because the whole premise of the spec's bracket is that a per-car-lap rate is pushed UP for an arm that
+    loses cars while a per-race count is pushed DOWN. With a nominal denominator the first half of that is
+    simply false: the rate does not move at all.
+
+    Caught because all six F2 arms reported exactly 540 car-laps while nine cars had retired in the OFF arms.
+    The feed's race_end block carries each car's own lap count, so the real figure is already on disk.
+    """
+    laps = None
+    try:
+        with io.open(path, encoding="utf-8", errors="replace") as fh:
+            for ln in fh:
+                if '"race_end"' in ln:
+                    try:
+                        res = json.loads(ln).get("results") or []
+                    except ValueError:
+                        return None, None
+                    laps = [int(r.get("laps") or 0) for r in res if isinstance(r, dict)]
+    except OSError:
+        return None, None
+    if not laps:
+        return None, None
+    return sum(laps), sum(max(0, l - 2) for l in laps)
+
+
 def arm(track, prefix):
     """-> dict of pooled figures for one arm, plus the per-race rows and the exclusions, all named."""
     cands, byst = [], {}
@@ -57,7 +86,7 @@ def arm(track, prefix):
             continue
         cands.append({"lab": lab, "stem": stem, "laps": c["maxlap"], "fin": X.feed_finished(p),
                       "live": X.feed_live(p)})
-        byst[stem] = (lab, c, cars_in(p))
+        byst[stem] = (lab, c, cars_in(p), p)
     # the ERA test is per DAY, not per label: a race still on track is the only attempt at its own label, so a
     # sibling test cannot see it (this arm pooled a 3-lap live race before the fix), and one query spans eras.
     era = X.days_with_race_end(track, set(c["stem"][:8] for c in cands))
@@ -66,18 +95,27 @@ def arm(track, prefix):
     keep, dropped, unknown = X.pick(cands)
     t = collections.Counter()
     races = []
+    nominal_used = 0
     for _, stem, _ in keep:
-        lab, c, cars = byst[stem]
+        lab, c, cars, path = byst[stem]
         ea = sum(c["exc_abs"].values())
         band = sum(v for k, v in c["exc_abs"].items() if abs(k - BAND_OF_INTEREST) < 0.005)
+        # ACTUAL car-laps where the feed records them, nominal only as a fallback - and the fallback is counted
+        # and reported, never silent, because the two differ by exactly the survival gap under test.
+        rcl, rcl2 = real_carlaps(path)
+        if rcl is None:
+            rcl, rcl2 = c["carlaps"], c["carlaps_l2"]
+            nominal_used += 1
         races.append({"label": lab, "laps": c["maxlap"], "cars": cars, "exc": ea, "exc_l2": c["abs_l2"],
-                      "band": band, "carlaps": c["carlaps"], "carlaps_l2": c["carlaps_l2"], "off": c["n_off"]})
+                      "band": band, "carlaps": rcl, "carlaps_l2": rcl2, "off": c["n_off"],
+                      "nominal": c["carlaps"]})
         t["exc"] += ea; t["exc_l2"] += c["abs_l2"]; t["band"] += band
-        t["carlaps"] += c["carlaps"]; t["carlaps_l2"] += c["carlaps_l2"]; t["off"] += c["n_off"]
-        t["starts"] += cars
+        t["carlaps"] += rcl; t["carlaps_l2"] += rcl2; t["off"] += c["n_off"]
+        t["nominal"] += c["carlaps"]; t["starts"] += cars
     return {"prefix": prefix, "n": len(races), "races": races, "dropped": dropped, "unknown": unknown,
             "exc": t["exc"], "exc_l2": t["exc_l2"], "band": t["band"], "off": t["off"],
             "carlaps": t["carlaps"], "carlaps_l2": t["carlaps_l2"], "starts": t["starts"],
+            "nominal": t["nominal"], "nominal_used": nominal_used,
             "per_100cl": 100.0 * t["exc"] / max(t["carlaps"], 1),
             "per_100cl_l2": 100.0 * t["exc_l2"] / max(t["carlaps_l2"], 1),
             "per_start": float(t["exc"]) / max(t["starts"], 1),
@@ -104,8 +142,14 @@ def bracket(a, b):
 
 
 def show(a):
-    print("  %-18s n=%d  %5d car-laps (%5d lap2+), %3d starts" % (a["prefix"], a["n"], a["carlaps"],
-                                                                  a["carlaps_l2"], a["starts"]))
+    lost = a.get("nominal", 0) - a["carlaps"]
+    tag = ""
+    if lost > 0:
+        tag = "  (%d car-laps LOST to retirements against the nominal %d)" % (lost, a["nominal"])
+    if a.get("nominal_used"):
+        tag += "  [%d race(s) had no race_end: nominal denominator used for those]" % a["nominal_used"]
+    print("  %-18s n=%d  %5d car-laps ACTUAL (%5d lap2+), %3d starts%s"
+          % (a["prefix"], a["n"], a["carlaps"], a["carlaps_l2"], a["starts"], tag))
     if a["n"] == 0:
         print("      NO RACES - nothing to report for this arm")
         return

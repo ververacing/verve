@@ -64,11 +64,18 @@ def label_map():
 
 
 def scan(path):
-    """-> (finished, [retirement dicts]) or (None, None) if the feed is unusable."""
+    """-> (finished, [retirement dicts], race distance) or (None, None, 0) if the feed is unusable.
+
+    The DISTANCE is the leader's lap high-water, and it is returned because the caller needs it to rank the
+    attempts at one label. Deriving it from the retirement records instead - which the first version of the
+    pick() migration did - scores a clean race as 0 laps, so a complete race with nobody retiring loses to a
+    3-lap fragment in which one car retired, and the fragment is the one kept.
+    """
     rets, offs, stucks = [], collections.defaultdict(list), collections.defaultdict(list)
     dmg_at = collections.defaultdict(list)       # (t, dmg) per car
     finished = False
     n_state = 0
+    maxlap = 0
     with io.open(path, encoding="utf-8", errors="replace") as f:
         for ln in f:
             ln = ln.strip()
@@ -81,6 +88,10 @@ def scan(path):
             t = d.get("type")
             if t == "state":
                 n_state += 1
+                try:
+                    maxlap = max(maxlap, int(d.get("leader_lap") or 0))
+                except (TypeError, ValueError):
+                    pass
                 for c in (d.get("cars") or []):
                     if isinstance(c.get("i"), int) and isinstance(c.get("dmg"), (int, float)):
                         dmg_at[c["i"]].append((d.get("t") or 0.0, c["dmg"]))
@@ -94,8 +105,14 @@ def scan(path):
                     stucks[d["car"]].append(d.get("t") or 0.0)
             elif t == "race_end":
                 finished = True
+                for r in (d.get("results") or []):
+                    if isinstance(r, dict):
+                        try:
+                            maxlap = max(maxlap, int(r.get("laps") or 0))
+                        except (TypeError, ValueError):
+                            pass
     if n_state < 5:
-        return None, None
+        return None, None, 0
 
     out = []
     for r in rets:
@@ -117,7 +134,7 @@ def scan(path):
             "dmg_at_retire": dmgs[-1] if dmgs else None,
             "dmg_max_before": max(dmgs) if dmgs else None,
         })
-    return finished, out
+    return finished, out, maxlap
 
 
 def selftest():
@@ -144,7 +161,7 @@ def selftest():
         {"type": "retire", "t": 5.0, "car": 1, "lap": 0, "reason": "ac"},
         {"type": "race_end", "results": []},
     ]
-    fin, r = scan(feed(lines))
+    fin, r, _ = scan(feed(lines))
     if not r or len(r) != 1:
         print("SELFTEST FAIL: expected exactly one retirement, got %r" % (r,)); ok = False
     else:
@@ -158,7 +175,7 @@ def selftest():
 
     # 2. no off_track at all -> None, NOT 0, so "no event" cannot read as "0 seconds ago"
     lines2 = list(base) + [{"type": "retire", "t": 5.0, "car": 1, "lap": 0, "reason": "ac"}]
-    fin2, r2 = scan(feed(lines2))
+    fin2, r2, _ = scan(feed(lines2))
     if not r2 or r2[0]["s_since_off"] is not None or r2[0]["off_before"] != 0:
         print("SELFTEST FAIL: with no off_track, s_since_off must be None and off_before 0, got %r"
               % (r2 and r2[0])); ok = False
@@ -168,7 +185,7 @@ def selftest():
     # 3. the reason is taken from the feed, never re-derived from damage
     lines3 = list(base) + [{"type": "retire", "t": 5.0, "car": 1, "lap": 0, "reason": "hopeless"},
                            {"type": "race_end", "results": []}]
-    _, r3 = scan(feed(lines3))
+    _, r3, _ = scan(feed(lines3))
     if not r3 or r3[0]["reason"] != "hopeless":
         print("SELFTEST FAIL: reason must come from the feed verbatim, got %r" % (r3 and r3[0].get("reason")))
         ok = False
@@ -195,18 +212,34 @@ def main():
         if a == "--arms" and i + 1 < len(sys.argv):
             arms = sys.argv[i + 1].split(",")
 
+    # SELECTION IS SHARED, NOT LOCAL. This tool used to decide "finished" by itself, as "the feed carries a
+    # race_end" - the rule disproved three times on 2026-10-22: race_end is written at teardown, so a killed
+    # race carries one, and no feed before 29 Sep has one at all. It printed "STILL ON TRACK" for a race that
+    # died hours earlier and would have pooled a 5-lap fragment into these retirement counts. excursions.pick()
+    # is the one definition of which races a cell may pool; cell_score.py uses it too.
+    import excursions as X
     labs = label_map()
-    races, live = [], []
+    cands, byst = [], {}
     for p in paths.track_feeds(track):
-        lab = labs.get(os.path.basename(p)[:15], os.path.basename(p)[:15])
-        if want and want not in lab:
+        stem = os.path.basename(p)[:15]
+        lab = labs.get(stem) or X.label_for(stem)
+        if lab == X.NO_LABEL or (want and want not in lab):
             continue
-        fin, rr = scan(p)
+        fin, rr, mx = scan(p)
         if rr is None:
             continue
-        (races if fin else live).append((lab, rr))
-    if live:
-        print("STILL ON TRACK, excluded (no race_end): %s" % ", ".join(l for l, _ in live))
+        cands.append({"lab": lab, "stem": stem, "laps": mx, "fin": fin, "live": X.feed_live(p)})
+        byst[stem] = (lab, rr)
+    era = X.days_with_race_end(track, set(c["stem"][:8] for c in cands))
+    for c in cands:
+        c["era"] = era.get(c["stem"][:8], False)
+    keep, dropped, unknown = X.pick(cands)
+    races = [byst[s] for _, s, _ in keep]
+    for reason, items in dropped.items():
+        print("EXCLUDED (%d) - %s: %s" % (len(items), reason, ", ".join(sorted(items))))
+    if unknown:
+        print("KEPT with no race_end, and none that day wrote one (pre-29-Sep or wholly killed): %s"
+              % ", ".join(sorted(unknown)))
     if not races:
         print("retire_why: no finished %s race matched %s" % (track, want or "(any)"))
         return 0
@@ -217,7 +250,7 @@ def main():
     print("%-20s %4s %4s %10s %7s %9s %7s %10s %8s"
           % ("label", "car", "lap", "reason", "offs<=t", "s_since", "stucks", "s_since", "dmg@ret"))
     tally = collections.Counter()
-    for lab, rr in sorted(races):
+    for lab, rr in sorted(races, key=lambda x: x[0]):   # the label ALONE: dicts are not orderable
         if not rr:
             print("  %-18s %s" % (lab[:18], "- no retirement -"))
             continue            # the race is counted by len(races). This used to register a TUPLE key in the
