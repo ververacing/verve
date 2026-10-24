@@ -28,6 +28,10 @@ function W.update(dt)
     local ok, sim = pcall(ac.getSim); if not ok or not sim then return end
     local now = os.clock()
     local lvlC, aggC = 0, 0
+    -- (2026-10-23) WHICH cars, not just how many. The count alone cost a day: 15 race-only races each flagged
+    -- exactly ONE car on aggression and no artefact we keep could say which, because no diag survived any of
+    -- them (LESSONS abff7a4). These are function locals, so they add no upvalue candidates.
+    local lvlIdx, aggIdx = {}, {}
     for i = 0, sim.carsCount - 1 do
         local c = ac.getCar(i)
         if c and c.isAIControlled then
@@ -47,8 +51,16 @@ function W.update(dt)
                 if wl and type(c.aiLevel) == 'number' and c.aiLevel >= 0 and math.abs(c.aiLevel - wl) > W.TOL_LVL then s.lvlBad = s.lvlBad + 1 end
                 if wa and type(c.aiAggression) == 'number' and c.aiAggression >= 0 and math.abs(c.aiAggression - wa) > W.TOL_AGG then s.aggBad = s.aggBad + 1 end
             end
-            if s.lvlVerdict then lvlC = lvlC + 1 end
-            if s.aggVerdict then aggC = aggC + 1 end
+            -- the pair is this frame's actual against what we last applied: the verdict is a 5 s window, so these
+            -- are a sample of the mismatch rather than its cause, which is why they are logged and not reported
+            if s.lvlVerdict then
+                lvlC = lvlC + 1
+                lvlIdx[#lvlIdx + 1] = string.format('%d(is %.3f want %.3f)', i, c.aiLevel or -1, wl or -1)
+            end
+            if s.aggVerdict then
+                aggC = aggC + 1
+                aggIdx[#aggIdx + 1] = string.format('%d(is %.3f want %.3f)', i, c.aiAggression or -1, wa or -1)
+            end
         end
     end
     W.conflicts.level, W.conflicts.aggr = lvlC, aggC
@@ -57,6 +69,13 @@ function W.update(dt)
         if now - lastLog > 60 then
             lastLog = now
             pcall(function() ac.log('Verve watch: ' .. W.detail) end)
+            -- A SECOND LINE, deliberately: the line above is left BYTE-IDENTICAL because tools/watch_tally.py
+            -- groups four weeks and 1740 logs by its shape, and appending a car list would fork that shape into
+            -- one per grid size. New information goes in a new line, never into a line history depends on.
+            pcall(function()
+                if #lvlIdx > 0 then ac.log('Verve watchcars level: ' .. table.concat(lvlIdx, ' ')) end
+                if #aggIdx > 0 then ac.log('Verve watchcars aggr: ' .. table.concat(aggIdx, ' ')) end
+            end)
         end
     else
         W.detail = ''
