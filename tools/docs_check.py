@@ -180,18 +180,50 @@ if os.path.isdir(os.path.join(DOCS, ".git")):
         flags.append("docs/ ALSO has had no commit in over 24 h - the daily docs commit was missed")
 
 # 6. the living documents are versioned AND committed
+# A HARDCODED LIST WAS THE DEFECT (2026-10-23): this check passed "living documents tracked and committed"
+# for months while TWENTY-SIX other files in racecraft/ sat in no git at all - coverage.md, the state_log
+# archives CLAUDE.md points readers at, and both csp_user_config_record files, which are the baselines the
+# owner's machine gets verified against. A list you have to remember to extend is not a check. So: the five
+# named files stay named (they carry extra rules elsewhere), and EVERY .md in racecraft/ and docs/ must be
+# tracked, discovered rather than listed.
 LIVING = ["racecraft/state.md", "racecraft/backlog.md", "racecraft/reality.md",
           "requests_for_racecraft.md", "requests_for_broadcast.md"]
+
+
+def _desk_markdown(desk):
+    """Every desk document that must have history, found on disk rather than from a list."""
+    out = []
+    for sub in ("racecraft", "docs"):
+        d = os.path.join(desk, sub)
+        if not os.path.isdir(d):
+            continue
+        for name in sorted(os.listdir(d)):
+            if name.endswith(".md"):
+                out.append(sub + "/" + name)
+    return out
 desk_top = git("rev-parse", "--show-toplevel", cwd=DESK).strip()
 if not desk_top:
     flags.append("verve_desk is NOT a git repo - state.md and the other living documents have no history at all")
 else:
-    untracked = [f for f in LIVING
-                 if os.path.exists(os.path.join(DESK, f))
-                 and subprocess.run(["git", "ls-files", "--error-unmatch", f], cwd=DESK,
-                                    capture_output=True, text=True).returncode != 0]
+    # docs/ IS ITS OWN REPO (its own git, synced to PC #2, never in the public repo), so a file under docs/
+    # must be asked about in THAT repo. My first version of this check asked the desk repo about all of them
+    # and promptly reported four tracked files as untracked - which is the tool failing the way rule 4 wants
+    # it to, before the output was believed. Each path is checked where its history actually lives.
+    def _tracked(rel):
+        if rel.startswith("docs/"):
+            cwd, arg = os.path.join(DESK, "docs"), rel[len("docs/"):]
+        else:
+            cwd, arg = DESK, rel
+        return subprocess.run(["git", "ls-files", "--error-unmatch", arg], cwd=cwd,
+                              capture_output=True, text=True).returncode == 0
+
+    must_track = LIVING + [f for f in _desk_markdown(DESK) if f not in LIVING]
+    untracked = [f for f in must_track
+                 if os.path.exists(os.path.join(DESK, f)) and not _tracked(f)]
     if untracked:
-        flags.append("living documents in NO git: " + ", ".join(untracked))
+        shown = ", ".join(untracked[:6]) + ("" if len(untracked) <= 6 else " (+%d more)" % (len(untracked) - 6))
+        flags.append("desk documents in NO git (%d): %s - `git add -f` them; /racecraft/* is gitignored"
+                     % (len(untracked), shown))
     dirty = [l[3:].strip() for l in git("status", "--porcelain", cwd=DESK).splitlines()
              if l[3:].strip() in LIVING]
     if dirty:
