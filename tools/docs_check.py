@@ -20,6 +20,7 @@ The 2026-09-28 docs set drifted for 12 days because nothing noticed. This notice
     python tools/docs_check.py --selftest    # check 7 against fixtures, including the real 5-day gap
 Exit code 0 = current, 1 = something to fix (the hourly check fixes it before anything else).
 """
+import io
 import json
 import os
 import re
@@ -118,6 +119,7 @@ if "--selftest" in sys.argv:
     sys.exit(selftest())
 
 flags = []
+notices = []   # things to SEE, not faults to fix: they must never block the hourly routine
 
 # 1. new switches with no status
 try:
@@ -190,15 +192,46 @@ LIVING = ["racecraft/state.md", "racecraft/backlog.md", "racecraft/reality.md",
           "requests_for_racecraft.md", "requests_for_broadcast.md"]
 
 
-def _desk_markdown(desk):
-    """Every desk document that must have history, found on disk rather than from a list."""
+def _whitelisted(desk):
+    """Paths the desk .gitignore CLAIMS to track, read from its own `!/...` lines.
+
+    (2026-10-23) The first version of this asked "is every .md under racecraft/ and docs/ tracked?" and told me
+    to `git add -f` whatever was not. That advice was WRONG and I had just finished undoing the damage of
+    following it: the desk .gitignore ignores everything and whitelists BY HAND, with comments explaining each
+    entry, and two files are excluded ON PURPOSE because they carry a real email address and absolute paths. A
+    blanket add put the owner's real first name into the repo sixteen times. So the question is not "is
+    everything tracked" - it is "is everything the whitelist PROMISES actually tracked", and the whitelist is
+    the single source of truth rather than a second list kept here.
+    """
     out = []
-    for sub in ("racecraft", "docs"):
+    gi = os.path.join(desk, ".gitignore")
+    if not os.path.exists(gi):
+        return out
+    with io.open(gi, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line.startswith("!/") or line.endswith("/"):
+                continue
+            rel = line[2:]
+            if rel.endswith(".md") or rel.endswith(".jsonl") or rel.endswith(".txt"):
+                out.append(rel)
+    return out
+
+
+def _undecided(desk, whitelisted):
+    """Documents on the desk that the whitelist says nothing about - a NOTICE, never a drift error.
+
+    A new document nobody has made a decision about should be visible, but it is not a fault: the decision may
+    well be "leave it out". Printing it as drift would block the hourly routine forever on files I chose to
+    exclude, which is how a check gets ignored.
+    """
+    out = []
+    for sub in ("racecraft",):
         d = os.path.join(desk, sub)
         if not os.path.isdir(d):
             continue
         for name in sorted(os.listdir(d)):
-            if name.endswith(".md"):
+            if name.endswith(".md") and (sub + "/" + name) not in whitelisted:
                 out.append(sub + "/" + name)
     return out
 desk_top = git("rev-parse", "--show-toplevel", cwd=DESK).strip()
@@ -217,13 +250,20 @@ else:
         return subprocess.run(["git", "ls-files", "--error-unmatch", arg], cwd=cwd,
                               capture_output=True, text=True).returncode == 0
 
-    must_track = LIVING + [f for f in _desk_markdown(DESK) if f not in LIVING]
+    wl = _whitelisted(DESK)
+    must_track = LIVING + [f for f in wl if f not in LIVING]
     untracked = [f for f in must_track
                  if os.path.exists(os.path.join(DESK, f)) and not _tracked(f)]
     if untracked:
         shown = ", ".join(untracked[:6]) + ("" if len(untracked) <= 6 else " (+%d more)" % (len(untracked) - 6))
-        flags.append("desk documents in NO git (%d): %s - `git add -f` them; /racecraft/* is gitignored"
+        flags.append("the .gitignore whitelists these but git does not have them (%d): %s - `git add -f` them"
                      % (len(untracked), shown))
+    undecided = _undecided(DESK, wl)
+    if undecided:
+        notices.append("%d racecraft document(s) the whitelist says nothing about - decide each ON ITS CONTENT "
+                       "(a real name or a work email means LEAVE IT OUT; .gitignore's comments carry the "
+                       "reasons): %s%s" % (len(undecided), ", ".join(os.path.basename(f) for f in undecided[:4]),
+                                           "" if len(undecided) <= 4 else " and %d more" % (len(undecided) - 4)))
     dirty = [l[3:].strip() for l in git("status", "--porcelain", cwd=DESK).splitlines()
              if l[3:].strip() in LIVING]
     if dirty:
@@ -232,6 +272,9 @@ else:
 
 # 7. the morning email reached the desk (see nightly_flags; needs desk_top from check 6)
 flags += nightly_flags(os.path.join(DESK, "nightly"), time.time(), desk_top, DESK)
+
+for _n in notices:
+    print("docs notice: " + _n)
 
 if flags:
     print("DOCS DRIFT - fix before anything else:")
