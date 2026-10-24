@@ -1274,7 +1274,7 @@ local evalBody = function()
             -- reactive pass above. Skill- and difficulty-gated inside; nil = no opinion.
             local ov = Strategy.evaluate(i, { dt = dt, gapA = gapA, spd = spd, aheadSpd = aheadSpd, aheadIdx = aheadIdx,
                 prog = progZ, dLat = dLat, myLat = myLat, wide = wide, baseA = baseA, prof = prof, classKey = classKey,
-                off = off, passGap = K.PASS_GAP, attackGap = attackGap, isOval = R.isOval, lap = myLap, crowd = crowd, lapped = lappedAhead,
+                off = off, passGap = K.PASS_GAP, attackGap = attackGap, fasterMargin = K.FASTER_MARGIN, isOval = R.isOval, lap = myLap, crowd = crowd, lapped = lappedAhead,
                 wild = wild or nil, wLunge = R.WILD_LUNGE * (wm > 0 and R.WILD_TILT_LUNGE or 1), wCool = R.WILD_COOL, wReach = R.WILD_REACH, wDive0 = R.WILD_DIVE0 })
             if ov then
                 if ov.target ~= nil then target = ov.target end

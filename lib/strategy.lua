@@ -315,7 +315,14 @@ function S.evaluate(i, c)
     local eager = (0.35 + 0.65 * c.baseA) * S.EAGER_SCALE
     local roll = hash01(i * 13 + st.corners * 7 + math.floor(st.t0))   -- one roll per car-and-corner, not per frame
     local closeIn = c.gapA < c.passGap * 1.5 * (c.wild and c.wReach or 1)   -- (a wild car goes from further back: R.WILD_REACH)
-    local keepingUp = c.spd >= c.aheadSpd - 3
+    -- (2026-10-24) ONE SOURCE FOR THE SPEED MARGIN. This was a bare `- 3` duplicating K.FASTER_MARGIN (3.0) in
+    -- racecraft.lua, which drives the ATTACK gate, the DEFEND gate and the yield. `keepingUp` gates whether a
+    -- move is PICKED, so an A/B on the constant would have moved the attack state and NOT the pick - a
+    -- half-applied change inside one arm. No `or 3` fallback on purpose: the fallback value IS the literal being
+    -- removed, so it would leave a second hardcoded 3 here and re-create the divergence this closes. There is
+    -- exactly one Strategy.evaluate call site (racecraft.lua:1275) and evalBody is pcall-wrapped with R.errN
+    -- making faults loud, so a missing field fails visibly in testing instead of diverging silently.
+    local keepingUp = c.spd >= c.aheadSpd - c.fasterMargin
     local closing = c.spd >= c.aheadSpd + 2          -- a lunge needs a genuine run, not a parity dive
     local cl, mom = 0, 1                             -- (TIER_MODE 1) clumsiness and picking the moment, from the car's own skill
     if S.TIER_MODE == 1 then
