@@ -285,6 +285,14 @@ R.OL_LANES = true             -- DEFAULT 2026-09-18 (owner): regression suite pa
 R.CONCEDE = 0                 -- >0: a defender concedes the line to a tier-2 driver behind whose pace rating beats his by this much (A/B)
 R.ACX_LAP = 0                 -- ATTACK_CAUT_X applies from this lap on (0 = always; 2 = keep the opening laps as they are) (A/B)
 R.ATTACK_CAUT_X = 1.0         -- multiplier on the attack's negative caution (A/B; applied caution while attacking was 1.11 vs AC's 1.0)
+R.COMMIT_HOLD_X = 1.0         -- multiplier on K.COMMIT_HOLD for an ATTACK commitment only (defend untouched) (A/B 2026-10-24).
+                              -- Why: s59_lunget measured a lunge at 2.1-2.8 s (median; capped 2.2 s at LUNGE_OUT_T 1.3 and 3.5 s
+                              -- at 2.6) against a COMMIT_HOLD of 0.7 s, so the move outlives the state that authorises it by 3-4x.
+                              -- strategy.lua:1378 clears the move the frame `state ~= 1`, with how = 'left'. rawAttack needs BOTH
+                              -- gapA < attackGap AND spd >= aheadSpd - K.FASTER_MARGIN (3 km/h), and a car pulling off-line to lunge
+                              -- scrubs exactly that speed - so the lunge trips its own authorising condition. Doubling the commit
+                              -- window did not help and inverted the ending (base 2/3 'run', long 2/3 'left'), and a WINNING lunge is
+                              -- SHORTER than a losing one in both arms, which is what "the rope is not the constraint" looks like.
 R.PC_TS = 1.0                 -- trouble-spot + crash caution multiplier for a committed passer (PASS_COMMIT; A/B)
 R.PASS_ABORT = 0              -- >0: not this much alongside the car I'm passing by the braking zone -> tuck back in behind it (A/B)
 R.TOW_ATTACK = 0              -- >0: on a STRAIGHT (steer < 0.1), above TOW_MIN km/h, within TOW_M of the car ahead, with a pace edge of
@@ -1203,7 +1211,7 @@ local evalBody = function()
         -- the hold; otherwise coast the last decision until a wider release threshold clears it.
         local nowd = os.clock()
         if rawAttack then
-            commitState[i], commitUntil[i], state = 1, nowd + K.COMMIT_HOLD, 1
+            commitState[i], commitUntil[i], state = 1, nowd + K.COMMIT_HOLD * R.COMMIT_HOLD_X, 1   -- (R.COMMIT_HOLD_X) attack only
         elseif rawDefend then
             commitState[i], commitUntil[i], state = 2, nowd + K.COMMIT_HOLD, 2
         elseif commitState[i] and (commitUntil[i] or 0) > nowd then
