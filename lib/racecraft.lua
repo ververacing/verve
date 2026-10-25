@@ -285,6 +285,19 @@ R.OL_LANES = true             -- DEFAULT 2026-09-18 (owner): regression suite pa
 R.CONCEDE = 0                 -- >0: a defender concedes the line to a tier-2 driver behind whose pace rating beats his by this much (A/B)
 R.ACX_LAP = 0                 -- ATTACK_CAUT_X applies from this lap on (0 = always; 2 = keep the opening laps as they are) (A/B)
 R.ATTACK_CAUT_X = 1.0         -- multiplier on the attack's negative caution (A/B; applied caution while attacking was 1.11 vs AC's 1.0)
+R.FASTER_MARGIN_X = 1.0       -- multiplier on K.FASTER_MARGIN (3.0 km/h), the speed term in the attack gate (A/B
+                              -- 2026-10-24). 1.0 = today's behaviour exactly, so the default changes nothing.
+                              -- Why this lever: starclimb2 (16 Oct, n=5) found that at a REALISTIC pace edge
+                              -- (~1.2 s/lap realised) a faster car from P18 reaches about P6 and NEVER leads in 16
+                              -- laps, while the same car from P1 wins wire-to-wire - so PASSING, not pace, is the
+                              -- limit. The lunge analysis put all 256 'left' exits on the SPEED term:
+                              -- `gapA < attackGap and spd >= aheadSpd - K.FASTER_MARGIN`. A car that is slower than
+                              -- the one ahead by more than the margin never opens an attack at all, which is exactly
+                              -- the car trying to come through a field. Loosening it should let a quicker car start
+                              -- moves it currently cannot.
+                              -- APPLIED AT ALL FOUR READ SITES, deliberately: the attack gate, the defend gate, the
+                              -- yield, and the `fasterMargin` handed to strategy. Splitting it would leave attack and
+                              -- defend disagreeing about one concept, which is the divergence c16d4e7 closed.
 R.COMMIT_HOLD_X = 1.0         -- multiplier on K.COMMIT_HOLD for an ATTACK commitment only (defend untouched) (A/B 2026-10-24).
                               -- Why: s59_lunget measured a lunge at 2.1-2.8 s (median; capped 2.2 s at LUNGE_OUT_T 1.3 and 3.5 s
                               -- at 2.6) against a COMMIT_HOLD of 0.7 s, so the move outlives the state that authorises it by 3-4x.
@@ -1202,9 +1215,10 @@ local evalBody = function()
         local paceEdge = false   -- R.PASS_COMMIT: I am the clearly quicker driver and I'm committing to the pass
 
         -- raw instantaneous reads: is there a fight on right now?
-        local rawAttack = (gapA < attackGap and spd >= aheadSpd - K.FASTER_MARGIN)
+        local fasterM = K.FASTER_MARGIN * R.FASTER_MARGIN_X    -- one effective margin for all four uses below
+        local rawAttack = (gapA < attackGap and spd >= aheadSpd - fasterM)
         local behindLat = behindIdx >= 0 and latOf(ac.getCar(behindIdx).position) or 0
-        local rawDefend = (gapB < defendGap and behindSpd > spd - K.FASTER_MARGIN
+        local rawDefend = (gapB < defendGap and behindSpd > spd - fasterM
                            and math.abs(behindLat) < K.OFFLINE_MAX)   -- ignore a car miles off-line
 
         -- resolve the COMMITTED state (see COMMIT_* notes): a genuine read (re)commits and refreshes
@@ -1274,7 +1288,7 @@ local evalBody = function()
             -- reactive pass above. Skill- and difficulty-gated inside; nil = no opinion.
             local ov = Strategy.evaluate(i, { dt = dt, gapA = gapA, spd = spd, aheadSpd = aheadSpd, aheadIdx = aheadIdx,
                 prog = progZ, dLat = dLat, myLat = myLat, wide = wide, baseA = baseA, prof = prof, classKey = classKey,
-                off = off, passGap = K.PASS_GAP, attackGap = attackGap, fasterMargin = K.FASTER_MARGIN, isOval = R.isOval, lap = myLap, crowd = crowd, lapped = lappedAhead,
+                off = off, passGap = K.PASS_GAP, attackGap = attackGap, fasterMargin = fasterM, isOval = R.isOval, lap = myLap, crowd = crowd, lapped = lappedAhead,
                 wild = wild or nil, wLunge = R.WILD_LUNGE * (wm > 0 and R.WILD_TILT_LUNGE or 1), wCool = R.WILD_COOL, wReach = R.WILD_REACH, wDive0 = R.WILD_DIVE0 })
             if ov then
                 if ov.target ~= nil then target = ov.target end
@@ -1638,7 +1652,11 @@ local evalBody = function()
             state = 0
             target = 0                                                 -- no diving for passes with a bent car
             aggr = math.min(aggr, K.YIELD_AGGR)
-            if behindIdx >= 0 and gapB < K.YIELD_GAP and behindSpd > spd + K.FASTER_MARGIN then
+            -- the effective margin again, written out rather than reusing `fasterM`: this site is more deeply
+            -- nested than where that local is declared, so its scope here is plausible but not certain, and a
+            -- silent nil would read as 0 km/h and change the yield.
+            if behindIdx >= 0 and gapB < K.YIELD_GAP
+               and behindSpd > spd + K.FASTER_MARGIN * R.FASTER_MARGIN_X then
                 yielding = true
                 -- keep whatever side we've already committed to (don't re-pick and weave); only choose
                 -- one the first time, or if the current side is against an edge.
