@@ -35,6 +35,24 @@ spec = sys.argv[1]
 COOL_C = 85   # GPU hot-spot temperature above which the next run waits (a break between races)
 
 
+def game_running():
+    """Is ANY Assetto Corsa running - the owner's included. BOTH executables (2026-10-24).
+
+    This is the gate that keeps a queue from starting a race over the owner's own session, and CLAUDE.md
+    promises it: "batch.py already waits while acs.exe is running and leaves a quiet gap after, so never fight
+    it for the game". It checked ONLY acs.exe, and the install ships acs_x86.exe as well - so an owner playing
+    the 32-bit build was invisible to it and the next row would have launched straight over them. procs.py has
+    carried the executable-pair lesson since 23 Oct, and the same blind spot was found the same afternoon in
+    harness.py's acs_running() and in PC #2's own detection.
+    """
+    for img in ("acs.exe", "acs_x86.exe"):
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq %s" % img],
+                             capture_output=True, text=True).stdout
+        if img in out:
+            return True
+    return False
+
+
 def gpu_hot_spot():
     """GPU hot-spot temperature from LibreHardwareMonitor's sensor server, or None if it isn't running"""
     try:
@@ -99,13 +117,13 @@ with open(log_path, "a", encoding="utf-8") as log:
             time.sleep(60); waited += 60
         # the game is someone else's if it's already running (the user playing): wait, don't fight for it
         busy = 0
-        while "acs.exe" in subprocess.run(["tasklist", "/FI", "IMAGENAME eq acs.exe"], capture_output=True, text=True).stdout:
+        while game_running():
             if busy == 0:
                 log.write(f"=== {time.strftime('%H:%M:%S')}: Assetto Corsa is already running (someone's playing) -- waiting\n"); log.flush()
             time.sleep(60); busy += 60
         if busy:
             time.sleep(120)     # a quiet gap after they quit, in case they're just restarting a session
-            if "acs.exe" in subprocess.run(["tasklist", "/FI", "IMAGENAME eq acs.exe"], capture_output=True, text=True).stdout:
+            if game_running():
                 continue
         log.write(f"=== step {n}/{len(lines)} {time.strftime('%H:%M:%S')}: harness.py {args}\n"); log.flush()
         subprocess.run([sys.executable, os.path.join(here, "harness.py")] + args.split(), cwd=root, stdout=log, stderr=subprocess.STDOUT)

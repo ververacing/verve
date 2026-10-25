@@ -1371,10 +1371,9 @@ def run_once(args, arm, run_idx):
         # 2026-09-24: the restore ran, AC then wrote 1022x646 windowed over it, and the backup was already
         # deleted - the owner's resolution was lost.
         for _ in range(20):
-            if "acs.exe" not in subprocess.run(["tasklist", "/FI", "IMAGENAME eq acs.exe"],
-                                               capture_output=True, text=True).stdout:
-                break
-            time.sleep(1)
+            if not acs_running():       # the helper, so this sees acs_x86.exe too: an owner's 32-bit AC exiting
+                break                   # after our restore writes ITS geometry over the owner's saved resolution,
+            time.sleep(1)               # which is the 2026-09-24 harm by another route
         if not getattr(args, 'keep_video', False):
             video_profile.restore()
         if os.path.exists(HARNESS_LUA):

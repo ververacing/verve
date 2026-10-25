@@ -28,8 +28,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 BRANCH = 'dev016'
-GAMES = ('acs.exe', 'AssettoCorsa.exe', 'F1_25.exe', 'F1_24.exe',
-         'AC2-Win64-Shipping.exe')
+GAMES = ('acs.exe', 'acs_x86.exe', 'AssettoCorsa.exe', 'F1_25.exe', 'F1_24.exe',
+         'AC2-Win64-Shipping.exe')      # acs_x86.exe added 2026-10-24: the install ships both, and a guard that
+                                        # misses the 32-bit build would clear a launch while the owner is racing on it
 
 
 def _tasklist():
