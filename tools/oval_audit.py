@@ -55,13 +55,18 @@ KNOWN = {
     # it would hide the change; it must be RE-OBSERVED on a race after the change and then updated to False.
     ("acu_unitedstates", "east"): (True, "observed at the OLD 0.6 threshold; item 13 intends this to become "
                                          "False. Re-observe on a post-change race, then set False."),
-    # A GENUINE oval, added 2026-10-25 so the control has one. Its observed value is FALSE, and that is a
-    # DEFECT, not a classification: across 2990 diags the runtime has not called daytona_2017/oval an oval since
-    # 19 Sep 14:10 (42 consecutive races). The proxy reads 0.9872 and says oval. The disagreement is the bug.
-    ("daytona_2017", "oval"): (False, "RECORDS A DEFECT, not a correct classification: 42 consecutive races on "
-                                      "this genuine oval read as a road course since 19 Sep 14:10. The proxy is right "
-                                      "and the runtime is wrong. Fix is a separate named change (degenerate "
-                                      "geometry at load leaves total~0 with sampled=true, so the retry stops)."),
+    # A GENUINE oval, added 2026-10-25 so the control has one. OBSERVED TRUE, and the proxy AGREES.
+    # I SEEDED THIS WRONG FIRST TIME AND THE CORRECTION MATTERS MORE THAN THE ENTRY. I recorded it as observed
+    # FALSE with "42 consecutive races read as a road course", from a glob of *daytona* PLUS *bahrain*.
+    # ZERO of those 41 Bahrain races were on the OVAL layout: 37 grandprix, 2 outer, 1 paddock, 1 endurance -
+    # all ROAD COURSES, all correctly classified. bahrain .../test, the 0.9737 oval this audit names, has NEVER
+    # been raced. The only genuine oval ever raced here is Daytona: 10 diags, of which 2 real races False and 1
+    # failed launch (2 snapshots) BEFORE 00c5c43 on 19 Sep 08:20, then 6 TRUE and 1 False after it.
+    # SO: the retry worked, detection fires on a real oval 6 times in 7, THERE IS NO INVERSION, and what remains
+    # is an INTERMITTENT false negative near 1 in 7 - for which the degenerate-geometry path is still the best
+    # account. A glob that is too BROAD is the same defect as one that is too narrow: both answer a question
+    # about the query instead of about the world.
+    ("daytona_2017", "oval"): (True, None),
 }
 
 

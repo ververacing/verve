@@ -333,13 +333,20 @@ R.OVAL_ONEWAY = 0.90          -- detectOval's threshold: |signed turn| / total t
                               -- COTA East, which the OWNER RACES. Each got the whole BOOK.nascar playbook on a road
                               -- course. 0.90 has 0.102 of headroom above the highest false positive and 0.074 below
                               -- the lowest true oval (bahrain .../test 0.9737; daytona_2017/oval 0.9872).
-                              -- *** THIS DOES NOT MAKE OVALS WORK, AND MUST NOT BE READ AS DOING SO. *** Measured
-                              -- across 2990 diags on the value the GAME recorded: isOval has fired true on exactly
-                              -- those false positives (COTA East as recently as 23 Oct) and has NEVER fired true on
-                              -- a genuine oval since 19 Sep 14:10 - daytona/bahrain-oval are 42 consecutive races read as
-                              -- ROAD COURSES. The two faults are INVERTED, and this change fixes only the one the
-                              -- owner asked about. After it, the oval playbook applies to nothing until the false
-                              -- negative is fixed under its own name.
+                              -- WHAT THE RUNTIME ACTUALLY DOES ON A REAL OVAL, corrected 2026-10-25 after I got
+                              -- this badly wrong in this very comment. I wrote that detection is "INVERTED" and
+                              -- has "NEVER fired true on a genuine oval since 19 Sep - 42 consecutive races".
+                              -- THAT CAME FROM A GLOB OF *daytona* PLUS *bahrain*, AND ZERO OF THOSE 41 BAHRAIN
+                              -- RACES WERE ON THE OVAL LAYOUT: 37 grandprix, 2 outer, 1 paddock, 1 endurance, all
+                              -- ROAD COURSES, all correctly classified. bahrain .../test, the 0.9737 oval, has
+                              -- NEVER been raced. The only genuine oval ever raced here is Daytona, 10 diags:
+                              -- 2 real races false and 1 failed launch (2 snapshots) BEFORE 00c5c43 (19 Sep
+                              -- 08:20), then 6 TRUE and 1 false after it.
+                              -- SO: 00c5c43's retry WORKED, detection fires on a real oval 6 times in 7, and
+                              -- there is NO inversion. The false positives this threshold fixes were real and
+                              -- independently confirmed (COTA East observed true as recently as 23 Oct); what
+                              -- remains on the other side is an INTERMITTENT false negative near 1 in 7, not a
+                              -- dead mechanism. The oval playbook is NOT left applying to nothing.
                               -- THE FALSE NEGATIVE'S LIKELY CAUSE (verve-47's, confirmed by reading this function
                               -- and not yet by a log): `sampled = true` is set as soon as all 96 samples are
                               -- non-nil, BEFORE any geometry is judged. DEGENERATE points - all equal, or zeros at

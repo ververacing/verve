@@ -567,7 +567,8 @@ function script.update(dt)
             roomN = Racecraft.roomN or 0, roomAct = Racecraft.roomAct or 0, bgN = Racecraft.bgN or 0, bgPassN = Racecraft.bgPassN or 0, evalN = Racecraft.evalN or 0, fastTuckN = Racecraft.fastTuckN or 0, yellowSlowN = Racecraft.yellowSlowN or 0,
             hotSpots = Troublespots.hotCount(), crashRisk = Troublespots.crashiness(), isOval = Racecraft.isOval,
             -- item 14 (owner's yes 2026-10-24, logging only): isOval alone cannot say WHY a genuine oval reads as
-            -- a road course, which it has done in 42 consecutive Daytona/Bahrain races since 19 Sep 14:10. These five
+            -- a road course, which it has done INTERMITTENTLY on Daytona - 1 of the 7 races since 00c5c43 (and NOT
+            -- the "42 consecutive" I first claimed: that count swept in 41 Bahrain ROAD-course races). These five
             -- separate the candidates in one row: ovalSampled false = never got geometry; sampled true with
             -- ovalTotal ~0 = DEGENERATE points at load (the leading hypothesis); a real total with a ratio below
             -- ovalOneway = the threshold genuinely rejecting it.
