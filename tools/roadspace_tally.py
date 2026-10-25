@@ -11,6 +11,7 @@ contact count so an A/B can be read side by side.
 Rows are grouped by label with the trailing _<run> stripped (p11_rs_kart_A_1 and _A_2 -> p11_rs_kart_A) and
 averaged, so "A vs B" is one line each.
 """
+import classify
 import argparse, glob, json, os, re, sys
 from collections import defaultdict
 
@@ -96,11 +97,14 @@ def tally(path, hero):
     made, lost = overtakes(feed_for(path), hero)
     heroContacts = sum(1 for c in contacts if c.get("car") == hero)
     heavy = sum(1 for c in contacts if c.get("dmg", 0) >= 25)
+    _end = classify.ai_place(label_of(path), hero)
     return {
         "label": label_of(path), "cars": len(hdr["cars"]) if hdr else 0, "laps": laps,
-        "start": first.get("pos", 0), "end": last.get("pos", 0),
-        "gained": first.get("pos", 0) - last.get("pos", 0),
-        "gained_per_lap": (first.get("pos", 0) - last.get("pos", 0)) / laps if laps else 0.0,
+        # end/gained come from AC's CLASSIFICATION, not the last snapshot's live `pos` - see tools/classify.py:
+        # that field is the live order and misreads a finish by up to ten places once the leader has finished.
+        "start": first.get("pos", 0), "end": _end,
+        "gained": (first.get("pos", 0) - _end) if _end else None,
+        "gained_per_lap": ((first.get("pos", 0) - _end) / laps) if (_end and laps) else None,
         "ot_made": made, "ot_lost": lost,
         "hero_atk": heroAtk, "hero_wide_pct": 100.0 * heroWide / heroAtk if heroAtk else 0.0,
         "hero_rs_pct": 100.0 * heroRs / heroAtk if heroAtk else 0.0,

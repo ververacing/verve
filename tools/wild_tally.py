@@ -26,6 +26,7 @@ Per race:
   fh80 fout            the field without him: contact events at 80+ km/h (diag), cars retired or parked at the end
   doff                 repositioning switched itself off this race (diag dropsOff)
 """
+import classify as finishes   # aliased: this module already has its own `classify(ev, hero)` at line 66
 import argparse, glob, json, os, re, statistics as stats
 from collections import Counter, defaultdict
 
@@ -103,8 +104,14 @@ def score(p, hero):
     caut = stats.median([g["caut"] for g in run]) if run else None
     agg = stats.median([g["agg"] for g in run]) if run else None
     out_field = sum(1 for c in snaps[-1]["grid"] if c["i"] != hero and (c.get("ret") in (True, 1) or c.get("park")))
-    r = {"label": stamp_of(p)[2], "start": first.get("pos"), "fin": last.get("pos"), "gain": (first.get("pos") or 0) - (last.get("pos") or 0),
-         "win": int(last.get("pos") == 1 and not dnf), "dnf": int(dnf), "pw": pw, "laps": laps,
+    # fin/gain/win come from AC's CLASSIFICATION, never from the last snapshot's live `pos` - that field is the
+    # live order and once the leader takes the chequer it puts a car still on the previous lap behind everyone
+    # already home. It has misread a finish by ten places. See tools/classify.py for the full why.
+    _lab = stamp_of(p)[2]
+    _fin = finishes.ai_place(_lab, hero)
+    r = {"label": _lab, "start": first.get("pos"), "fin": _fin,
+         "gain": ((first.get("pos") or 0) - _fin) if _fin else None,
+         "win": int(_fin == 1 and not dnf) if _fin else None, "dnf": int(dnf), "pw": pw, "laps": laps,
          "caused": None, "suff": None, "side": None, "solo": None, "offs": None, "inc100": None, "flt": None, "fmed": None,
          "lunge": sum(1 for m in mvs if m.get("car") == hero and m.get("name") == "lunge"),
          "lwon": sum(1 for m in mvs if m.get("car") == hero and m.get("name") == "lunge" and m.get("won")),
