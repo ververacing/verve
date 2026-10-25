@@ -141,9 +141,8 @@ if missing:
 # 2/3. registry and lessons v the newest commits
 try:
     lua_t = int(git("log", "-1", "--format=%ct", "--", "lib", "Verve.lua").strip() or 0)
-    any_t = int(git("log", "-1", "--format=%ct").strip() or 0)
 except ValueError:
-    lua_t = any_t = 0
+    lua_t = 0
 if mtime(os.path.join(DOCS, "SWITCHES.md")) < lua_t:
     flags.append("docs/SWITCHES.md is older than the newest Lua commit - run: python tools/switch_registry.py")
 if mtime(os.path.join(DOCS, "LESSONS.md")) < lua_t:
@@ -281,6 +280,9 @@ if flags:
     for f in flags:
         print("  - " + f)
     sys.exit(1)
-print("docs current: switches %d with status, state.md %d lines, LESSONS and SWITCHES newer than the last commit, "
-      "living documents tracked and committed" % (len(status), n))
+# The pass line names the COMPARAND, because the old wording ("newer than the last commit") named the wrong one:
+# the test is each doc's MTIME against the newest LUA commit (lib/, Verve.lua), not against the newest commit of
+# any kind. A `any_t` holding exactly that broader figure sat beside it unused, which is how the label drifted.
+print("docs current: switches %d with status, state.md %d lines, LESSONS and SWITCHES modified since the newest "
+      "lib/Verve.lua commit, living documents tracked and committed" % (len(status), n))
 sys.exit(0)
