@@ -31,11 +31,18 @@ R.INTENSITY   = 0.7        -- racecraft "how hard they race" slider
 R.VARIABILITY = 0.5        -- variability slider: spreads per-driver aggression across the field
 R.attacking = 0
 R.defending = 0
--- (2026-10-24) THE PREMISE COUNTER FOR R.FASTER_MARGIN_X, ZERO BY CONSTRUCTION AT THE DEFAULT. Counts attack
--- entries the DEFAULT margin would refuse and the LOOSENED one admits: `spd < aheadSpd - K.FASTER_MARGIN` AND
--- `spd >= aheadSpd - K.FASTER_MARGIN * R.FASTER_MARGIN_X`. At X = 1.0 those cannot both hold, so this reads
--- EXACTLY 0 - and any other value there means THE COUNTER is wrong, not the switch. At X > 1 it must exceed 0
--- or the switch is dead.
+-- (2026-10-24) THE PREMISE COUNTER FOR R.FASTER_MARGIN_X, ZERO BY CONSTRUCTION AT THE DEFAULT.
+-- IT COUNTS CAR-FRAMES, NOT ATTACK ENTRIES - measured on s71b and the first version of this comment said
+-- "entries", which was wrong. It increments once per car per evaluated frame while the condition holds, so at
+-- X=3.0 over six Monza laps it read 354942, about 30.7 per car-second and ~51% of car-frames. THAT IS A DWELL
+-- MEASURE: how much of the race the loosened margin admits an attack the default refuses. It is NOT a count of
+-- attacks and must never be reported as one. An event count would need a per-car edge trigger (was this car
+-- already inside the band on the previous frame) and is not needed for a premise gate.
+-- The condition: `spd < aheadSpd - K.FASTER_MARGIN` AND `spd >= aheadSpd - K.FASTER_MARGIN * R.FASTER_MARGIN_X`.
+-- At X = 1.0 those cannot both hold, so this reads EXACTLY 0 - and any other value there means THE COUNTER is
+-- wrong, not the switch. At X > 1 it must exceed 0 or the switch is dead.
+-- AND IT SUBSUMES THE DELIVERY CHECK: a non-zero value is only reachable when X > 1, so fmOnlyN > 0 PROVES the
+-- switch arrived, more strongly than reading the value back from a settings blob would.
 -- WHY IT EXISTS: the first premise gate for this switch compared `attacking` between two rows, which is vacuous
 -- twice over - two rows at identical settings already differ run to run (s64's 100b v 100c), AND `R.attacking`
 -- is RESET EVERY FRAME in R.beginFrame(), so it is a per-frame GAUGE and comparing it compares one frame.
