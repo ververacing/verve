@@ -62,10 +62,12 @@ KNOWN = {
     # all ROAD COURSES, all correctly classified. bahrain .../test, the 0.9737 oval this audit names, has NEVER
     # been raced. The only genuine oval ever raced here is Daytona: 10 diags, of which 2 real races False and 1
     # failed launch (2 snapshots) BEFORE 00c5c43 on 19 Sep 08:20, then 6 TRUE and 1 False after it.
-    # SO: the retry worked, detection fires on a real oval 6 times in 7, THERE IS NO INVERSION, and what remains
-    # is an INTERMITTENT false negative near 1 in 7 - for which the degenerate-geometry path is still the best
-    # account. A glob that is too BROAD is the same defect as one that is too narrow: both answer a question
-    # about the query instead of about the world.
+    # SO: the retry worked and THERE IS NO INVERSION. State the figure as what it is and NOT as a rate: SIX
+    # CORRECT READINGS AND ONE MISS, ALL SEVEN ON 19 SEPTEMBER, on that day's build and CSP. "1 in 7" is one
+    # miss; n=7 supports no rate. DAYTONA HAS NOT BEEN RACED SINCE 19 SEP 14:10:56, so current-build behaviour
+    # is UNMEASURED and this entry's `True` describes a five-week-old tree - re-observe before relying on it.
+    # A glob that is too BROAD is the same defect as one that is too narrow: both answer a question about the
+    # query instead of about the world.
     ("daytona_2017", "oval"): (True, None),
 }
 

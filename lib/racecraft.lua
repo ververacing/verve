@@ -342,11 +342,17 @@ R.OVAL_ONEWAY = 0.90          -- detectOval's threshold: |signed turn| / total t
                               -- NEVER been raced. The only genuine oval ever raced here is Daytona, 10 diags:
                               -- 2 real races false and 1 failed launch (2 snapshots) BEFORE 00c5c43 (19 Sep
                               -- 08:20), then 6 TRUE and 1 false after it.
-                              -- SO: 00c5c43's retry WORKED, detection fires on a real oval 6 times in 7, and
-                              -- there is NO inversion. The false positives this threshold fixes were real and
-                              -- independently confirmed (COTA East observed true as recently as 23 Oct); what
-                              -- remains on the other side is an INTERMITTENT false negative near 1 in 7, not a
-                              -- dead mechanism. The oval playbook is NOT left applying to nothing.
+                              -- SO: 00c5c43's retry WORKED and there is NO inversion. The false positives this
+                              -- threshold fixes were real and independently confirmed (COTA East observed true
+                              -- as recently as 23 Oct); the oval playbook is NOT left applying to nothing.
+                              -- STATE THE DAYTONA FIGURE AS WHAT IT IS, AND NOT AS A RATE (verve-47, 25 Oct):
+                              -- SIX CORRECT READINGS AND ONE MISS, ALL SEVEN ON 19 SEPTEMBER, on that day's
+                              -- build and that day's CSP. "1 in 7" is one miss, not a rate, and n=7 supports
+                              -- neither. DAYTONA HAS NOT BEEN RACED SINCE 19 SEP 14:10:56, so what detection
+                              -- does on the CURRENT build is UNMEASURED - "detection works" describes a
+                              -- five-week-old tree. A short fresh-launch Daytona cell on the current build,
+                              -- reading the oval fields below, would measure it; it should come BEFORE any
+                              -- false-negative fix, because that fix now needs a measured miss to justify it.
                               -- THE FALSE NEGATIVE'S LIKELY CAUSE (verve-47's, confirmed by reading this function
                               -- and not yet by a log): `sampled = true` is set as soon as all 96 samples are
                               -- non-nil, BEFORE any geometry is judged. DEGENERATE points - all equal, or zeros at
