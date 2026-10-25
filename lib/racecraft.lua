@@ -49,6 +49,9 @@ R.defending = 0
 -- CUMULATIVE ON PURPOSE: zeroed in R.reset() at session start, never in beginFrame().
 R.fmOnlyN = 0
 R.isOval = false           -- set per session: true if the track turns mostly one way (an oval/speedway)
+R.ovalSampled = false      -- item 14 logging (owner's yes 2026-10-24, logging only): did detectOval get geometry
+R.ovalTotal = -1           -- the total absolute turn it summed. ~0 with ovalSampled true = DEGENERATE points at
+R.ovalRatio = -1           -- load, which is the leading hypothesis for 41 genuine-oval races reading road course
 
 -- oval groove: on a speedway, stock cars commit to a high or low LANE and run it side-by-side
 -- through the banking, instead of all returning to one racing line.
@@ -312,9 +315,42 @@ R.FASTER_MARGIN_X = 1.0       -- multiplier on K.FASTER_MARGIN (3.0 km/h), the s
                               -- the one ahead by more than the margin never opens an attack at all, which is exactly
                               -- the car trying to come through a field. Loosening it should let a quicker car start
                               -- moves it currently cannot.
-                              -- APPLIED AT ALL FOUR READ SITES, deliberately: the attack gate, the defend gate, the
-                              -- yield, and the `fasterMargin` handed to strategy. Splitting it would leave attack and
-                              -- defend disagreeing about one concept, which is the divergence c16d4e7 closed.
+                              -- APPLIED ON THE ATTACK SIDE ONLY: this gate and the `fasterMargin` handed to
+                              -- strategy. The defend gate and the yield stay on plain K.FASTER_MARGIN (cfec772).
+                              -- CORRECTED 2026-10-25: this comment used to say "all four read sites, deliberately",
+                              -- which cfec772 made false the same night it was written. A stale comment about which
+                              -- sites a lever touches is worse than none - it is the first thing anyone reads when
+                              -- deciding whether a result generalises.
+                              -- RESULT, s71b stage 2 (25 Oct, n=4/5): NOT CREDITED. x30 median P13 v x10 P9.5, led
+                              -- 0 of 9, ranges overlapping - and the lever demonstrably ACTED (a third of all AI
+                              -- car-frames entered the widened band at X=3.0). So the 'left' exits were real and
+                              -- relieving them is not what the climb needed.
+R.OVAL_ONEWAY = 0.90          -- detectOval's threshold: |signed turn| / total turn above this = an oval (item 13,
+                              -- the owner's yes of 2026-10-24: "only purpose-built ovals count", general and NOT
+                              -- track-specific). WAS A HARDCODED 0.6, which called SEVEN of 160 installed layouts
+                              -- ovals and FIVE of those wrongly: ks_monza66/full 0.7980, /junior 0.7655, /road
+                              -- 0.6707, ks_red_bull_ring/layout_national 0.6434, and acu_unitedstates/east 0.6141 -
+                              -- COTA East, which the OWNER RACES. Each got the whole BOOK.nascar playbook on a road
+                              -- course. 0.90 has 0.102 of headroom above the highest false positive and 0.074 below
+                              -- the lowest true oval (bahrain .../test 0.9737; daytona_2017/oval 0.9872).
+                              -- *** THIS DOES NOT MAKE OVALS WORK, AND MUST NOT BE READ AS DOING SO. *** Measured
+                              -- across 2990 diags on the value the GAME recorded: isOval has fired true on exactly
+                              -- those false positives (COTA East as recently as 23 Oct) and has NEVER fired true on
+                              -- a genuine oval since 19 Sep - daytona/bahrain-oval are 41 consecutive races read as
+                              -- ROAD COURSES. The two faults are INVERTED, and this change fixes only the one the
+                              -- owner asked about. After it, the oval playbook applies to nothing until the false
+                              -- negative is fixed under its own name.
+                              -- THE FALSE NEGATIVE'S LIKELY CAUSE (verve-47's, confirmed by reading this function
+                              -- and not yet by a log): `sampled = true` is set as soon as all 96 samples are
+                              -- non-nil, BEFORE any geometry is judged. DEGENERATE points - all equal, or zeros at
+                              -- load - leave m1,m2 <= 1e-3, so nothing accumulates, total stays 0, oval stays false
+                              -- and `ovalChecked` is committed. The beginFrame retry then never runs, because it
+                              -- only retries while NOT ovalChecked and only guards the NIL case (00c5c43, 19 Sep,
+                              -- added for this very Daytona symptom). The fix - treat total <= 1e-3 as NOT sampled
+                              -- so the retry continues - is a SEPARATE named change: it re-enables the playbook on
+                              -- a track where the groove offset once wrecked Daytona (e79ea2d), so it needs a test.
+                              -- The diag now logs sampled/total/ratio at commit time so one Daytona row tells
+                              -- degenerate-at-load from wrong-ratio from never-sampled.
 R.COMMIT_HOLD_X = 1.0         -- multiplier on K.COMMIT_HOLD for an ATTACK commitment only (defend untouched) (A/B 2026-10-24).
                               -- Why: s59_lunget measured a lunge at 2.1-2.8 s (median; capped 2.2 s at LUNGE_OUT_T 1.3 and 3.5 s
                               -- at 2.6) against a COMMIT_HOLD of 0.7 s, so the move outlives the state that authorises it by 3-4x.
@@ -660,7 +696,12 @@ local function detectOval()
                 total = total + math.abs(turn)
             end
         end
-        if total > 1e-3 then oval = (math.abs(signed) / total) > 0.6 end   -- mostly one-way = oval
+        -- mostly one-way = oval. R.OVAL_ONEWAY, not a literal, so it is A/B-able and so that the audit tool has
+        -- something to mirror by name rather than by a number buried here.
+        if total > 1e-3 then oval = (math.abs(signed) / total) > R.OVAL_ONEWAY end
+        R.ovalTotal = total                                  -- item 14 logging, no behaviour change: these three
+        R.ovalRatio = total > 1e-3 and (math.abs(signed) / total) or -1   -- distinguish degenerate-at-load (total
+        R.ovalSampled = true                                 -- ~0) from wrong-ratio from never-sampled (no values)
     end)
     return oval, sampled
 end

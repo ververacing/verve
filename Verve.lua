@@ -566,6 +566,13 @@ function script.update(dt)
             limpRepairs = Recovery.limpCount, retired = Recovery.retiredCount, crawlN = Racecraft.crawlN or 0,
             roomN = Racecraft.roomN or 0, roomAct = Racecraft.roomAct or 0, bgN = Racecraft.bgN or 0, bgPassN = Racecraft.bgPassN or 0, evalN = Racecraft.evalN or 0, fastTuckN = Racecraft.fastTuckN or 0, yellowSlowN = Racecraft.yellowSlowN or 0,
             hotSpots = Troublespots.hotCount(), crashRisk = Troublespots.crashiness(), isOval = Racecraft.isOval,
+            -- item 14 (owner's yes 2026-10-24, logging only): isOval alone cannot say WHY a genuine oval reads as
+            -- a road course, which it has done in 41 consecutive Daytona/Bahrain races since 19 Sep. These five
+            -- separate the candidates in one row: ovalSampled false = never got geometry; sampled true with
+            -- ovalTotal ~0 = DEGENERATE points at load (the leading hypothesis); a real total with a ratio below
+            -- ovalOneway = the threshold genuinely rejecting it.
+            ovalSampled = Racecraft.ovalSampled, ovalTotal = Racecraft.ovalTotal, ovalRatio = Racecraft.ovalRatio,
+            ovalOneway = Racecraft.OVAL_ONEWAY, ovalChecked = Racecraft.ovalChecked,
             peak = Troublespots.peakHeat(), storeLen = Troublespots.storeLen, saveOk = Troublespots.lastSaveOk,
             per = diagPer, rc = Racecraft.last, recState = Recovery.stateOf, cv2 = Racecraft.cv2, episodes = Strategy.episodes,
             recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, dropFailN = Recovery.dropFailN, dropFailClear = Recovery.dropFailClear, boxRescueN = Recovery.boxRescueN, boxSeenN = Recovery.boxSeenN, boxTryN = Recovery.boxTryN, boxOkN = Recovery.boxOkN, dropsOff = Recovery.dropsOff, fuelLoadN = Fuel.loadN, fuelBoxN = Fuel.boxFixN, fuelReN = Fuel.boxReN,

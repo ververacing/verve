@@ -38,10 +38,31 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 AC = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(HERE))))
 TRACKS = os.path.join(AC, "content", "tracks")
-THRESHOLD = 0.6                      # racecraft.lua:601 - keep these two in step
+THRESHOLD = 0.90                     # MIRRORS R.OVAL_ONEWAY in lib/racecraft.lua - KEEP THESE TWO IN STEP.
+                                     # Was a hardcoded 0.6 on both sides until 2026-10-25 (item 13). At 0.6 this
+                                     # tool called 7 of 160 layouts ovals and 5 were wrong, including
+                                     # acu_unitedstates/east, which the owner races.
 SAMPLES = 96                         # detectOval's N
 # The runtime verdicts we actually have, from diag `isOval` across many races. The selftest's whole value.
-KNOWN = {("acu_unitedstates", "a"): False, ("acu_unitedstates", "east"): True}
+#: Layout -> the verdict the GAME ITSELF recorded (from diag `isOval`), used to validate the offline proxy.
+#: A third value may be given: a REASON why a disagreement with the proxy is expected and already explained.
+#: A disagreement WITHOUT a reason still fails the selftest - that is the check's whole value.
+KNOWN = {
+    ("acu_unitedstates", "a"): (False, None),
+    # east was observed TRUE by the runtime - but at the OLD hardcoded 0.6 threshold, and its ratio is 0.6141.
+    # Raising the threshold to 0.90 (item 13) is INTENDED to stop it being called an oval, so the proxy now
+    # disagrees with that observation BY DESIGN. The entry stays, because it is a real observation and deleting
+    # it would hide the change; it must be RE-OBSERVED on a race after the change and then updated to False.
+    ("acu_unitedstates", "east"): (True, "observed at the OLD 0.6 threshold; item 13 intends this to become "
+                                         "False. Re-observe on a post-change race, then set False."),
+    # A GENUINE oval, added 2026-10-25 so the control has one. Its observed value is FALSE, and that is a
+    # DEFECT, not a classification: across 2990 diags the runtime has not called daytona_2017/oval an oval since
+    # 19 Sep (41 consecutive races). The proxy reads 0.9872 and says oval. The disagreement is the bug.
+    ("daytona_2017", "oval"): (False, "RECORDS A DEFECT, not a correct classification: 41 consecutive races on "
+                                      "this genuine oval read as a road course since 19 Sep. The proxy is right "
+                                      "and the runtime is wrong. Fix is a separate named change (degenerate "
+                                      "geometry at load leaves total~0 with sampled=true, so the retry stops)."),
+}
 
 
 def spline(path):
@@ -113,7 +134,8 @@ def layouts(one_track=None):
 
 def selftest():
     ok = True
-    for (t, lay), expected in sorted(KNOWN.items()):
+    for (t, lay), spec in sorted(KNOWN.items()):
+        expected, reason = spec if isinstance(spec, tuple) else (spec, None)
         p = os.path.join(TRACKS, t, lay, "ai", "fast_lane.ai")
         pts = spline(p)
         if not pts:
@@ -123,10 +145,19 @@ def selftest():
             continue
         r = ratio(pts)
         got = (r is not None and r > THRESHOLD)
-        mark = "agrees" if got == expected else "*** DISAGREES ***"
+        if got == expected:
+            mark = "agrees"
+        elif reason:
+            mark = "disagrees - EXPECTED AND EXPLAINED"
+        else:
+            mark = "*** DISAGREES ***"
         print("  %s/%-6s ratio %.4f -> offline %-5s | runtime from diags %-5s  %s"
               % (t, lay, r, got, expected, mark))
-        if got != expected:
+        if got != expected and reason:
+            # An explained discrepancy must NOT pass silently and must NOT fail the run: printing the reason is
+            # the point. An UNexplained one still fails, which is what keeps the check worth having.
+            print("     reason on file: %s" % reason)
+        elif got != expected:
             print("     the offline proxy does not reproduce the game's own verdict. NOTHING THIS TOOL PRINTS "
                   "MAY BE QUOTED until that is explained.")
             ok = False
@@ -136,12 +167,19 @@ def selftest():
         pts = spline(os.path.join(TRACKS, t, lay, "ai", "fast_lane.ai"))
         if pts:
             rs.append(ratio(pts))
-    if len(rs) == 2 and not (min(rs) < THRESHOLD < max(rs)):
-        print("SELFTEST FAIL: both known layouts fall the same side of %.2f, so agreement proves nothing "
-              "about the threshold" % THRESHOLD)
+    # ANY number of knowns, not exactly two. The old form was `len(rs) == 2`, so adding a third layout would
+    # have made this control SILENTLY SKIP - a guard that disappears when you strengthen the data around it.
+    # Found 2026-10-25 while adding daytona_2017/oval as the first genuine oval in KNOWN.
+    if len(rs) < 2:
+        print("SELFTEST FAIL: fewer than two readable knowns, so the threshold cannot be shown to do any work")
         ok = False
-    elif len(rs) == 2:
-        print("  negative control OK: the two knowns straddle %.2f (%.4f and %.4f)" % (THRESHOLD, min(rs), max(rs)))
+    elif not (min(rs) < THRESHOLD < max(rs)):
+        print("SELFTEST FAIL: all %d known layouts fall the same side of %.2f, so agreement proves nothing "
+              "about the threshold" % (len(rs), THRESHOLD))
+        ok = False
+    else:
+        print("  negative control OK: the %d knowns straddle %.2f (%.4f .. %.4f)"
+              % (len(rs), THRESHOLD, min(rs), max(rs)))
     print("oval_audit selftest: " + ("PASSED" if ok else "FAILED"))
     return 0 if ok else 1
 
