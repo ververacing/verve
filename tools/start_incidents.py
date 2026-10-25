@@ -152,6 +152,9 @@ def arm_of(path, track):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     by_race = "--by-race" in sys.argv
+    # AI-ONLY BY DEFAULT (owner's rule): slot 0 is the autopilot player, ignores Verve's level and grip
+    # and starts on a different fuel load, so its contacts are not AI racecraft. --include-player to keep it.
+    ai_only = "--include-player" not in sys.argv
     min_snaps = 5
     for a in sys.argv[1:]:
         if a.startswith("--min-snaps"):
@@ -167,6 +170,8 @@ def main():
     rows, skipped = [], []
     for p in paths:
         hdr, snaps, cons, laps, gbl = read_diag(p)
+        if ai_only and cons:
+            cons = [e for e in cons if e.get("car") != 0]
         if hdr is None or snaps < min_snaps:
             skipped.append((p, "hdr" if hdr is None else "%d snaps" % snaps)); continue
         track = hdr.get("track", "?")
@@ -175,7 +180,8 @@ def main():
         pop[(track, cars, arm)] += 1
         rows.append((p, track, cars, arm, cons, laps, gbl))
 
-    print("POPULATION (%d scorable, %d skipped)" % (len(rows), len(skipped)))
+    print("POPULATION (%d scorable, %d skipped)   contacts: %s" % (
+        len(rows), len(skipped), "AI ONLY, slot 0 excluded" if ai_only else "ALL CARS incl. slot 0"))
     for (track, cars, arm), n in sorted(pop.items(), key=lambda kv: -kv[1]):
         print("   %-34s %2d cars  %-6s  %d races" % (track, cars, arm, n))
     if skipped:
