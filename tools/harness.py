@@ -215,18 +215,49 @@ OWNED = {"game": False, "lua": False}   # what THIS process started / wrote: cle
                                         # being undone at exit. False means we own no game and cleanup touches nothing.
 
 
+def pid_is_game(pid):
+    """Is this PID STILL one of our game executables? The identity check before any kill.
+
+    Guards against PID REUSE: Windows recycles PIDs, so a stored number can belong to something else by the
+    time we act on it. Checked by NAME on that one PID - not by listing every acs.exe, which is the by-name
+    kill this function exists to avoid.
+    """
+    try:
+        out = subprocess.run(["tasklist", "/FI", "PID eq %d" % int(pid)],
+                             capture_output=True, text=True, timeout=20).stdout.lower()
+    except Exception:  # noqa: BLE001
+        return False                                # unreadable table -> FAIL CLOSED, kill nothing
+    return any(img in out for img in ("acs.exe", "acs_x86.exe"))
+
+
 def kill_owned_game():
-    """Kill ONLY the game this process launched, by PID, and only while it is alive.
+    """Kill ONLY the game this process launched: by PID, and only while that PID is still a game.
 
     BY PID, NEVER BY IMAGE NAME. `taskkill /IM acs.exe /F` ends every Assetto Corsa on the machine, including
     the owner's. That is not hypothetical: on 2026-09-13 a harness run killed the owner's drift session, the
     not-ours branch below was added to prevent it, and until 2026-10-24 `cleanup()` undid that protection at
-    exit because OWNED["game"] was set True at launch and never cleared. /T as well, so a game that spawned
-    anything takes its children with it."""
+    exit because OWNED["game"] was set True at launch and never cleared.
+
+    WHY THE PID IS SAFE TO HOLD AT ALL, written down because it was an IMPLICIT argument until 2026-10-24 and
+    the safety rested on it: the stored PID and the `Popen` object have THE SAME LIFETIME. The PID is only ever
+    set while `proc` is in scope, and every kill path clears it below, so CPython keeps the process handle open
+    for exactly as long as the PID is stored - and Windows cannot reuse a PID while a handle to it is open.
+    The `pid_is_game` check above does not depend on that argument, which is the point of having it.
+
+    NO `/T` (2026-10-24, measured). A tree kill finds children by ParentProcessId, and Windows NEVER UPDATES a
+    parent id when the parent exits - so a long-running process whose original parent happened to hold the PID
+    our game later received looks like our child. Measured on this machine during a live race: `acs.exe` had
+    ZERO processes recording it as parent, while TWELVE live processes recorded a parent PID that no longer
+    exists. So `/T` buys nothing of ours and carries that. The old by-name kill never had it; it was added by
+    mistake the same day and removed on measurement.
+    """
     pid = OWNED.get("game")
     if not pid:
         return
-    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+    if not pid_is_game(pid):                        # recycled, already gone, or never ours
+        OWNED["game"] = False
+        return
+    subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
     OWNED["game"] = False
 
 
@@ -1243,7 +1274,10 @@ def run_once(args, arm, run_idx):
     t_launch = time.time()
     proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
     OWNED["game"] = proc.pid
-    print(f"  acs.exe pid {proc.pid}")      # logged so a stop tool has an identity to read: nothing printed it before
+    # flush=True (2026-10-24): batch.py captures this with stdout=log, and Python BLOCK-BUFFERS stdout when it
+    # is not a tty - so without the flush the pid reached the log only when the harness EXITED, which is the
+    # one moment a stop tool no longer needs it. Measured: the line appeared at log line 7 after row 1 ended.
+    print(f"  acs.exe pid {proc.pid}", flush=True)      # logged so a stop tool has an identity to read: nothing printed it before
     # AC occasionally dies at load (a crash box, or an exit within a minute); one relaunch after a pause fixes it
     csp_log = os.path.join(DOCS, "logs", "custom_shaders_patch.log")
     for attempt in range(3):
@@ -1270,7 +1304,7 @@ def run_once(args, arm, run_idx):
             t_launch = time.time()
             proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
             OWNED["game"] = proc.pid
-            print(f"  acs.exe pid {proc.pid} (relaunch after hang)")
+            print(f"  acs.exe pid {proc.pid} (relaunch after hang)", flush=True)
             continue
         if acs_running():
             break                                   # someone else's game: handled below
@@ -1279,7 +1313,7 @@ def run_once(args, arm, run_idx):
         t_launch = time.time()
         proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
         OWNED["game"] = proc.pid
-        print(f"  acs.exe pid {proc.pid} (relaunch after early exit)")
+        print(f"  acs.exe pid {proc.pid} (relaunch after early exit)", flush=True)
     finished = False
     ours = True
     try:
@@ -1498,6 +1532,26 @@ def run_once(args, arm, run_idx):
         m["cmd"] = " ".join(_a)
     except Exception:  # noqa: BLE001
         m["cmd"] = ""
+    # THE BUILD THE ROW ACTUALLY RAN UNDER (2026-10-24). `cmd` records the invocation; nothing recorded the
+    # CODE. That gap is why a print-flush could not be fixed mid-cell on 24 Oct: batch.py starts a fresh
+    # harness per row, so an edit would have put rows 1 and 2+ of one A/B on different code, and no column
+    # would have shown it. arm_check and launch_guard compare command lines and are blind to this.
+    # DIRTY IS PART OF THE ANSWER: a clean sha identifies the code exactly, a dirty tree does not, and a row
+    # that cannot say which is which is a row whose build claim is an inference from commit dates.
+    # THE `except` BELOW IS DELIBERATELY NARROW. The first version of this caught bare `Exception` with
+    # `cwd=ROOT`, and ROOT DOES NOT EXIST IN THIS FILE - so the NameError would have been swallowed and every
+    # row would have carried an empty verve_commit forever, while the comment above claimed provenance.
+    # A BROAD except AROUND NEW CODE HIDES THE NEW CODE'S OWN BUGS, which is the opposite of protecting a race.
+    _repo = os.path.dirname(_TOOLS)
+    try:
+        _sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=_repo,
+                              capture_output=True, text=True, timeout=20).stdout.strip()
+        _st = subprocess.run(["git", "status", "--porcelain"], cwd=_repo,
+                             capture_output=True, text=True, timeout=30).stdout
+        _tracked = [l for l in _st.splitlines() if l[:2] != "??"]
+        m["verve_commit"] = (_sha + ("-dirty" if _tracked else "")) if _sha else ""
+    except (OSError, subprocess.SubprocessError):    # git missing or hung - not a reason to fail a race
+        m["verve_commit"] = ""
     # AC's own fuel record (appended columns): tanks it emptied at a stop, AI stops it began, laps it fuelled the field
     # for, and whether its log was cut off (the counts are then lower bounds; no race line = no counts)
     m.update(ac_log_fuel(aclog))
