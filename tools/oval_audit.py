@@ -57,9 +57,9 @@ KNOWN = {
                                          "False. Re-observe on a post-change race, then set False."),
     # A GENUINE oval, added 2026-10-25 so the control has one. Its observed value is FALSE, and that is a
     # DEFECT, not a classification: across 2990 diags the runtime has not called daytona_2017/oval an oval since
-    # 19 Sep (41 consecutive races). The proxy reads 0.9872 and says oval. The disagreement is the bug.
-    ("daytona_2017", "oval"): (False, "RECORDS A DEFECT, not a correct classification: 41 consecutive races on "
-                                      "this genuine oval read as a road course since 19 Sep. The proxy is right "
+    # 19 Sep 14:10 (42 consecutive races). The proxy reads 0.9872 and says oval. The disagreement is the bug.
+    ("daytona_2017", "oval"): (False, "RECORDS A DEFECT, not a correct classification: 42 consecutive races on "
+                                      "this genuine oval read as a road course since 19 Sep 14:10. The proxy is right "
                                       "and the runtime is wrong. Fix is a separate named change (degenerate "
                                       "geometry at load leaves total~0 with sampled=true, so the retry stops)."),
 }

@@ -336,7 +336,7 @@ R.OVAL_ONEWAY = 0.90          -- detectOval's threshold: |signed turn| / total t
                               -- *** THIS DOES NOT MAKE OVALS WORK, AND MUST NOT BE READ AS DOING SO. *** Measured
                               -- across 2990 diags on the value the GAME recorded: isOval has fired true on exactly
                               -- those false positives (COTA East as recently as 23 Oct) and has NEVER fired true on
-                              -- a genuine oval since 19 Sep - daytona/bahrain-oval are 41 consecutive races read as
+                              -- a genuine oval since 19 Sep 14:10 - daytona/bahrain-oval are 42 consecutive races read as
                               -- ROAD COURSES. The two faults are INVERTED, and this change fixes only the one the
                               -- owner asked about. After it, the oval playbook applies to nothing until the false
                               -- negative is fixed under its own name.
