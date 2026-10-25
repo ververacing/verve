@@ -195,20 +195,46 @@ class Ini(configparser.RawConfigParser):
 
 
 def acs_running():
-    out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq acs.exe"], capture_output=True, text=True).stdout
-    return "acs.exe" in out
+    """Is ANY Assetto Corsa running. BOTH executables (2026-10-24): the install ships acs.exe AND acs_x86.exe,
+    and an exact IMAGENAME filter on the first is blind to the second - procs.py has carried that lesson since
+    23 Oct. It matters most HERE, because this function gates the not-ours detection below: if the owner plays
+    the 32-bit build, a check that only matched acs.exe would not notice them at all and the run would carry on
+    as though the machine were free."""
+    for img in ("acs.exe", "acs_x86.exe"):
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq %s" % img],
+                             capture_output=True, text=True).stdout
+        if img in out:
+            return True
+    return False
 
 
 OWNED = {"game": False, "lua": False}   # what THIS process started / wrote: cleanup touches nothing else (2026-09-28: an
                                         # import or --help from a scratch copy force-killed a live race through this hook)
+                                        # OWNED["game"] HOLDS THE PID, not a flag (2026-10-24): a kill by image name
+                                        # cannot tell our game from the owner's, which is how the 09-13 protection was
+                                        # being undone at exit. False means we own no game and cleanup touches nothing.
+
+
+def kill_owned_game():
+    """Kill ONLY the game this process launched, by PID, and only while it is alive.
+
+    BY PID, NEVER BY IMAGE NAME. `taskkill /IM acs.exe /F` ends every Assetto Corsa on the machine, including
+    the owner's. That is not hypothetical: on 2026-09-13 a harness run killed the owner's drift session, the
+    not-ours branch below was added to prevent it, and until 2026-10-24 `cleanup()` undid that protection at
+    exit because OWNED["game"] was set True at launch and never cleared. /T as well, so a game that spawned
+    anything takes its children with it."""
+    pid = OWNED.get("game")
+    if not pid:
+        return
+    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+    OWNED["game"] = False
 
 
 def cleanup():
     """Whatever happens (Ctrl+C, crash, kill), never leave a game instance or a live harness.lua behind --
     a leftover blocks the next run and a stale harness.lua could hijack a real race (it self-expires, but
     don't rely on it). Only what this process launched or wrote: an import, --help or a refused run leaves the game alone."""
-    if OWNED["game"]:
-        subprocess.run(["taskkill", "/IM", "acs.exe", "/F"], capture_output=True)
+    kill_owned_game()
     if OWNED["lua"] and os.path.exists(HARNESS_LUA):
         try:
             os.remove(HARNESS_LUA)
@@ -1216,7 +1242,8 @@ def run_once(args, arm, run_idx):
     snapshot_configs(label)
     t_launch = time.time()
     proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
-    OWNED["game"] = True
+    OWNED["game"] = proc.pid
+    print(f"  acs.exe pid {proc.pid}")      # logged so a stop tool has an identity to read: nothing printed it before
     # AC occasionally dies at load (a crash box, or an exit within a minute); one relaunch after a pause fixes it
     csp_log = os.path.join(DOCS, "logs", "custom_shaders_patch.log")
     for attempt in range(3):
@@ -1238,10 +1265,12 @@ def run_once(args, arm, run_idx):
             if not hung:
                 break
             print(f"  !! acs.exe hung at launch ({time.time() - t_launch:.0f}s, no CSP log); killing and relaunching (attempt {attempt + 1})")
-            subprocess.run(["taskkill", "/IM", "acs.exe", "/F"], capture_output=True)
+            kill_owned_game()                       # by PID: a by-name kill here also ended the owner's game
             time.sleep(20)
             t_launch = time.time()
             proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
+            OWNED["game"] = proc.pid
+            print(f"  acs.exe pid {proc.pid} (relaunch after hang)")
             continue
         if acs_running():
             break                                   # someone else's game: handled below
@@ -1249,6 +1278,8 @@ def run_once(args, arm, run_idx):
         time.sleep(15)
         t_launch = time.time()
         proc = subprocess.Popen([os.path.join(AC_DIR, "acs.exe")], cwd=AC_DIR)
+        OWNED["game"] = proc.pid
+        print(f"  acs.exe pid {proc.pid} (relaunch after early exit)")
     finished = False
     ours = True
     try:
@@ -1261,6 +1292,11 @@ def run_once(args, arm, run_idx):
                 break
         if proc.poll() is not None and acs_running():
             ours = False
+            OWNED["game"] = False               # 2026-10-24: THE BUG THIS LINE FIXES. Our process is gone and the
+                                                # game that is running is someone else's, so we own nothing. Without
+                                                # this, OWNED["game"] stayed set from launch and atexit's cleanup()
+                                                # killed the owner's game by image name on the way out - undoing the
+                                                # 09-13 protection that the very next line announces.
             print("  !! another Assetto Corsa instance is running (not ours) -- aborting this run without touching it")
             if os.path.exists(HARNESS_LUA):
                 os.remove(HARNESS_LUA)
@@ -1327,7 +1363,9 @@ def run_once(args, arm, run_idx):
         restore_assists(assists_bak)
         restore_csp_overrides(csp_restore)
         if ours:
-            subprocess.run(["taskkill", "/IM", "acs.exe", "/F"], capture_output=True)
+            kill_owned_game()                   # by PID (2026-10-24): if OUR game had died mid-race and the owner
+                                                # started theirs inside the poll window, the by-name kill that used
+                                                # to be here ended THEIRS. `ours` is still True on that path.
         # video LAST, and only once AC is gone: AC rewrites video.ini as it exits (it stores the window
         # geometry there), so restoring while it is still alive gets overwritten a second later. Observed
         # 2026-09-24: the restore ran, AC then wrote 1022x646 windowed over it, and the backup was already
