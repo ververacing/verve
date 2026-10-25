@@ -31,6 +31,16 @@ R.INTENSITY   = 0.7        -- racecraft "how hard they race" slider
 R.VARIABILITY = 0.5        -- variability slider: spreads per-driver aggression across the field
 R.attacking = 0
 R.defending = 0
+-- (2026-10-24) THE PREMISE COUNTER FOR R.FASTER_MARGIN_X, ZERO BY CONSTRUCTION AT THE DEFAULT. Counts attack
+-- entries the DEFAULT margin would refuse and the LOOSENED one admits: `spd < aheadSpd - K.FASTER_MARGIN` AND
+-- `spd >= aheadSpd - K.FASTER_MARGIN * R.FASTER_MARGIN_X`. At X = 1.0 those cannot both hold, so this reads
+-- EXACTLY 0 - and any other value there means THE COUNTER is wrong, not the switch. At X > 1 it must exceed 0
+-- or the switch is dead.
+-- WHY IT EXISTS: the first premise gate for this switch compared `attacking` between two rows, which is vacuous
+-- twice over - two rows at identical settings already differ run to run (s64's 100b v 100c), AND `R.attacking`
+-- is RESET EVERY FRAME in R.beginFrame(), so it is a per-frame GAUGE and comparing it compares one frame.
+-- CUMULATIVE ON PURPOSE: zeroed in R.reset() at session start, never in beginFrame().
+R.fmOnlyN = 0
 R.isOval = false           -- set per session: true if the track turns mostly one way (an oval/speedway)
 
 -- oval groove: on a speedway, stock cars commit to a high or low LANE and run it side-by-side
@@ -1215,10 +1225,25 @@ local evalBody = function()
         local paceEdge = false   -- R.PASS_COMMIT: I am the clearly quicker driver and I'm committing to the pass
 
         -- raw instantaneous reads: is there a fight on right now?
-        local fasterM = K.FASTER_MARGIN * R.FASTER_MARGIN_X    -- one effective margin for all four uses below
+        -- NARROWED 2026-10-24 (the cloud's objection, and it is right): the multiplier applies to the ATTACK
+        -- side ONLY - this gate and the `fasterMargin` handed to strategy's move PICK. rawDefend below and the
+        -- yield both stay on the plain K.FASTER_MARGIN.
+        -- WHY: X>1 at every site would make a star attack more AND make the cars ahead defend harder against it
+        -- AND make damaged cars yield less. In a star climb those pull against each other, so a null would have
+        -- been CANCELLATION rather than a finding. The mechanism is attack-side - the lunge analysis put all 256
+        -- 'left' exits on this gate's speed term - and `R.COMMIT_HOLD_X` sets the house precedent by being
+        -- "ATTACK commitment only (defend untouched)". My first version cited that precedent and then did the
+        -- opposite of what it does. c16d4e7's de-dup concern was attack STATE v move PICK, which these two
+        -- still share, so nothing diverges.
+        local fasterM = K.FASTER_MARGIN * R.FASTER_MARGIN_X    -- ATTACK side only: this gate + strategy's pick
         local rawAttack = (gapA < attackGap and spd >= aheadSpd - fasterM)
+        -- the premise counter: an entry the DEFAULT margin refuses and the loosened one admits. 0 at X=1.0 by
+        -- construction, because the two comparisons become mutually exclusive.
+        if gapA < attackGap and spd < aheadSpd - K.FASTER_MARGIN and spd >= aheadSpd - fasterM then
+            R.fmOnlyN = R.fmOnlyN + 1
+        end
         local behindLat = behindIdx >= 0 and latOf(ac.getCar(behindIdx).position) or 0
-        local rawDefend = (gapB < defendGap and behindSpd > spd - fasterM
+        local rawDefend = (gapB < defendGap and behindSpd > spd - K.FASTER_MARGIN
                            and math.abs(behindLat) < K.OFFLINE_MAX)   -- ignore a car miles off-line
 
         -- resolve the COMMITTED state (see COMMIT_* notes): a genuine read (re)commits and refreshes
@@ -1652,11 +1677,9 @@ local evalBody = function()
             state = 0
             target = 0                                                 -- no diving for passes with a bent car
             aggr = math.min(aggr, K.YIELD_AGGR)
-            -- the effective margin again, written out rather than reusing `fasterM`: this site is more deeply
-            -- nested than where that local is declared, so its scope here is plausible but not certain, and a
-            -- silent nil would read as 0 km/h and change the yield.
-            if behindIdx >= 0 and gapB < K.YIELD_GAP
-               and behindSpd > spd + K.FASTER_MARGIN * R.FASTER_MARGIN_X then
+            -- NARROWED 2026-10-24: back on the plain K.FASTER_MARGIN. The multiplier is ATTACK-side only, and a
+            -- damaged car yielding LESS to a faster car works against the attack change it was meant to test.
+            if behindIdx >= 0 and gapB < K.YIELD_GAP and behindSpd > spd + K.FASTER_MARGIN then
                 yielding = true
                 -- keep whatever side we've already committed to (don't re-pick and weave); only choose
                 -- one the first time, or if the current side is against an edge.
@@ -2073,6 +2096,7 @@ R.SESSION_SALT = true; R.salt = ((os.time() + math.floor(os.clock() * 1000)) % 9
 function R.reset()
     R.salt = ((os.time() + math.floor(os.clock() * 1000)) % 9973)
     dmgSeen, dmgLap = {}, {}
+    R.fmOnlyN = 0               -- cumulative premise counter: zeroed per SESSION, never per frame
     R.hurtSeen, R.hurtLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     letbyT, letbyDone, letbyFor = {}, {}, {}
