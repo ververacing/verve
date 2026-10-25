@@ -41,23 +41,30 @@ def ol_s(lap, spline):
     return spline
 
 
-def bucket(lap, spline, grid_before_line):
-    """Bucket a contact, with the lap index normalised so 0 is always the FIRST FULL LAP.
+def bucket(lap, spline, wrap_above):
+    """Bucket a contact. `wrap_above` is the spline above which a LAP-0 car is still ON THE GRID, or None
+    if this race's grid sits after the line (never wrap).
 
-    AC increments lapCount AT THE TIMING LINE. So on a track whose grid sits BEFORE the line the cars
-    start at spline ~0.98 with lapCount 0, cross the line within seconds, and the first full lap is
-    lapCount 1. On a grid-AFTER-line track the first full lap is lapCount 0. Bucketing on the raw lap
-    number therefore means DIFFERENT THINGS ON DIFFERENT TRACKS, and pooling the two put the pre-line
-    grid stretch and the first full lap in the same bucket on half the corpus. `openlap` removes that.
+    AC's lapCount counts COMPLETED laps, and it does NOT increment at the first line crossing. So on a
+    grid-before-line track LAP 0 SPANS BOTH the short grid stretch (spline ~0.98 -> 1.0) AND the entire
+    first full lap (0.0 -> 1.0). That is exactly why the house wraps with olS (racecraft.lua:933) instead
+    of shifting the lap index.
+
+    An earlier version of this function shifted the lap index by one on such tracks, on the false premise
+    that lapCount increments at the line. It therefore labelled THE WHOLE FIRST LAP as "launch" and
+    inflated that bucket from 35.8 to 54.4 contacts per 100 car-laps. The falsifier was in the data the
+    whole time: a 2-LAP race ends at lap 2, and its first snapshot has every car at lap 0 with spline
+    0.977-0.997. If the line incremented the count, a 2-lap race would end at lap 3.
+
+    `wrap_above` comes from the race's own grid splines rather than a fixed 0.5, because a bare "> 0.5"
+    wraps a car that is merely 66% through its first lap into the grid phase. The house avoids this with
+    cv2.crossed[i], which the diag does not carry.
     """
-    openlap = lap - 1 if grid_before_line else lap
-    if openlap < 0:
-        return "launch"          # the pre-line grid stretch: the getaway itself
-    if openlap >= 2:
+    if lap >= 2:
         return "later"
-    if openlap == 1:
+    if lap == 1:
         return "lap1"
-    s = spline - 1.0 if (grid_before_line and spline > 0.5) else spline
+    s = spline - 1.0 if (wrap_above is not None and spline >= wrap_above) else spline
     if s < 0:
         return "launch"
     if s < CV_END:
@@ -96,15 +103,20 @@ def read_diag(path):
                     o = json.loads(line)
                     laps = max(laps, o.get("leaderLap") or 0)
                     if gbl is None:
-                        # GRID GEOMETRY, from the first snapshot: are the lap-0 cars sitting at a HIGH
-                        # spline (before the timing line) or a low one (after it)? Measured per race
-                        # rather than assumed per track, because a track can have several layouts.
+                        # GRID GEOMETRY from this race's OWN first snapshot: if the lap-0 cars are sitting
+                        # at a high spline they are still behind the timing line, and the wrap threshold is
+                        # just under the lowest of them. A fixed 0.5 would wrap a car merely 66% through
+                        # its first lap into the grid phase (seen on acu_unitedstates/east, 23 Oct).
                         sp = [c.get("spline", 0) / 1000.0 for c in o.get("grid", []) if (c.get("lap") or 0) == 0]
+                        # A real pre-line grid sits at 0.97-0.99, so test against 0.90, not 0.5. With 0.5
+                        # a single car 66% through its first lap set a 0.65 wrap on 3 races (COTA East,
+                        # 23 Oct, where only one car was still on lap 0 by the first snapshot).
+                        hi = [x for x in sp if x > 0.90]
                         if sp:
-                            gbl = sum(1 for x in sp if x > 0.5) > len(sp) / 2.0
+                            gbl = (min(hi) - 0.01) if (len(hi) > len(sp) / 2.0) else False
                 except Exception:
                     pass
-    return hdr, snaps, cons, laps, bool(gbl)
+    return hdr, snaps, cons, laps, (gbl if isinstance(gbl, float) else None)
 
 
 def arm_token(stem):
@@ -308,44 +320,47 @@ def selftest():
 
     # CONTROL CASE, and the whole reason this tool needs a selftest: a grid that sits before the timing
     # line reads spline ~0.98 on lap 0. Without the house wrap that is "97% round the opening lap".
-    # GRID BEFORE THE LINE (gbl=True): lap 0 is only the getaway, the first FULL lap is lapCount 1.
-    check("gbl: grid getaway, spline 0.980 lap 0", bucket(0, 0.980, True), "launch")
-    check("gbl: grid getaway, spline 0.995 lap 0", bucket(0, 0.995, True), "launch")
-    check("gbl: first full lap start is lap 1",    bucket(1, 0.010, True), "convoy")
-    check("gbl: mid convoy of first full lap",     bucket(1, 0.440, True), "convoy")
-    check("gbl: past CV.END on first full lap",    bucket(1, 0.460, True), "lap0_late")
-    check("gbl: second full lap is lap 2",         bucket(2, 0.100, True), "lap1")
-    check("gbl: lap 3 is later",                   bucket(3, 0.100, True), "later")
-    # GRID AFTER THE LINE (gbl=False): lap 0 IS the first full lap.
-    check("gal: first full lap is lap 0",          bucket(0, 0.010, False), "convoy")
-    check("gal: past CV.END on lap 0",             bucket(0, 0.460, False), "lap0_late")
-    check("gal: lap 1 is the second lap",          bucket(1, 0.100, False), "lap1")
-    check("gal: lap 2 is later",                   bucket(2, 0.010, False), "later")
-    # a late-race car near the line must NOT wrap into 'launch' under either geometry
-    check("gbl: lap 5 at spline 0.99 is later",    bucket(5, 0.99, True), "later")
-    check("gal: lap 5 at spline 0.99 is later",    bucket(5, 0.99, False), "later")
-    # CONTROL that the geometry MATTERS: the same (lap, spline) must bucket differently.
-    if bucket(1, 0.010, True) == bucket(1, 0.010, False):
-        ok = False
-        print("  FAIL geometry flag has no effect - the two track layouts are being conflated again")
-    else:
-        print("  pass geometry changes the bucket: lap1@0.01 is %r (grid before line) vs %r (after)"
-              % (bucket(1, 0.010, True), bucket(1, 0.010, False)))
+    # GRID BEFORE THE LINE: wrap_above ~0.97, so lap 0 holds BOTH the grid stretch AND the first full lap.
+    W = 0.97
+    check("on the grid, spline 0.980",            bucket(0, 0.980, W), "launch")
+    check("on the grid, spline 0.995",            bucket(0, 0.995, W), "launch")
+    check("just after the line, lap 0",           bucket(0, 0.010, W), "convoy")
+    check("mid convoy zone, lap 0",               bucket(0, 0.440, W), "convoy")
+    check("past CV.END, lap 0",                   bucket(0, 0.460, W), "lap0_late")
+    # THE REGRESSION THIS CAUGHT: 66% through the FIRST lap is NOT the grid phase. A bare "> 0.5" wrap, or
+    # a lap-index shift, called this launch and inflated the launch bucket by half.
+    check("66% through the first lap is NOT launch", bucket(0, 0.659, W), "lap0_late")
+    check("19% through the first lap is convoy",     bucket(0, 0.194, W), "convoy")
+    check("second full lap",                      bucket(1, 0.100, W), "lap1")
+    check("third lap is later",                   bucket(2, 0.100, W), "later")
+    # GRID AFTER THE LINE: never wrap, so a high lap-0 spline is the END of the first lap, not the grid.
+    check("no wrap: lap 0 at 0.98 is late, not launch", bucket(0, 0.980, None), "lap0_late")
+    check("no wrap: lap 0 at 0.01 is convoy",           bucket(0, 0.010, None), "convoy")
+    # a 2-LAP race ends at lap 2, which is the fact that disproves the lap-shift premise
+    check("lap 2 is later even at a low spline", bucket(2, 0.010, W), "later")
 
-    # MUTANT: reinstate the bug the wrap exists to prevent, and the control MUST flip.
-    def naive(lap, spline):
-        if lap >= 2:
-            return "later"
-        if lap == 1:
-            return "lap1"
+    # MUTANT: reinstate the two bugs this function has actually had, and the controls MUST flip.
+    def naive_no_wrap(lap, spline):
+        if lap >= 2: return "later"
+        if lap == 1: return "lap1"
         return "convoy" if spline < CV_END else "lap0_late"
 
-    mut = naive(0, 0.980)
-    if mut == "launch":
-        ok = False
-        print("  FAIL mutant: naive bucketing still said 'launch' - the test cannot detect the bug")
+    def naive_lapshift(lap, spline):
+        openlap = lap - 1
+        if openlap < 0: return "launch"
+        if openlap >= 2: return "later"
+        if openlap == 1: return "lap1"
+        return "convoy" if spline < CV_END else "lap0_late"
+
+    if naive_no_wrap(0, 0.980) == "launch":
+        ok = False; print("  FAIL mutant 1: no-wrap bucketing still found the grid shunt")
     else:
-        print("  pass mutant without the wrap puts the grid shunt in %r, so the test has teeth" % mut)
+        print("  pass mutant 1 without the wrap, a grid shunt becomes %r" % naive_no_wrap(0, 0.980))
+    if naive_lapshift(0, 0.194) != "launch":
+        ok = False; print("  FAIL mutant 2: the lap-shift bug did not reproduce - test has no teeth")
+    else:
+        print("  pass mutant 2 the lap-shift bug calls 19%% of the FIRST LAP 'launch', as it did in the "
+              "reported numbers")
 
     # ARM TOKENS - pure, no filesystem. The control is the owner's own filename: its TRACK contains no
     # arm token, and the first version of this tool read that track slug as a label and said "ON".
