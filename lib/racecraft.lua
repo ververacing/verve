@@ -1195,7 +1195,11 @@ local evalBody = function()
         -- this value is also written by FAST_TUCK and OL_SIDEYIELD, and delaying one of those by the slew's own
         -- 0.25 s would be ~14 m at 200 km/h - an unmeasured safety change smuggled into a smoothing switch. Only
         -- the RISE is slewed, which is the edge the pulsing is actually made of (gate opens, limit snaps to 1.0).
-        if R.CV_SMOOTH then
+        -- (2026-10-26 v2) START-ONLY: gate the slew to lap 0. v1 put the slew at the throttle-write site with no
+        -- lap condition, so FAST_TUCK/OL_SIDEYIELD writes on LATER laps got slewed too (measured: 9-20% of the
+        -- slew's activity happened after lap 0). The lights-out convoy smoothing is a lap-0 concern; `myLap == 0`
+        -- confines it and leaves later-lap FAST_TUCK/side-yield releases immediate. Default still OFF.
+        if R.CV_SMOOTH and myLap == 0 then
             local prev = cv2.thrOut[i]
             if prev and thr > prev then
                 local step = CV.THR_SLEW * (dt > 0 and dt < 0.5 and dt or 0.016)
