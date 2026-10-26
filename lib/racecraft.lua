@@ -154,7 +154,7 @@ local CV = { END = 0.45, GAP = 0.006, LAT = 0.35, MARGIN = 6.0,          -- v1: 
              RS_EDGE = 0.80, RS_MARGIN_M = 0.8, RS_CARW_M = 1.9, RS_BACK_M = 12.0, RS_FWD_M = 10.0, RS_REAREND = 0.35, RS_ADV = 0.5,
              ISO_REACH_M = 300.0, LONE_M = 50.0,
              LANE_OFF = 0.45, LANE_APEX_M = 40.0, LANE_SCAN_M = 20.0, LANE_MAX_M = 900.0, LANE_LOCAL_M = 12.0, LANE_COL_GAP_M = 1.5 }   -- turn-1 lanes: offset, hold this far past the apex, corner-scan step, give up looking this far out   -- alone-on-track: a car ahead within this is 'catchable' for a top-tier driver; nobody within this either way = lone   -- road space: usable edge (track units), margin + fallback car width (m), scan window behind me / past the car ahead (m), rear-end ease left while pulling out, run needed (x the aggression-scaled minimum)
-local cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, crossed = {}, mvThr = {}, mvBg = {} }      -- v2 state: lights-out clock, distance behind the front car, cars we throttled, guard applied, base brake hints
+local cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, crossed = {}, mvThr = {}, mvBg = {}, thrLast = {}, thrTog = {} }      -- v2 state: lights-out clock, distance behind the front car, cars we throttled, guard applied, base brake hints
 R.cv2 = cv2                                                               -- (read by diag's contact trace)
 -- CONVOY v2 (harness A/B: R.CONVOY2_ON): throttle, never a speed cap. A follower closing on the car ahead on the
 -- same line loses throttle in proportion to the gap; the field is released from the lights row by row.
@@ -1132,6 +1132,18 @@ local evalBody = function()
         local hm = R.humanMv and R.humanMv[i]
         if hm and (os.clock() >= (hm.lv or 0) or (Recovery.stateOf(i) or R.NOSTATE).rec) then hm = nil end
         if hm and hm.thr then thr = math.min(thr, hm.thr); cv2.mvThr[i] = true end
+        -- (2026-10-25) THROTTLE-LIMIT PULSE COUNT, logging only, no behaviour change. The owner reported cars
+        -- "jumpy right off the line" and the census cannot see it: it counts DAMAGE, and their game has
+        -- DAMAGE=0, so their own sessions registered 0 contact events against 7 counted contacts.
+        -- WHAT IS COUNTED, and the choice matters: BOUNDARY CROSSINGS between capped and uncapped, NOT raw
+        -- value changes. `thr` comes off a gap ramp (:1109) and so moves almost every frame, which would
+        -- measure the ramp rather than the complaint. The suspected mechanism is bang-bang: the gate at
+        -- :1105 needs `spd > aheadSpd + CV.CLOSING`, cutting throttle removes the closing speed, the gate
+        -- opens, and the line below snaps the limit back to 1.0 - the gated quantity is the one the action
+        -- removes. That shows up as crossings, not as ramp motion.
+        local capped = thr < 1.0
+        if capped ~= (cv2.thrLast[i] == true) then cv2.thrTog[i] = (cv2.thrTog[i] or 0) + 1 end
+        cv2.thrLast[i] = capped
         if thr < 1.0 then cv2.thr[i] = true; pcall(physics.setAIThrottleLimit, i, thr)
         elseif cv2.thr[i] then cv2.thr[i] = nil; cv2.mvThr[i] = nil; pcall(physics.setAIThrottleLimit, i, 1.0) end
         -- BRAKE-ZONE GUARD (lap 0): the car ahead on my line is on the brakes and I'm inside CV.BG_M -> raise my brake
@@ -2161,7 +2173,7 @@ function R.reset()
     R.hurtSeen, R.hurtLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     letbyT, letbyDone, letbyFor = {}, {}, {}
-    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {} }; R.cv2 = cv2
+    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {}, thrLast = {}, thrTog = {} }; R.cv2 = cv2
     R.crawlN = 0; R.topV = {}; R.aggV = {}
     R.roomN = 0; R.roomAct = 0; R.evalN = 0; R.fastTuckN = 0; R.yellowSlowN = 0; R.bgN = 0; R.bgPassN = 0
     R.errN = 0; R.errFirst = nil   -- (R.errN) per SESSION, matching how Verve.lua zeroes luaErrors
