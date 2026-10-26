@@ -144,7 +144,7 @@ K.YIELD_GAP = 0.010 -- a lapping car this close behind -> start moving aside
 R.CONVOY_ON = false          -- v1 speed cap: OFF (halved lap-1 contact at Barcelona, 16-of-18 pile-up at Spa); kept for experiments
 -- (one table: LuaJIT allows a function 120 upvalues and R.evaluate's closure was over the limit -- Verve then fails to load)
 local CV = { END = 0.45, GAP = 0.006, LAT = 0.35, MARGIN = 6.0,          -- v1: lap fraction covered, gap (m via scaleToTrack), same-line lat, km/h margin
-             NEAR_M = 8.0, GAP_M = 25.0, THR_MIN = 0.35, CLOSING = 2.0, SNAP = 0.25,  -- v2 throttle convoy: gap at the floor, gap where it starts, floor, closing km/h
+             NEAR_M = 8.0, GAP_M = 25.0, THR_MIN = 0.35, CLOSING = 2.0, SNAP = 0.25, HYST = 1.0, THR_SLEW = 2.0,  -- v2 throttle convoy: gap at the floor, gap where it starts, floor, closing km/h
              ROW_M = 8.0, ROW_T = 0.12, THR = 0.35,                      -- v2 staggered release: one row of distance, extra hold per row, throttle while held
              ROWCAUT = 0.35, ROWCAUT_M = 90.0,                           -- brake-earlier-from-the-back: full extra caution this far behind the front car
              SPIN_FRAC = 0.55, SPIN_DOT = 0.55,                          -- opening-lap yellow: car ahead under this fraction of my speed, or nose off its travel by this much
@@ -154,12 +154,26 @@ local CV = { END = 0.45, GAP = 0.006, LAT = 0.35, MARGIN = 6.0,          -- v1: 
              RS_EDGE = 0.80, RS_MARGIN_M = 0.8, RS_CARW_M = 1.9, RS_BACK_M = 12.0, RS_FWD_M = 10.0, RS_REAREND = 0.35, RS_ADV = 0.5,
              ISO_REACH_M = 300.0, LONE_M = 50.0,
              LANE_OFF = 0.45, LANE_APEX_M = 40.0, LANE_SCAN_M = 20.0, LANE_MAX_M = 900.0, LANE_LOCAL_M = 12.0, LANE_COL_GAP_M = 1.5 }   -- turn-1 lanes: offset, hold this far past the apex, corner-scan step, give up looking this far out   -- alone-on-track: a car ahead within this is 'catchable' for a top-tier driver; nobody within this either way = lone   -- road space: usable edge (track units), margin + fallback car width (m), scan window behind me / past the car ahead (m), rear-end ease left while pulling out, run needed (x the aggression-scaled minimum)
-local cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, crossed = {}, mvThr = {}, mvBg = {}, thrLast = {}, thrTog = {}, thrPrev = {}, thrSnap = {} }      -- v2 state: lights-out clock, distance behind the front car, cars we throttled, guard applied, base brake hints
+local cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, crossed = {}, mvThr = {}, mvBg = {}, thrLast = {}, thrTog = {}, thrPrev = {}, thrSnap = {}, cvEng = {}, thrOut = {} }      -- v2 state: lights-out clock, distance behind the front car, cars we throttled, guard applied, base brake hints
 R.cv2 = cv2                                                               -- (read by diag's contact trace)
 -- CONVOY v2 (harness A/B: R.CONVOY2_ON): throttle, never a speed cap. A follower closing on the car ahead on the
 -- same line loses throttle in proportion to the gap; the field is released from the lights row by row.
 R.CONVOY2_ON = true 
 R.ROWCAUT_X = 1.0             -- row-caution multiplier (A/B for big grids, 2026-09-19)
+R.CV_SMOOTH = false          -- (2026-10-26) SMOOTH THE LAP-0 CONVOY THROTTLE. DEFAULT OFF, untested as a default.
+                              -- Two changes together, both gated on this one switch: HYSTERESIS on the closing gate
+                              -- (engage above aheadSpd + CV.CLOSING, release only below aheadSpd - CV.HYST) and a
+                              -- one-sided SLEW of CV.THR_SLEW units/sec on the limit's RELEASE (a reduction is
+                              -- still immediate - see the slew site). WHY: the gate reads a quantity
+                              -- its own action removes - cut throttle, lose the closing speed, gate opens, limit
+                              -- snaps to 1.0 - so it pulses. MEASURED on the owner's shape, n=6: four of five AI
+                              -- cars pulse in EVERY race, thrSnap median 19 an opening lap, 69-91% of crossings
+                              -- genuine single-frame steps, and the one clean car was the POLE SITTER in all six
+                              -- rows (the gate needs aheadIdx >= 0). K.OFFSET_SLEW already does this on the
+                              -- LATERAL axis, commented "anti-dart"; this is the longitudinal equivalent.
+                              -- NOT a default until the gating cells pass: turning the easing OFF is already
+                              -- measured as WORSE (~3x heavy lap-0/1 hits on Monza GT3), so the aim is to keep the
+                              -- easing and remove the stepping, NOT to reduce the hold.
 R.START_T1_M = 0              -- >0: a first corner closer than this (m) to the line keeps the Calm easing whatever raceStart says (Spa's La Source)
 R.START_X = 1.0               -- RACE START (user option raceStart): scales the whole opening-lap easing. 1 = Calm (the default: caution,
                               -- staggered release, convoy throttle), 0.5 = Racing (half of it), 0 = Stock (none of it, brake guard off too).
@@ -1102,8 +1116,21 @@ local evalBody = function()
             local cvGap, cvNear = CV.GAP_M, CV.NEAR_M
             if R.CV_TGAP > 0 then cvGap = math.max(CV.GAP_M, spd / 3.6 * R.CV_TGAP); cvNear = cvGap * (CV.NEAR_M / CV.GAP_M) end   -- a time gap: the faster I arrive, the further out I ease
             if roomF then cvGap = math.max(cvGap, spd / 3.6 * R.ROOM_TG * tightHere); cvNear = cvGap * (CV.NEAR_M / CV.GAP_M) end   -- ROOM_FOLLOW: a time gap in tight room, every lap
-            if ((olS < CV.END and myLap == 0) or roomF) and aheadIdx >= 0 and gapA * trackLen < cvGap and spd > aheadSpd + CV.CLOSING
+            -- (2026-10-26, R.CV_SMOOTH, DEFAULT OFF) HYSTERESIS ON THE CLOSING GATE. Measured on the owner's own
+            -- shape, n=6: four of five AI cars pulse in EVERY race, thrSnap median 19 an opening lap, 69-91% of
+            -- throttle-limit crossings being genuine single-frame STEPS. The loop is that this gate reads
+            -- `spd > aheadSpd + CV.CLOSING`, cutting throttle REMOVES the closing speed, the gate opens, and the
+            -- limit snaps back to 1.0 - THE GATED QUANTITY IS THE ONE THE ACTION REMOVES. Confirmed by a
+            -- prediction that could have failed: the only non-pulsing AI car was the POLE SITTER in all six rows,
+            -- which is what `aheadIdx >= 0` requires.
+            -- Once engaged, hold until the car is clearly NOT closing (CV.HYST below the car ahead) instead of
+            -- releasing the instant it stops gaining. Same idea as K.OFFSET_SLEW on the lateral axis, whose own
+            -- comment reads "anti-dart" - that axis was given this treatment and the longitudinal one never was.
+            local closeEnough = spd > aheadSpd + CV.CLOSING
+            if R.CV_SMOOTH and cv2.cvEng[i] then closeEnough = spd > aheadSpd - CV.HYST end
+            if ((olS < CV.END and myLap == 0) or roomF) and aheadIdx >= 0 and gapA * trackLen < cvGap and closeEnough
                and not (R.OL_STAR_CONVOY and Strategy.tierOf(i) >= 2) and not (wild and myLap == 0 and (R.WILD_CONVOY or R.WILD_START)) then
+                cv2.cvEng[i] = true
                 local aCar = ac.getCar(aheadIdx)
                 if aCar and math.abs(latOf(aCar.position) - latOf(me.position)) < CV.LAT then
                     local gm = gapA * trackLen
@@ -1112,10 +1139,16 @@ local evalBody = function()
                     thr = math.min(thr, lim)
                     if roomF and myLap > 0 then R.roomAct = (R.roomAct or 0) + 1 end
                 end
+            else
+                cv2.cvEng[i] = nil   -- the gate must RELEASE, or the hysteresis latches on for the session
             end
             -- SIDE YIELD: two-abreast into a corner on lap 0 is how same-row pairs touch (Barcelona F1 2026-09-16:
             -- six of nine lap-0 contacts). The car behind by a nose eases and tucks in.
             if myLap == 0 and R.OL_SIDEYIELD and sideBy and cornerAhead(mySpline) then thr = math.min(thr, CV.SIDE_THR) end
+        else
+            cv2.cvEng[i] = nil   -- the OUTER gate dropped (recovery, crowd, a lap with no roomF): the
+                                 -- hysteresis latch must not survive it, or the next episode begins already
+                                 -- engaged and gets the loose release test on its very first frame.
         end
         -- FAST TUCK (R.FAST_TUCK): two abreast at speed into a bend, the car behind by a nose backs out instead of squeezing
         if R.FAST_TUCK > 0 and (sideBy or fastBy) and spd > R.FAST_TUCK and myLap >= R.FAST_TUCK_MINLAP and not (Recovery.stateOf(i) or R.NOSTATE).rec then
@@ -1153,6 +1186,23 @@ local evalBody = function()
         -- Known limitation, stated rather than hidden: a car that skips this block on some frames (not
         -- managed) leaves thrPrev stale, which can log one spurious snap on its next pass. Acceptable for a
         -- logging-only counter; it cannot inflate a whole race's count.
+        -- (2026-10-26, R.CV_SMOOTH, DEFAULT OFF) SLEW ON THE RELEASE OF THE THROTTLE LIMIT, the second half of
+        -- the fix, applied BEFORE the counters so thrSnap measures what the car actually gets. Takes the dt guard
+        -- and step form from K.OFFSET_SLEW at :1964 ("slew the offset (anti-dart)") - dt can arrive as 0 or huge
+        -- after a stall, and `(dt > 0 and dt < 0.5 and dt or 0.016)` is the house answer to both.
+        -- ONE-SIDED, AND THAT IS THE POINT, which is where it departs from OFFSET_SLEW's symmetric form: a
+        -- REDUCTION is a car easing off for something ahead and is applied the same frame it is decided, because
+        -- this value is also written by FAST_TUCK and OL_SIDEYIELD, and delaying one of those by the slew's own
+        -- 0.25 s would be ~14 m at 200 km/h - an unmeasured safety change smuggled into a smoothing switch. Only
+        -- the RISE is slewed, which is the edge the pulsing is actually made of (gate opens, limit snaps to 1.0).
+        if R.CV_SMOOTH then
+            local prev = cv2.thrOut[i]
+            if prev and thr > prev then
+                local step = CV.THR_SLEW * (dt > 0 and dt < 0.5 and dt or 0.016)
+                if thr > prev + step then thr = prev + step end
+            end
+            cv2.thrOut[i] = thr
+        end
         local capped = thr < 1.0
         if capped ~= (cv2.thrLast[i] == true) then cv2.thrTog[i] = (cv2.thrTog[i] or 0) + 1 end
         cv2.thrLast[i] = capped
@@ -2188,7 +2238,7 @@ function R.reset()
     R.hurtSeen, R.hurtLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     letbyT, letbyDone, letbyFor = {}, {}, {}
-    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {}, thrLast = {}, thrTog = {}, thrPrev = {}, thrSnap = {} }; R.cv2 = cv2
+    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {}, thrLast = {}, thrTog = {}, thrPrev = {}, thrSnap = {}, cvEng = {}, thrOut = {} }; R.cv2 = cv2
     R.crawlN = 0; R.topV = {}; R.aggV = {}
     R.roomN = 0; R.roomAct = 0; R.evalN = 0; R.fastTuckN = 0; R.yellowSlowN = 0; R.bgN = 0; R.bgPassN = 0
     R.errN = 0; R.errFirst = nil   -- (R.errN) per SESSION, matching how Verve.lua zeroes luaErrors
