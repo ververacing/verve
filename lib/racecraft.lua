@@ -154,7 +154,7 @@ local CV = { END = 0.45, GAP = 0.006, LAT = 0.35, MARGIN = 6.0,          -- v1: 
              RS_EDGE = 0.80, RS_MARGIN_M = 0.8, RS_CARW_M = 1.9, RS_BACK_M = 12.0, RS_FWD_M = 10.0, RS_REAREND = 0.35, RS_ADV = 0.5,
              ISO_REACH_M = 300.0, LONE_M = 50.0,
              LANE_OFF = 0.45, LANE_APEX_M = 40.0, LANE_SCAN_M = 20.0, LANE_MAX_M = 900.0, LANE_LOCAL_M = 12.0, LANE_COL_GAP_M = 1.5 }   -- turn-1 lanes: offset, hold this far past the apex, corner-scan step, give up looking this far out   -- alone-on-track: a car ahead within this is 'catchable' for a top-tier driver; nobody within this either way = lone   -- road space: usable edge (track units), margin + fallback car width (m), scan window behind me / past the car ahead (m), rear-end ease left while pulling out, run needed (x the aggression-scaled minimum)
-local cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, crossed = {}, mvThr = {}, mvBg = {}, thrLast = {}, thrTog = {}, thrPrev = {}, thrSnap = {}, cvEng = {}, thrOut = {} }      -- v2 state: lights-out clock, distance behind the front car, cars we throttled, guard applied, base brake hints
+local cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, crossed = {}, mvThr = {}, mvBg = {}, thrLast = {}, thrTog = {}, thrPrev = {}, thrSnap = {}, cvEng = {}, thrOut = {}, thrSlew = {} }      -- v2 state: lights-out clock, distance behind the front car, cars we throttled, guard applied, base brake hints
 R.cv2 = cv2                                                               -- (read by diag's contact trace)
 -- CONVOY v2 (harness A/B: R.CONVOY2_ON): throttle, never a speed cap. A follower closing on the car ahead on the
 -- same line loses throttle in proportion to the gap; the field is released from the lights row by row.
@@ -1199,7 +1199,14 @@ local evalBody = function()
             local prev = cv2.thrOut[i]
             if prev and thr > prev then
                 local step = CV.THR_SLEW * (dt > 0 and dt < 0.5 and dt or 0.016)
-                if thr > prev + step then thr = prev + step end
+                if thr > prev + step then thr = prev + step
+                    -- thrSlew: the DIRECT "this code executed" counter, and the reason it exists is the
+                    -- project's own failure pattern - 0042, START_X, the aiLapsLeft raise and the fuel
+                    -- top-up were all changes that shipped and were INERT because the lever was not where
+                    -- it looked. Without this, a null result on thrSnap cannot be told apart from the
+                    -- switch never reaching the code. Logging only; nothing reads it in the sim.
+                    cv2.thrSlew[i] = (cv2.thrSlew[i] or 0) + 1
+                end
             end
             cv2.thrOut[i] = thr
         end
@@ -2238,7 +2245,7 @@ function R.reset()
     R.hurtSeen, R.hurtLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     letbyT, letbyDone, letbyFor = {}, {}, {}
-    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {}, thrLast = {}, thrTog = {}, thrPrev = {}, thrSnap = {}, cvEng = {}, thrOut = {} }; R.cv2 = cv2
+    cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {}, thrLast = {}, thrTog = {}, thrPrev = {}, thrSnap = {}, cvEng = {}, thrOut = {}, thrSlew = {} }; R.cv2 = cv2
     R.crawlN = 0; R.topV = {}; R.aggV = {}
     R.roomN = 0; R.roomAct = 0; R.evalN = 0; R.fastTuckN = 0; R.yellowSlowN = 0; R.bgN = 0; R.bgPassN = 0
     R.errN = 0; R.errFirst = nil   -- (R.errN) per SESSION, matching how Verve.lua zeroes luaErrors
