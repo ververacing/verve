@@ -504,8 +504,8 @@ def selftest():
         run(G + ["add", "-A"]); run(G + ["commit", "-q", "-m", "removes it, fixing forward"])
         rng = "HEAD~2..HEAD"
         me = os.path.abspath(__file__)
-        rr = subprocess.run([sys.executable, "-I", me, "--range", rng], capture_output=True, text=True,
-                            cwd=repo, timeout=120, env={**os.environ, "LEAKCHECK_ALLOW_NO_DENYLIST": "1"})
+        rr = subprocess.run([sys.executable, "-I", me, "--range", rng, "--allow-no-denylist"],
+                            capture_output=True, text=True, cwd=repo, timeout=120)
         rh = subprocess.run([sys.executable, "-I", me, "--history", rng], capture_output=True, text=True,
                             cwd=repo, timeout=120)
         print("  --range PASSES an add-then-remove range (the gap)?      %s (exit %d)"
@@ -523,8 +523,8 @@ def selftest():
         run(G + ["tag", "v_clean", "HEAD"])            # the fixed-forward tip
         rtd = subprocess.run([sys.executable, "-I", me, "--tree", "v_dirty"], capture_output=True, text=True,
                              cwd=repo, timeout=120)
-        rtc = subprocess.run([sys.executable, "-I", me, "--tree", "v_clean"], capture_output=True, text=True,
-                             cwd=repo, timeout=120, env={**os.environ, "LEAKCHECK_ALLOW_NO_DENYLIST": "1"})
+        rtc = subprocess.run([sys.executable, "-I", me, "--tree", "v_clean", "--allow-no-denylist"],
+                             capture_output=True, text=True, cwd=repo, timeout=120)
         rta = subprocess.run([sys.executable, "-I", me, "--refs", "tags", "--mode", "tree"],
                              capture_output=True, text=True, cwd=repo, timeout=300)
         print("  a CLEAN TIP still leaves the TAG dirty - caught?        %s (exit %d)"
@@ -540,20 +540,19 @@ def selftest():
 
         # FAIL-CLOSED ON A MISSING DENYLIST (verve-47, 2026-10-26). tools/.identity_deny is absent here, so a
         # GATING run must exit non-zero: the owner-specific terms were never checked, so "clean" overstates it.
-        # The hatch LEAKCHECK_ALLOW_NO_DENYLIST (set for the subprocesses above so they can test the other
-        # modes) MUST be stripped here, or this case proves nothing.
+        # The sole bypass is the EXPLICIT --allow-no-denylist flag (the subprocesses above pass it to test the
+        # other modes); it MUST be absent here, or this case proves nothing. No env var can reopen the gate.
         cf = os.path.join(repo, "clean.txt")
         with open(cf, "w", encoding="utf-8") as fh:
             fh.write("a perfectly clean line, no identity in it\n")
-        env_no = {k: v for k, v in os.environ.items() if k != "LEAKCHECK_ALLOW_NO_DENYLIST"}
         rfc = subprocess.run([sys.executable, "-I", me, cf], capture_output=True, text=True, cwd=repo,
-                             timeout=60, env=env_no)
+                             timeout=60)
         print("  a clean file with NO denylist FAILS CLOSED (non-zero)?  %s (exit %d)"
               % ("yes" if rfc.returncode != 0 else "NO - BROKEN, fails OPEN", rfc.returncode))
         ok &= rfc.returncode != 0
-        rfo = subprocess.run([sys.executable, "-I", me, cf], capture_output=True, text=True, cwd=repo,
-                             timeout=60, env={**os.environ, "LEAKCHECK_ALLOW_NO_DENYLIST": "1"})
-        print("  ...and PASSES with the test hatch set?                  %s (exit %d)"
+        rfo = subprocess.run([sys.executable, "-I", me, cf, "--allow-no-denylist"], capture_output=True,
+                             text=True, cwd=repo, timeout=60)
+        print("  ...and PASSES with the explicit --allow-no-denylist flag? %s (exit %d)"
               % ("yes" if rfo.returncode == 0 else "NO - BROKEN", rfo.returncode))
         ok &= rfo.returncode == 0
     finally:
@@ -563,15 +562,22 @@ def selftest():
     return 0 if ok else 1
 
 
+# Set True ONLY by --selftest-driven subprocesses, via the EXPLICIT CLI flag --allow-no-denylist, so the
+# selftest can exercise the gating modes with no denylist present. Deliberately NOT an environment variable:
+# an env var is inherited into child shells and hooks and would silently reopen the gate - the exact
+# fail-open this file exists to prevent. The real pre-push gate never passes the flag.
+_ALLOW_NO_DENY = False
+
+
 def _finalize(rc):
     """Fail CLOSED when tools/.identity_deny is absent. The generic rules (paths, email, OS user name, home
     dir) ran, but the OWNER-SPECIFIC terms - the real name, the old tags, the work email - live ONLY in that
     gitignored, owner-supplied file. Without it a 0 verdict claims a clean the tool never checked for, which
     is exactly how a "clean" with no denylist has misled before. So a gating run with no denylist exits
-    non-zero (code 3) whatever the generic rules found - a hit still returns 1. The env hatch
-    LEAKCHECK_ALLOW_NO_DENYLIST exists ONLY so this file's own selftest can exercise the other modes without a
-    denylist present; the real pre-push gate never sets it."""
-    if not os.path.isfile(DENY_FILE) and not os.environ.get("LEAKCHECK_ALLOW_NO_DENYLIST"):
+    non-zero (code 3) whatever the generic rules found - a hit still returns 1. The _ALLOW_NO_DENY module flag
+    (set only by the explicit --allow-no-denylist CLI flag, used only by this file's selftest) is the sole
+    bypass; main() prints a LOUD line whenever that flag is present."""
+    if not os.path.isfile(DENY_FILE) and not _ALLOW_NO_DENY:
         print("  REFUSING A FULL PASS: tools/.identity_deny is ABSENT, so the owner-specific terms "
               "(real name, old tags, work email) were NOT checked - only the generic rules ran above. "
               "This is NOT a clean on identity; add the owner-supplied denylist before trusting a pass.")
@@ -580,10 +586,15 @@ def _finalize(rc):
 
 
 def main():
+    global _ALLOW_NO_DENY
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     rs = rules()
     if "--selftest" in sys.argv:
         return selftest()
+    if "--allow-no-denylist" in sys.argv:
+        _ALLOW_NO_DENY = True
+        print("  !! --allow-no-denylist IS SET: the missing-denylist identity gate is DISABLED for this run. "
+              "This must NEVER appear in a real pre-push gate. !!")
     for i, a in enumerate(sys.argv):
         if a == "--range" and i + 1 < len(sys.argv):
             return _finalize(check_range(sys.argv[i + 1], rs))
