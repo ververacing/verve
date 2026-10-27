@@ -119,6 +119,10 @@ def report(do_restore):
             state = "no recorded value (run --baseline when the game is closed and no backup needs restoring)"
         elif cur == want:
             state = "MATCHES the recorded owner value"
+        elif name == "race.ini":
+            # (owner item 27) the harness rewrites cfg/race.ini every session by design, so it ~always differs from
+            # the owner's recorded baseline. Keep LISTING it, labelled, but do NOT count it as a change/failure.
+            state = "rewritten every launch by the harness (expected; not counted as a change)"
         else:
             state = "DIFFERS from the recorded owner value"
             bad += 1
