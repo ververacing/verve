@@ -130,6 +130,13 @@ SUITE_METRICS = [("contact_events", True, "contact", 1.0), ("incidents", True, "
                  ("heavy80", True, "heavy80", 1.0), ("retired_or_parked", True, "dead", 1.0),
                  ("pace_best_s", True, "pace_s", 0.30)]
 PACE_NOTE = "pace judged on pace_best_s (feed lap_ms, 0.001 s resolution, fastest clean lap = the ceiling)"
+# Metrics where an ABSENT (empty) value is different from a genuine 0 and must REFUSE rather than coerce to 0.0.
+# pace_best_s is joined from pace.csv and is missing until the writer runs. contact_events and incidents are
+# feed-derived and - verified across the 829-row results archive - are never empty in practice, so this is
+# defensive future-proofing for them (a schema gap would otherwise read as a perfect 0 = "not worse"/BETTER).
+# heavy80 and retired_or_parked are NOT here: 0 is a real and common value for them, so "0 in both arms = not
+# judged" (the skip rule) is correct, not a refusal.
+REFUSE_IF_ABSENT = ("contact_events", "incidents", "pace_best_s")
 
 
 def sh(*args):
@@ -322,21 +329,25 @@ def check_not_worse(rep, suite, fresh_prefix, all_rows=()):
             continue
         bad, unresolved, notes, skipped, refused = [], [], [], [], []
         for key, higher_worse, label, floor in SUITE_METRICS:
-            av, bv = nums(a, key), nums(b, key)
-            if key == "pace_best_s":
-                # Pace absent/empty/zero/negative -> REFUSED, never coerced to 0.0. nums() turns a missing or
-                # empty pace into 0.0, and because pace_best_s is higher-worse a 0.0 reads as mean < lo and
-                # prints "0.0 BETTER" - absence masquerading as the fastest possible lap. PC #1's rc17 did exactly
-                # this on mon, spa12 and sgf. Pace is always measurable when pace.csv is written, so a non-positive
-                # value is a tooling gap to block on, not a number to compare against the baseline.
-                avp, bvp = [x for x in av if x > 0], [x for x in bv if x > 0]
-                if len(avp) < len(av) or len(bvp) < len(bv) or not avp or not bvp:
-                    where = ("both arms" if not avp and not bvp else
-                             "baseline" if not avp else "head" if not bvp else "some rows")
+            if key in REFUSE_IF_ABSENT:
+                # An ABSENT value means the metric could not be computed (pace.csv not written, or a log/feed
+                # gap), which is different from a genuine 0. nums() would coerce it to 0.0 and, these metrics all
+                # being higher-worse, a 0.0 reads as mean < lo and prints "0.0 BETTER" - absence masquerading as
+                # the best possible result. PC #1's rc17 did exactly this for pace on mon, spa12 and sgf. So an
+                # absent value REFUSES the cell (a REFUSED counts as a failure) rather than being compared.
+                amiss = sum(1 for r in a if not str(r.get(key) or "").strip())
+                bmiss = sum(1 for r in b if not str(r.get(key) or "").strip())
+                if amiss or bmiss:
+                    where = "both arms" if amiss and bmiss else "baseline" if amiss else "head"
                     refused.append(label)
-                    notes.append("%s REFUSED (absent/zero/negative: %s)" % (label, where))
+                    notes.append("%s REFUSED (absent: %s)" % (label, where))
                     continue
-                av, bv = avp, bvp
+            av, bv = nums(a, key), nums(b, key)
+            if key == "pace_best_s" and any(x <= 0 for x in av + bv):
+                # pace can be PRESENT but 0 or negative (a stale/garbage row); that is still not a lap time.
+                refused.append(label)
+                notes.append("%s REFUSED (zero/negative)" % label)
+                continue
             if not av or not bv or (max(av) == 0 and max(bv) == 0):
                 # the sprint cells never produce a median lap time; do not pretend they did.
                 # BUT SAY SO. This skip used to be silent, and the cell then read "4 of 5 metrics judged" with
@@ -540,6 +551,18 @@ def rule_checks():
         f.append("a pace of 0.0 did not REFUSE (the '0.0 BETTER' bug): %s" % pace_verdicts("0.0"))
     if "REFUSED" in pace_verdicts("109.0"):
         f.append("a VALID pace (109.0, faster than baseline) was wrongly refused: %s" % pace_verdicts("109.0"))
+
+    # An ABSENT (empty) contact_events must REFUSE too; a genuine 0 must still be judged, not refused.
+    def contact_verdicts(fresh_contact):
+        base = [dict(mk("rc97a_sgf_%d" % i, 20), pace_best_s="110.5") for i in (1, 2, 3)]
+        fresh = [dict(mk("rc97b_sgf_%d" % i, 20), pace_best_s="110.5", contact_events=fresh_contact)
+                 for i in (1, 2, 3)]
+        r = Report(); check_not_worse(r, base + fresh, "rc97b", all_rows=base + fresh)
+        return [v for v, n, d in r.rows if "sgf" in n]
+    if "REFUSED" not in contact_verdicts(""):
+        f.append("an ABSENT contact_events did not REFUSE: %s" % contact_verdicts(""))
+    if "REFUSED" in contact_verdicts("0"):
+        f.append("a genuine-0 contact_events was wrongly refused (0 must be judged): %s" % contact_verdicts("0"))
 
     for cell in list(GATING_CELLS) + list(CHARACTER_CELLS):
         m = SUITE_RE.match("rc16c_%s_on_1" % cell)
