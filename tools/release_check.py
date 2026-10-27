@@ -37,6 +37,13 @@ THE BAR, each line a thing this script actually tests:
   7. DOCS CURRENT - docs_check reports no drift.
 Items 4-5 are only as good as the registry and LESSONS being honest, which is why the docs routine is mandatory;
 this script says which it could not evaluate rather than passing them.
+
+VOLATILE, NOT A FAILURE (owner item 26-37, 27 Oct): cfg/race.ini is written fresh by the harness every run by
+design (harness.py builds each row from race.ini.harness-backup as a template; handback.py keeps that backup on
+purpose). Its content therefore differs run to run, and AC's own INIReader warnings against it - e.g.
+"KEY_NOT_FOUND: [SESSION_0] ADDITITIONAL_LAP" seen in crash .report/errors.txt - are benign. Neither this gate nor
+the docs check treats race.ini's churn or those warnings as a release failure; it is a volatile input, not a tracked
+artifact. (Documented so a future error/log scanner is not written to fail a run on it.)
 """
 import os
 import re
