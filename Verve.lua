@@ -129,6 +129,7 @@ local DEFAULTS = {
     -- read as lap-time steps, which mapped slider 80 to level 83 and slider 99 to 94 on a GT car. The schema
     -- bump below turns it off once for installs that already stored `true`, or the decision never reaches them.
     timedFuel = true,    -- DEFAULT 0.14.6 (lib/fuel.lua): fuel a TIMED race's AI for the clock, stop AC's empty-tank pit loop
+    shortFuel = false,   -- DEFAULT OFF (owner item 28, lib/fuel.lua F.SHORT_FUEL): a SHORT lapped race that fits one tank gets a start load covering it, so the AI makes no pointless fuel stop
     paceAbs = true,      -- DEFAULT 0.14.8 (lib/drivers.lua D.PACE_ABS): a driver profile sets the car's pace outright
     ratingV2 = true,     -- DEFAULT 0.14.9; harness switch (lib/drivers.lua D.RATING_V2): real drivers rated as pros around a Veteran (owner 2026-09-29)
     classV2 = false,     -- harness switch (lib/classes.lua M.DETECT_V2): the v2 car-class detector (2026-09-30 inventory: 97 % vs 53 %)
@@ -144,6 +145,7 @@ local S = ac.storage({
     careerCurve = true, shareData = false, strategy = true, raceStart = 'calm', sliderCurve = false, repairOnTrack = true,
     intensity = 0.5, rcIntensity = 0.7, baseGrip = 1.20,
     timedFuel = true,
+    shortFuel = false,
     paceAbs = true,
     ratingV2 = true,
     classV2 = false,
@@ -590,7 +592,8 @@ function script.update(dt)
     Recovery.CRASH_REPAIR = G.crashRepair
     Recovery.REPAIR_BODY  = G.repairOnTrack ~= false
     if G.recovery then Recovery.update(dt) end
-    if G.timedFuel then pc('fuel', Fuel.update, sim, dt) else pcall(Fuel.offTick) end   -- timed races: green fuel load + pit-box guard (lib/fuel.lua)
+    Fuel.SHORT_FUEL = G.shortFuel == true   -- (owner item 28) short-race fuel guard, read inside Fuel.update's gate
+    if G.timedFuel or G.shortFuel then pc('fuel', Fuel.update, sim, dt) else pcall(Fuel.offTick) end   -- timed races + short-race guard: green fuel load / pit-box guard (lib/fuel.lua)
     Troublespots.ENABLED = G.troubleSpots
     Troublespots.update(dt)
     pc('ers', Ers.update, sim, dt)   -- AI battery deployment (lib/ers.lua); returns at once while R.ERS_MODE is 'off'

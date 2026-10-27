@@ -60,6 +60,12 @@ F.active = false          -- this session is one the switch acts in
 -- 3-4 stops. F.RATE_LAPPED: in a LAPPED race with fuel rate > 1, the same green load and box guard as a timed race, with the laps
 -- from the session. In both kinds the litres per lap are x the fuel rate (1 = no change).
 F.RATE_LAPPED = true
+-- (owner item 28, 2026-10-27) SHORT-RACE FUEL GUARD. In a SHORT lapped race, AC still fuels its AI for only part of
+-- the declared distance (seen: "setting fuel for 6 laps" in a 12-lap race; and a 3-lap tank for a 2-lap race that
+-- STILL pits) so the AI makes a pointless fuel stop. With this on, a race whose whole distance fits ONE tank with
+-- AC's own margin gets a start load that covers it (real fuel/lap), so no stop is planned. A race that genuinely
+-- needs a stop is left alone (greenLoad's per-car fits-one-tank gate). DEFAULT OFF until tested; set from G.shortFuel.
+F.SHORT_FUEL = false
 
 local st = {}             -- per-session state (F.reset)
 
@@ -178,6 +184,8 @@ local function gate(sim)
     local ss = F.timedSession(sim)
     if ss then st.mode = 'timed'; return ss end
     if F.RATE_LAPPED and st.rate > 1 then ss = lappedSession(sim); if ss then st.mode = 'lapped'; st.lapsRace = ss.laps or 0; return ss end end
+    -- (owner item 28) a SHORT lapped race at rate 1: greenLoad's per-car fits-one-tank gate decides which cars it acts on
+    if F.SHORT_FUEL then ss = lappedSession(sim); if ss then st.mode = 'short'; st.lapsRace = ss.laps or 0; return ss end end
     return nil
 end
 
@@ -247,17 +255,28 @@ local function greenLoad(sim, ss, trackM)
         local car = ac.getCar(i)
         if eligible(car) then
             local fpl = fplOf(i, car, trackM)
-            local laps = (st.mode == 'lapped') and ((ss.laps or 0) + extra) or (math.ceil(dur / lapEst(i, car, trackM)) + extra)
-            local target = tankFor(car, laps, fpl)
-            local fuel = car.fuel or 0
-            if fuel + F.SLACK_L < target and pcall(physics.setCarFuel, i, target) then
-                F.loadN = F.loadN + 1; fuel = target
-                st.lo = math.min(st.lo or target, target); st.hi = math.max(st.hi or target, target)
-                if laps > st.laps then st.laps = laps end
+            local laps = (st.mode == 'lapped' or st.mode == 'short') and ((ss.laps or 0) + extra)
+                or (math.ceil(dur / lapEst(i, car, trackM)) + extra)
+            -- (owner item 28) the SHORT guard acts ONLY when the whole race fits one tank with AC's own margin; a
+            -- race that genuinely needs a stop ((laps+1)*MULT*fpl > maxFuel) is left untouched, so the guard can
+            -- never shorten a real strategy. timed/lapped are unchanged (fits stays true).
+            local fits = true
+            if st.mode == 'short' then
+                local mx = car.maxFuel or 0
+                fits = mx > 0 and (laps + 1) * F.MULT * fpl <= mx
             end
-            local want = lapsCovered(fuel, fpl, laps + 1)
-            local left = field(car, 'aiLapsLeft')
-            if left == nil or left < want then pcall(physics.setAILapsToComplete, i, want) end   -- only ever raised
+            if fits then
+                local target = tankFor(car, laps, fpl)
+                local fuel = car.fuel or 0
+                if fuel + F.SLACK_L < target and pcall(physics.setCarFuel, i, target) then
+                    F.loadN = F.loadN + 1; fuel = target
+                    st.lo = math.min(st.lo or target, target); st.hi = math.max(st.hi or target, target)
+                    if laps > st.laps then st.laps = laps end
+                end
+                local want = lapsCovered(fuel, fpl, laps + 1)
+                local left = field(car, 'aiLapsLeft')
+                if left == nil or left < want then pcall(physics.setAILapsToComplete, i, want) end   -- only ever raised
+            end
         end
     end
 end
@@ -337,7 +356,7 @@ function F.update(sim, dt)
             pcall(function() ac.log(string.format('Verve fuel: %s race (%.0f min / %d laps, fuel rate %.1f): %d green loads written (%.1f-%.1f L, up to %d laps)',
                 st.mode or '?', ss.durationMinutes or 0, ss.laps or 0, st.rate or 1, F.loadN, st.lo or 0, st.hi or 0, st.laps)) end)
         end
-        if st.mode ~= 'lapped' then boxGuard(sim, ss, trackM) end   -- (review) lapped: AC refills a positive amount; the guard was built for its 0 L loop
+        if st.mode ~= 'lapped' and st.mode ~= 'short' then boxGuard(sim, ss, trackM) end   -- (review) lapped: AC refills a positive amount; the guard was built for its 0 L loop. short (item 28): the start load is the whole guard; no mid-race writes.
     end
 end
 
