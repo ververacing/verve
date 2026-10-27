@@ -41,6 +41,18 @@ do  -- ...and an off it started heats the learned trouble-spot map at Human.MV_T
         return tsIncident(spline, cls, i, wt)
     end
 end
+-- (2026-10-27, owner item 33) CSP MINIMUM CHECK. Verve's AI-grip and racecraft paths rely on CSP public APIs that
+-- exist from build 3465; below it they are simply absent and those features fall back to AC's own. Say so once,
+-- clearly, and change NOTHING else - no feature is gated on this, it is only a message.
+local CSP_MIN = 3465
+do
+    local b; pcall(function() b = ac.getPatchVersionCode() end)
+    if type(b) == 'number' and b < CSP_MIN then
+        pcall(ac.log, string.format(
+            'Verve: CSP build %d is below the minimum %d - some AI-grip/racecraft features run at AC defaults on this build. Update Custom Shaders Patch to %d or newer for the full set.',
+            b, CSP_MIN, CSP_MIN))
+    end
+end
 local Diag = nil; pcall(function() Diag = require('diag') end)   -- LOCAL dev diagnostics; absent in the shipped build
 -- LOCAL test harness (tools/harness.py writes harness.lua right before launching a run, and it self-expires):
 -- can put the player's car on autopilot, override settings for the run, and label the diagnostics file.
