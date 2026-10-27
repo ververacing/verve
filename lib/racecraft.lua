@@ -339,6 +339,11 @@ R.FASTER_MARGIN_X = 1.0       -- multiplier on K.FASTER_MARGIN (3.0 km/h), the s
                               -- 0 of 9, ranges overlapping - and the lever demonstrably ACTED (a third of all AI
                               -- car-frames entered the widened band at X=3.0). So the 'left' exits were real and
                               -- relieving them is not what the climb needed.
+-- NOTE (2026-10-27, owner item 26): the oval-threshold commit 2a30a0f's message asserts the two faults are
+-- "INVERTED" and that detection "NEVER fired true on a genuine oval since 19 Sep". THAT CLAIM WAS WITHDRAWN
+-- (commits f848837 / 5103802 / 85d1488): the 41 "oval" races were Bahrain ROAD courses swept in by a bad glob,
+-- 00c5c43's retry worked, and there is no inversion. The commit message is left as-is (honest history, no rewrite);
+-- the settled account is the block below. Daytona on the CURRENT build remains UNMEASURED.
 R.OVAL_ONEWAY = 0.90          -- detectOval's threshold: |signed turn| / total turn above this = an oval (item 13,
                               -- the owner's yes of 2026-10-24: "only purpose-built ovals count", general and NOT
                               -- track-specific). WAS A HARDCODED 0.6, which called SEVEN of 160 installed layouts
