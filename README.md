@@ -119,7 +119,8 @@ what it contains:
 - **Conditions** — weather type and which weather controller was active, wet or dry, air and road
   temperature, time of day.
 - **Your settings** — the Verve switches you are running and the applied difficulty, as a small JSON object.
-- **Performance** — average frame rate, Verve's own per‑frame cost, and a count of Lua errors.
+- **Performance** — average frame rate, Verve's own per‑frame cost, a count of Lua errors, and the Verve file
+  and line where the first one happened (file name and line only, never the error text or a path).
 - **Versions** — the Verve version and the CSP build number.
 - **A random install number**, generated the first time you send a report, so repeat reports from one copy can
   be grouped. It is not derived from your hardware or your account.

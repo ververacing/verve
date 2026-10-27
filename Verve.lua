@@ -66,11 +66,27 @@ pcall(function()
 end)
 local harnessApplied, autopilotArmed, harnessT = false, false, 0
 local frameMs, frameN, luaErrors = 0, 0, 0     -- Verve's own cost per frame and errors swallowed by pcall (telemetry)
+-- (2026-10-27, owner item 34) module:line of the FIRST swallowed error this session, for the anonymous report.
+-- THE LIMIT, written into the change: this is EXTRACTED (a file name and a line number only), never stripped from
+-- the error, so no part of the error MESSAGE and no filesystem path can ever reach the report through it.
+local firstErrAt = nil
 local errSeen = { n = 0 }                       -- (0.15, code review) each distinct swallowed error is logged once per session
+-- when LOGGING an error, show its location as module:line only, never a path. A CSP Lua error is
+-- "<full path>\lib\racecraft.lua:1415: msg" and the path leaks the machine's layout; a path can contain spaces
+-- ("Program Files (x86)"), so a character class cannot span it - anchor on the .lua:line token and drop all before it.
+local function shortErr(e)
+    e = tostring(e)
+    local ok, r = pcall(function() return (e:gsub("[^\r\n]-([%w_%.%-]+%.lua:%d+)", "%1", 1)) end)
+    return (ok and r) or e      -- never let the sanitiser itself throw inside the error sink
+end
 local function noteErr(where, e)
     luaErrors = luaErrors + 1
+    if not firstErrAt then                       -- first error only; EXTRACT module:line, never the message text
+        local m, l = tostring(e):match("([%w_%-]+%.lua):(%d+)")
+        if m then firstErrAt = m .. ':' .. l end
+    end
     if errSeen.n >= 25 then return end
-    local k = where .. ': ' .. tostring(e)
+    local k = where .. ': ' .. shortErr(e)
     if not errSeen[k] then errSeen[k] = true; errSeen.n = errSeen.n + 1; pcall(ac.log, 'Verve error (' .. k .. ')') end
 end
 local function pc(where, f, ...)                -- pcall that counts AND logs (noteErr)
@@ -183,7 +199,7 @@ local function sessionReset(restart)
     pcall(function() local okS, simR = pcall(ac.getSim); if okS and simR then Telemetry.abort(restart and 'restart' or 'session change', simR, telemetryCtx()) end end)
     pcall(Career.reset)
     pcall(Difficulty.reset)
-    frameMs, frameN, luaErrors = 0, 0, 0; errSeen = { n = 0 }
+    frameMs, frameN, luaErrors, firstErrAt = 0, 0, 0, nil; errSeen = { n = 0 }
     harnessStarted, harnessStartT, autopilotArmed, harnessT, harnessEndT = false, 0, false, 0, 0
     pcall(Classes.reset)
     pcall(Human.reset)            -- per-track distances
@@ -652,7 +668,7 @@ telemetryCtx = function()
         meter = Career.meter, isCareer = Career.active, careerEvent = Career.active and (Career.series .. '/' .. Career.event) or nil,
         laps = Career.laps, playerModel = playerModel, cspBuild = cspBuild,
         retiredByVerve = Recovery.retiredCount, crashRepairs = Recovery.repairedCount, limpRepairs = Recovery.limpCount, suspPits = Recovery.suspPitCount,
-        verveMs = frameN > 0 and frameMs / frameN or nil, luaErrors = luaErrors, track = (function() local t = ''; pcall(function() t = ac.getTrackID() or '' end); return t end)(),
+        verveMs = frameN > 0 and frameMs / frameN or nil, luaErrors = luaErrors, firstErrAt = firstErrAt, track = (function() local t = ''; pcall(function() t = ac.getTrackID() or '' end); return t end)(),
         drops = Recovery.dropN, dropsOk = Recovery.dropOK, troubleSpots = Troublespots.hotCount(), crawlN = Racecraft.crawlN or 0,
         faults = Fault.count, penalties = Fault.penCount,
         profilesUsed = pu, archetypesUsed = au,
@@ -868,7 +884,7 @@ function script.windowMain()
     -- nil and even Telemetry.abort returns early: nothing is sent at all from a Verve-off race. Both are fixed
     -- in the TEXT rather than the behaviour, which is the safe direction for a consent string. The full field
     -- list lives in the README; this stays a summary by category, but an honest one.
-    toggle('Send anonymous race stats to improve Verve', 'shareData', 'Only races run WITH Verve on - never practice or qualifying, and nothing at all is sent from a race you run with Verve switched off. One small anonymous summary per race, including one you leave early: the race (track, layout, session type, car models and classes, laps, difficulty, career event), how the field did (finishers, retirements and how many of them Verve retired, contact and solo incidents, repairs, lead changes, field spread, repositions, parked or frozen cars), your own car (grid and finish position, laps, best and median lap, incidents, damage, pit stops), the same per-car detail for every other car, the conditions (weather type and controller, wet or dry, air and road temperature, time of day), your Verve settings and applied difficulty, performance (average fps, Verve\'s own frame time, a count of Lua errors), the Verve and CSP build numbers, and a random install number so repeat reports from one copy can be grouped. No names, no gamer tag, no file paths, no hardware ids. Off by default - the full field list is in the README.')
+    toggle('Send anonymous race stats to improve Verve', 'shareData', 'Only races run WITH Verve on - never practice or qualifying, and nothing at all is sent from a race you run with Verve switched off. One small anonymous summary per race, including one you leave early: the race (track, layout, session type, car models and classes, laps, difficulty, career event), how the field did (finishers, retirements and how many of them Verve retired, contact and solo incidents, repairs, lead changes, field spread, repositions, parked or frozen cars), your own car (grid and finish position, laps, best and median lap, incidents, damage, pit stops), the same per-car detail for every other car, the conditions (weather type and controller, wet or dry, air and road temperature, time of day), your Verve settings and applied difficulty, performance (average fps, Verve\'s own frame time, a count of Lua errors and the Verve file and line where the first one happened, never the error text), the Verve and CSP build numbers, and a random install number so repeat reports from one copy can be grouped. No names, no gamer tag, no file paths, no hardware ids. Off by default - the full field list is in the README.')
     toggle('Formula DRS discipline', 'drsDiscipline', 'On Formula cars, close DRS when the game says it is not available (outside a DRS zone or not within range). In-zone DRS is left to the game.')
     if ui.checkbox('Advanced', G.showAdvanced) then setG('showAdvanced', not G.showAdvanced) end
     if G.showAdvanced then

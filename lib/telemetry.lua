@@ -280,6 +280,9 @@ function T.buildReport(sim, ctx, completed, abortReason)
         '"settings":' .. (ctx.settingsJson or 'null'),
         '"cars_detail":[' .. table.concat(detail, ',') .. ']',
     }
+    -- (owner item 34) module:line of the first swallowed error this session, sent ONLY when present and never the
+    -- message text (Verve.lua extracts it; the limit is written into that extraction).
+    if ctx.firstErrAt then fields[#fields + 1] = '"first_err_at":' .. jstr(ctx.firstErrAt) end
     return '{' .. table.concat(fields, ',') .. '}'
 end
 
