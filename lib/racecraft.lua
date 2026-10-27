@@ -160,7 +160,7 @@ R.cv2 = cv2                                                               -- (re
 -- same line loses throttle in proportion to the gap; the field is released from the lights row by row.
 R.CONVOY2_ON = true 
 R.ROWCAUT_X = 1.0             -- row-caution multiplier (A/B for big grids, 2026-09-19)
-R.CV_SMOOTH = false          -- (2026-10-26) SMOOTH THE LAP-0 CONVOY THROTTLE. DEFAULT OFF, untested as a default.
+R.CV_SMOOTH = true           -- (2026-10-27) SMOOTH THE LAP-0 CONVOY THROTTLE. ON BY DEFAULT in the release (owner decision, 27 Oct); switch retained so it can be turned off.
                               -- Two changes together, both gated on this one switch: HYSTERESIS on the closing gate
                               -- (engage above aheadSpd + CV.CLOSING, release only below aheadSpd - CV.HYST) and a
                               -- one-sided SLEW of CV.THR_SLEW units/sec on the limit's RELEASE (a reduction is
