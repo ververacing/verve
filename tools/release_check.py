@@ -320,9 +320,23 @@ def check_not_worse(rep, suite, fresh_prefix, all_rows=()):
             rep.refuse(name, "%s n=%d vs %s n=%d - a single run has no range, so this cell can neither show a "
                              "regression nor rule one out" % (base_label, len(a), fresh_prefix, len(b)))
             continue
-        bad, unresolved, notes, skipped = [], [], [], []
+        bad, unresolved, notes, skipped, refused = [], [], [], [], []
         for key, higher_worse, label, floor in SUITE_METRICS:
             av, bv = nums(a, key), nums(b, key)
+            if key == "pace_best_s":
+                # Pace absent/empty/zero/negative -> REFUSED, never coerced to 0.0. nums() turns a missing or
+                # empty pace into 0.0, and because pace_best_s is higher-worse a 0.0 reads as mean < lo and
+                # prints "0.0 BETTER" - absence masquerading as the fastest possible lap. PC #1's rc17 did exactly
+                # this on mon, spa12 and sgf. Pace is always measurable when pace.csv is written, so a non-positive
+                # value is a tooling gap to block on, not a number to compare against the baseline.
+                avp, bvp = [x for x in av if x > 0], [x for x in bv if x > 0]
+                if len(avp) < len(av) or len(bvp) < len(bv) or not avp or not bvp:
+                    where = ("both arms" if not avp and not bvp else
+                             "baseline" if not avp else "head" if not bvp else "some rows")
+                    refused.append(label)
+                    notes.append("%s REFUSED (absent/zero/negative: %s)" % (label, where))
+                    continue
+                av, bv = avp, bvp
             if not av or not bv or (max(av) == 0 and max(bv) == 0):
                 # the sprint cells never produce a median lap time; do not pretend they did.
                 # BUT SAY SO. This skip used to be silent, and the cell then read "4 of 5 metrics judged" with
@@ -387,6 +401,10 @@ def check_not_worse(rep, suite, fresh_prefix, all_rows=()):
             rep.refuse(name, detail)
         elif bad:
             rep.fail(name, detail)
+        elif refused:
+            rep.refuse(name, detail + " | pace REFUSED: a cell's pace is absent/zero/negative; write it with "
+                                      "tools/pace.py --cell <c> --write (or rerun the cell) - a non-positive pace "
+                                      "must never read as '0.0 BETTER'")
         elif unresolved:
             rep.refuse(name, detail + " | ? = outside the baseline range but within one spread of it; deepen the "
                                       "baseline arm before calling it either way")
@@ -505,6 +523,23 @@ def rule_checks():
         f.append("a gating cell with a 1-run baseline PASSED: %s" % verdicts)
     if "REFUSED" not in verdicts:
         f.append("a gating cell with a 1-run baseline was not refused: %s" % verdicts)
+
+    # PACE: absent, empty, zero or negative pace must REFUSE, never read as "0.0 BETTER". nums() coerces a
+    # missing pace to 0.0 and pace_best_s is higher-worse, so a 0.0 would print mean < lo = BETTER - which is
+    # what PC #1's rc17 did on mon, spa12 and sgf. Three seeded cases: a missing row, a 0.0 row, a valid row.
+    def pace_verdicts(fresh_pace):
+        base = [dict(mk("rc98a_sgf_%d" % i, 20), pace_best_s="110.5") for i in (1, 2, 3)]
+        extra = {} if fresh_pace is None else {"pace_best_s": fresh_pace}
+        fresh = [dict(mk("rc98b_sgf_%d" % i, 20), **extra) for i in (1, 2, 3)]
+        r = Report()
+        check_not_worse(r, base + fresh, "rc98b", all_rows=base + fresh)
+        return [v for v, n, d in r.rows if "sgf" in n]
+    if "REFUSED" not in pace_verdicts(None):
+        f.append("a MISSING pace row did not REFUSE (would read as 0.0 BETTER): %s" % pace_verdicts(None))
+    if "REFUSED" not in pace_verdicts("0.0"):
+        f.append("a pace of 0.0 did not REFUSE (the '0.0 BETTER' bug): %s" % pace_verdicts("0.0"))
+    if "REFUSED" in pace_verdicts("109.0"):
+        f.append("a VALID pace (109.0, faster than baseline) was wrongly refused: %s" % pace_verdicts("109.0"))
 
     for cell in list(GATING_CELLS) + list(CHARACTER_CELLS):
         m = SUITE_RE.match("rc16c_%s_on_1" % cell)
