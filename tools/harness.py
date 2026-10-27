@@ -738,6 +738,8 @@ def write_harness_lua(arm, ttl_s, ncars=0, laps=0, weekend=False):
         # [{"lap":4,"settings":{"enabled":false},"label":"off"},{"lap":6,"settings":{"enabled":true},"label":"on"}]
         "changes": arm.get("changes"),
     }
+    if arm.get("csp_min"):
+        body["cspMin"] = int(arm["csp_min"])   # TEST ONLY (owner item 33): raise Verve's CSP minimum to force the stand-down
     OWNED["lua"] = True
     with open(HARNESS_LUA, "w", encoding="utf-8") as f:
         f.write("-- written by tools/harness.py; self-expiring; never shipped\nreturn " + lua_literal(body) + "\n")
@@ -1613,6 +1615,7 @@ def main():
     ap.add_argument("--minutes", type=int, default=0, help="TIMED race of N minutes (LAPS 0; AC adds a lap after the clock). --laps then only fills race.ini's RACE_LAPS "
                     "record: AC fuels a timed field for 1.2 laps whatever it says (--settings timedFuel true fuels it for the clock)")
     ap.add_argument("--stop-laps", type=int, default=0, help="heavy sprint: end the race gracefully once the leader completes N laps (fuel load of --laps, duration of N)")
+    ap.add_argument("--csp-min", type=int, default=0, help="TEST ONLY: raise Verve's CSP minimum build for this run (e.g. 99999 to force the stand-down); 0 = use Verve's own CSP_MIN")
     ap.add_argument("--fuel", type=float, default=0, help="litres in every car when the autopilot arms (0 = AC decides); e.g. 20 for a quali-load pace probe")
     ap.add_argument("--assists", help="JSON of launcher assists for this run only (cfg/assists.ini [ASSISTS]), e.g. {\"DAMAGE\":0} = damage off")
     ap.add_argument("--fault", help="JSON of Fault module fields (penalties), e.g. {\"ENABLED\":true,\"ENFORCE\":false}")
@@ -1658,7 +1661,7 @@ def main():
         arms = [{"label": args.label, "settings": json.loads(args.settings) if args.settings else {}, "drivers": args.drivers, "driver_seed": args.driver_seed, "profiles": args.profiles,
                  "recovery": json.loads(args.recovery) if args.recovery else {}, "racecraft": json.loads(args.racecraft) if args.racecraft else {},
                  "troublespots": json.loads(args.troublespots) if args.troublespots else {}, "fault": json.loads(args.fault) if args.fault else {}, "csp": json.loads(args.csp) if args.csp else {}, "human": json.loads(args.human) if args.human else {}, "strategy": json.loads(args.strategy) if args.strategy else {}, "fuel": args.fuel,
-                 "assists": json.loads(args.assists) if args.assists else {}, "stop_laps": args.stop_laps,
+                 "assists": json.loads(args.assists) if args.assists else {}, "stop_laps": args.stop_laps, "csp_min": args.csp_min,
                  "changes": json.loads(args.changes) if args.changes else None}]
     refuse_voided_profiles(arms)
     if args.base148:

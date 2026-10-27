@@ -44,13 +44,19 @@ end
 -- (2026-10-27, owner item 33) CSP MINIMUM CHECK. Verve's AI-grip and racecraft paths rely on CSP public APIs that
 -- exist from build 3465; below it they are simply absent and those features fall back to AC's own. Say so once,
 -- clearly, and change NOTHING else - no feature is gated on this, it is only a message.
+-- STAND-DOWN (owner item 33, reworked 27 Oct): below the minimum Verve does NOT run with parts failing. It writes
+-- NOTHING to the cars (script.update routes through the already-safe disabled path at G.enabled's branch) and shows
+-- one clear message in its window. If the build cannot be read (nil), do NOT stand down - just log it.
 local CSP_MIN = 3465
+local cspBuildCode = nil; pcall(function() cspBuildCode = ac.getPatchVersionCode() end)
+local cspStoodDown = false      -- recomputed per frame in script.update (a harness-only override may raise the minimum)
 do
-    local b; pcall(function() b = ac.getPatchVersionCode() end)
-    if type(b) == 'number' and b < CSP_MIN then
+    if type(cspBuildCode) == 'number' and cspBuildCode < CSP_MIN then
         pcall(ac.log, string.format(
-            'Verve: CSP build %d is below the minimum %d - some AI-grip/racecraft features run at AC defaults on this build. Update Custom Shaders Patch to %d or newer for the full set.',
-            b, CSP_MIN, CSP_MIN))
+            'Verve needs Custom Shaders Patch build %d or newer (this is build %d). Verve is off for this session; update CSP to use it.',
+            CSP_MIN, cspBuildCode))
+    elseif type(cspBuildCode) ~= 'number' then
+        pcall(ac.log, 'Verve: could not read the CSP build number; proceeding without standing down.')
     end
 end
 local Diag = nil; pcall(function() Diag = require('diag') end)   -- LOCAL dev diagnostics; absent in the shipped build
@@ -453,7 +459,12 @@ function script.update(dt)
             end
         end
     end
-    if not G.enabled then
+    -- (owner item 33) CSP stand-down, recomputed each frame so a harness-only override (Harness.cspMin) can raise the
+    -- minimum for the test. nil build never stands down. Routed through the disabled branch below: no car writes, the
+    -- cars are handed back once, and diag/feed/telemetry keep observing - exactly "do nothing, don't run parts failing".
+    local cspEffMin = (Harness and type(Harness.cspMin) == 'number' and Harness.cspMin) or CSP_MIN
+    cspStoodDown = type(cspBuildCode) == 'number' and cspBuildCode < cspEffMin
+    if not G.enabled or cspStoodDown then
         -- (local dev diagnostics still log a DISABLED race, so a baseline run can be compared; the race feed is an
         -- observer and keeps running too, so a stock-AI race gets the same timing card as a Verve race)
         -- (0.16) contactRecent in the DISABLED branch too, so diag's contact ring - and results.csv
@@ -803,6 +814,15 @@ function script.windowMain()
     ui.popFont()
     ui.sameLine()
     ui.textColored('AI that feels human', rgbm(0.6, 0.6, 0.6, 1))
+
+    -- (owner item 33) stood down below the CSP minimum: show one clear message and nothing else - Verve is off.
+    if cspStoodDown then
+        ui.separator()
+        ui.textColored(string.format('Verve needs Custom Shaders Patch build %d or newer (this is build %s).',
+            CSP_MIN, tostring(cspBuildCode)), rgbm(0.98, 0.5, 0.2, 1))
+        ui.textWrapped('Verve is off for this session - it is not touching the AI. Update CSP to use it.')
+        return
+    end
 
     Update.check()
     if Update.latest then
