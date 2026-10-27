@@ -87,6 +87,8 @@ make sure you copied the whole `Verve` folder, `lib` included.
 - Verve controls AI grip via CSP's public physics API. If you also run another AI‑grip mod
   (e.g. AI Whisperer), they'll fight over the setting — Verve detects common ones and lets you
   defer ("Control AI grip" off; self‑recovery keeps working). **Use one AI‑grip layer at a time.**
+  **Only switch "Control AI grip" off if another mod is controlling AI grip.** With nothing managing
+  grip, the racecraft still runs and a formula field crashes more, not less.
 - Pace still scales with the **race difficulty %** for cars without a driver (a car with a driver runs at
   that driver's pace). **Base AI grip** 1.20 = stock AC (default);
   lower for a more human, on‑the‑edge feel; above 1.20 for extra stick.
