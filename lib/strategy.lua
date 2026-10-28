@@ -246,7 +246,8 @@ local function run(i, p, c, g, book)
         local outT = (tonumber(S.LUNGE_OUT_T) or 1.3) * (1 - 0.3 * cl)       -- (S.LUNGE_OUT_T)
         if age < outT then
             return { target = p.side * c.off * ((tonumber(S.LUNGE_OFF_X) or 1.4) - 0.4 * cl), caut = -0.5 * (book.lunge or 1) * (1 - 0.4 * cl), aggr = 0.2, hold = 1.0, code = CODE.lunge }
-        elseif age < outT + 0.9 then                         -- gather it up: brake a touch more, hold the inside
+        -- (review 27 Oct) the gather ends at 0.15.3's fixed 2.2 s at the default LUNGE_OUT_T; `outT + 0.9` cut it short for any cl > 0
+        elseif age < outT + (2.2 - 1.3 * (1 - 0.3 * cl)) then   -- gather it up: brake a touch more, hold the inside
             return { target = p.side * c.off * 0.7, caut = 0.3 + 0.15 * cl, aggr = 0, code = CODE.lunge }
         end
         finish(i); return nil

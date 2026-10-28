@@ -27,6 +27,8 @@ ZIP="$DIST/Verve-$TAG.zip"
 # deliberately a refusal and not a warning - and it NEVER prints DONE after a failure.
 RELEASE_BRANCH="${RELEASE_BRANCH:-main}"
 fail() { echo ""; echo "!! RELEASE REFUSED: $*"; echo "!! Nothing was built, committed, tagged or pushed."; exit 1; }
+# After the build step something HAS been built/committed/tagged/pushed, so each caller states what it left instead.
+fail_late() { echo ""; echo "!! RELEASE STOPPED PART-WAY: $*"; exit 1; }
 
 # 0a. the tree must be clean. `git add -A` below would otherwise sweep in anything lying around.
 [[ -z "$(git status --porcelain)" ]] || {
@@ -165,13 +167,13 @@ git add manifest.ini lib/update.lua version.json changelog.txt
 git commit -q -m "Release $TAG" ${COMMIT_TRAILER:+-m "$COMMIT_TRAILER"} || echo "(nothing to commit)"
 # NOT `tag -f`. The gate above proved this tag does not exist; forcing it would silently move a
 # published tag so two people downloading $TAG get different code with no way to tell.
-git tag "$TAG" || fail "could not create tag $TAG"
+git tag "$TAG" || fail_late "could not create tag $TAG - the zip is built and the release commit is local; nothing is tagged or pushed"
 
 # --- 4. push (if a remote exists) ---
 if git remote get-url origin >/dev/null 2>&1; then
-    git push origin HEAD || fail "push of HEAD failed - the tag is local only, nothing is published"
+    git push origin HEAD || fail_late "push of HEAD failed - the tag is local only, nothing is published"
     # NOT `push -f`. A force-push of a tag rewrites what a published version points at.
-    git push origin "$TAG" || fail "push of tag $TAG failed - HEAD is pushed but the tag is not"
+    git push origin "$TAG" || fail_late "push of tag $TAG failed - HEAD is pushed but the tag is not"
     echo "pushed to origin + tag $TAG"
     # --- 5. GitHub Release with the zip (needs gh, authed once via `gh auth login`) ---
     GH_BIN="$(command -v gh 2>/dev/null || true)"

@@ -1204,7 +1204,9 @@ local evalBody = function()
         -- lap condition, so FAST_TUCK/OL_SIDEYIELD writes on LATER laps got slewed too (measured: 9-20% of the
         -- slew's activity happened after lap 0). The lights-out convoy smoothing is a lap-0 concern; `myLap == 0`
         -- confines it and leaves later-lap FAST_TUCK/side-yield releases immediate. Default still OFF.
-        if R.CV_SMOOTH and myLap == 0 then
+        -- (review 27 Oct) not for a car recovery is driving: the convoy gate already excludes .rec, the slew did not
+        local recNow = (Recovery.stateOf(i) or R.NOSTATE).rec
+        if R.CV_SMOOTH and myLap == 0 and not recNow then
             local prev = cv2.thrOut[i]
             if prev and thr > prev then
                 local step = CV.THR_SLEW * (dt > 0 and dt < 0.5 and dt or 0.016)
@@ -1218,6 +1220,8 @@ local evalBody = function()
                 end
             end
             cv2.thrOut[i] = thr
+        elseif recNow then
+            cv2.thrOut[i] = nil
         end
         local capped = thr < 1.0
         if capped ~= (cv2.thrLast[i] == true) then cv2.thrTog[i] = (cv2.thrTog[i] or 0) + 1 end

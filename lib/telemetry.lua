@@ -392,7 +392,7 @@ function T.update(dt, ctx)
                 -- filtering that field discards the real finishes. `completed` was always correct, so the data
                 -- is recoverable - key on it, not on this field, for anything already collected.
                 local body = T.buildReport(sim, ctx, real, (not real) and 'restart' or (T.ABORT_LEGACY and 'restart' or nil))
-                post(body, function(ok2) if ok2 then S.sent = (S.sent or 0) + 1 else S.pending = body end end)
+                post(body, function(ok2, rejected) if ok2 then S.sent = (S.sent or 0) + 1 elseif not rejected then S.pending = body end end)   -- a 4xx-rejected row is dropped, not re-queued
             end)
         end
     else
