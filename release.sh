@@ -77,7 +77,7 @@ python -I tools/leak_check.py --tree HEAD \
 
 # 0e. the release gate itself: suite freshness, completeness and not-worse.
 echo "-- preflight: release_check"
-python -I tools/release_check.py || fail "release_check says NOT RELEASABLE. Read its output; a REFUSED line counts as a failure."
+python -I tools/release_check.py ${RELEASE_CHECK_ARGS:-} || fail "release_check says NOT RELEASABLE. Read its output; a REFUSED line counts as a failure."
 
 # 0f. the Lua must COMPILE and stay under LuaJIT's 120-upvalue ceiling. Over it, the app fails to
 #     load and every race 'sits at the lights' - a release that does that is unusable, and it is
