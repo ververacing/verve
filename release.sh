@@ -59,10 +59,19 @@ python -I tools/leak_check.py $LEAK_FILES || fail "leak_check found identity mat
 # so a line the range REMOVES is a line it PUBLISHES. --history reads `git log -p` and scans additions AND
 # removals. THE REMEDY FOR A HIT HERE IS A SQUASH OR A REWRITE, never another forward fix, which only adds a
 # second copy of the string as a removal line.
+# SCOPE (owner decision 2026-10-28, option (a)): the history gate scans only commits NOT YET ON ANY origin branch
+# (`git log HEAD --not --remotes=origin`), not origin/$RELEASE_BRANCH..HEAD. Releasing main from dev016 made the
+# old range re-scan commits public on origin/dev016 for two weeks, and 13 lines in 5 of them (generic install
+# paths and a one-letter placeholder user, nothing personal) blocked the release with only a rewrite of public
+# history as the remedy. The gate exists to stop NEW material going public, so it scans what is new. The fetch
+# (with --prune) is mandatory: a tracking ref left over from a branch since rewritten or deleted on origin would
+# excuse commits that are no longer published. The --tree scan below is unchanged and still checks every file the
+# tag will publish.
 if git remote get-url origin >/dev/null 2>&1; then
-    echo "-- preflight: identity gate over the HISTORY being pushed"
-    python -I tools/leak_check.py --history "origin/$RELEASE_BRANCH..HEAD" \
-        || fail "leak_check found identity material in the COMMIT HISTORY being pushed. A forward fix will not help: squash the range or rewrite the offending commits."
+    echo "-- preflight: identity gate over the HISTORY not yet on origin"
+    git fetch -q --prune origin || fail "git fetch origin failed, so what is already published cannot be known."
+    python -I tools/leak_check.py --history-unpublished \
+        || fail "leak_check found identity material in the UNPUBLISHED COMMIT HISTORY. A forward fix will not help: squash or rewrite those commits before they are pushed."
 fi
 # AND THE WHOLE TREE, because `git tag` below FREEZES IT AND SERVES IT FOR EVER. The two gates above look at a
 # DIFF and at a HISTORY; a tag publishes neither - it publishes every file at this commit, as a browsable tree

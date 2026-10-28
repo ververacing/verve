@@ -303,6 +303,16 @@ def already_public(ref, rs, timeout=600):
     return seen
 
 
+def _revs(rng):
+    """A revision set for `git log`: one range string, or an argument list (--history-unpublished passes
+    ["HEAD", "--not", "--remotes=origin"], which no single range string can express)."""
+    return list(rng) if isinstance(rng, (list, tuple)) else [rng]
+
+
+def _label(rng):
+    return " ".join(rng) if isinstance(rng, (list, tuple)) else rng
+
+
 def check_identity(rng, rs, quiet=False):
     """Item 12: gate the AUTHOR and COMMITTER fields of every commit a push would publish. -> hit count.
 
@@ -319,7 +329,8 @@ def check_identity(rng, rs, quiet=False):
     """
     fields = ("author name", "author email", "committer name", "committer email")
     SEP = chr(31)
-    cmd = ["git", "log", "--format=%H" + SEP + "%an" + SEP + "%ae" + SEP + "%cn" + SEP + "%ce", rng]
+    cmd = ["git", "log", "--format=%H" + SEP + "%an" + SEP + "%ae" + SEP + "%cn" + SEP + "%ce"] + _revs(rng)
+    rng = _label(rng)
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     except Exception as e:                                                # noqa: BLE001
@@ -381,7 +392,8 @@ def check_history(rng, rs, against=None):
     # give a line offset into a 60,000-line blob, which is useless for deciding what to rewrite - and "counts by
     # commit" was the whole point of being asked for this.
     MARK = "~~LEAKCHECK~COMMIT~~ "   # printable: a NUL here made git refuse with "embedded null character"
-    cmd = ["git", "log", "-p", "--format=" + MARK + "%H%n%B", rng]
+    cmd = ["git", "log", "-p", "--format=" + MARK + "%H%n%B"] + _revs(rng)
+    revs, rng = rng, _label(rng)
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
     except Exception as e:                                                # noqa: BLE001
@@ -439,8 +451,45 @@ def check_history(rng, rs, against=None):
     # Item 12 rides on the push gate rather than on a flag of its own, so it cannot be forgotten: release.sh
     # already calls --history before a push, and the author/committer fields are published by that same push.
     # A field hit is as blocking as a line hit - a rewrite can fix the patch and leave the author untouched.
-    ident = check_identity(rng, rs)
+    ident = check_identity(revs, rs)
     return 1 if (total or ident) else 0
+
+
+def check_unpublished(rs, remote="origin"):
+    """--history-unpublished: the --history gate over exactly the commits a push would make public for the FIRST
+    time - `git log HEAD --not --remotes=<remote>` - instead of a fixed range.
+
+    WHY (owner decision 2026-10-28, option (a)): release.sh's history gate ran over origin/main..HEAD, which on
+    a release from dev016 re-scans commits that have been public on origin/dev016 for weeks. Thirteen lines in
+    five such commits (generic install paths and a one-letter placeholder user, nothing personal) blocked it,
+    and the only remedy the strict gate offers - rewriting published history - is worse than the hit. The gate
+    exists to stop NEW material going public, so it now scans what is new. The caller should `git fetch` first
+    (release.sh fails if the fetch fails): a stale view mostly errs SAFE, re-scanning commits pushed since, but a
+    tracking ref left over from a branch later rewritten or deleted on origin would still excuse commits that
+    are no longer published. --tree HEAD is unaffected and still scans every published file.
+
+    An EMPTY set is a pass here, unlike --history's vacuous-pass refusal, but only when it is PROVEN empty: the
+    remote must have at least one tracking ref (else nothing could be "published") and rev-list must succeed."""
+    try:
+        refs = subprocess.run(["git", "for-each-ref", "--format=%(refname)", "refs/remotes/" + remote],
+                              capture_output=True, text=True, timeout=60)
+        if refs.returncode != 0 or not refs.stdout.strip():
+            print("  REFUSED: no refs/remotes/%s - cannot tell what is already published" % remote)
+            return 1
+        revs = ["HEAD", "--not", "--remotes=" + remote]
+        n = subprocess.run(["git", "rev-list", "--count"] + revs, capture_output=True, text=True, timeout=120)
+        if n.returncode != 0:
+            print("  REFUSED: `git rev-list --count %s` failed" % " ".join(revs))
+            return 1
+        count = int(n.stdout.strip() or 0)
+    except Exception as e:                                                # noqa: BLE001
+        print("  REFUSED: cannot list the unpublished commits (%s)" % e)
+        return 1
+    print("  unpublished commits (HEAD --not --remotes=%s): %d" % (remote, count))
+    if count == 0:
+        print("leak_check history-unpublished: CLEAN (every commit in HEAD is already on %s)" % remote)
+        return 0
+    return check_history(revs, rs)
 
 
 def selftest():
@@ -555,6 +604,39 @@ def selftest():
         print("  ...and PASSES with the explicit --allow-no-denylist flag? %s (exit %d)"
               % ("yes" if rfo.returncode == 0 else "NO - BROKEN", rfo.returncode))
         ok &= rfo.returncode == 0
+
+        # --history-unpublished (owner decision 2026-10-28). Publish the repo so far - it CARRIES the canary in its
+        # history - to a bare "origin", then prove the two halves: (1) a clean NEW commit passes, because the
+        # published canary is no longer re-scanned; (2) a NEW unpublished commit with a flagged line still FAILS.
+        # The new commits use the public identity so the author-field check cannot be what decides either case.
+        bare = tempfile.mkdtemp(prefix="leakcheck_origin_")
+        try:
+            run(["git", "init", "-q", "--bare", bare])
+            run(G + ["remote", "add", "origin", bare])
+            run(G + ["push", "-q", "origin", "HEAD:refs/heads/main"])
+            run(G + ["fetch", "-q", "origin"])
+            # the public no-reply address, assembled so this file carries no literal address for the email rule
+            P = ["git", "-c", "user.email=ververacing" + chr(64) + "users.noreply.github.com", "-c", "user.name=ververacing",
+                 "-C", repo]
+            with open(os.path.join(repo, "g.txt"), "w", encoding="utf-8") as fh:
+                fh.write("a new clean line\n")
+            run(P + ["add", "-A"]); run(P + ["commit", "-q", "-m", "new clean commit"])
+            ruc = subprocess.run([sys.executable, "-I", me, "--history-unpublished", "--allow-no-denylist"],
+                                 capture_output=True, text=True, cwd=repo, timeout=120)
+            print("  --history-unpublished: published canary NOT re-flagged?  %s (exit %d)"
+                  % ("yes" if ruc.returncode == 0 else "NO - BROKEN, it rescans published history", ruc.returncode))
+            ok &= ruc.returncode == 0
+            canary2 = "C:" + chr(92) + "Users" + chr(92) + "canarytwo" + chr(92) + "new.txt"
+            with open(os.path.join(repo, "g.txt"), "w", encoding="utf-8") as fh:
+                fh.write("a new clean line\nP2 = r\"%s\"\n" % canary2)
+            run(P + ["add", "-A"]); run(P + ["commit", "-q", "-m", "new commit with a canary"])
+            ruf = subprocess.run([sys.executable, "-I", me, "--history-unpublished", "--allow-no-denylist"],
+                                 capture_output=True, text=True, cwd=repo, timeout=120)
+            print("  --history-unpublished: NEW flagged commit still FAILS?   %s (exit %d)"
+                  % ("yes" if ruf.returncode == 1 else "NO - BROKEN, new material would go public", ruf.returncode))
+            ok &= ruf.returncode == 1
+        finally:
+            shutil.rmtree(bare, ignore_errors=True)
     finally:
         shutil.rmtree(repo, ignore_errors=True)
 
@@ -595,6 +677,8 @@ def main():
         _ALLOW_NO_DENY = True
         print("  !! --allow-no-denylist IS SET: the missing-denylist identity gate is DISABLED for this run. "
               "This must NEVER appear in a real pre-push gate. !!")
+    if "--history-unpublished" in sys.argv:
+        return _finalize(check_unpublished(rs))
     for i, a in enumerate(sys.argv):
         if a == "--range" and i + 1 < len(sys.argv):
             return _finalize(check_range(sys.argv[i + 1], rs))
