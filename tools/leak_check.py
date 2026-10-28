@@ -591,11 +591,18 @@ def selftest():
         # GATING run must exit non-zero: the owner-specific terms were never checked, so "clean" overstates it.
         # The sole bypass is the EXPLICIT --allow-no-denylist flag (the subprocesses above pass it to test the
         # other modes); it MUST be absent here, or this case proves nothing. No env var can reopen the gate.
+        # RUN FROM A COPY with no denylist beside it (2026-10-28): DENY_FILE is resolved next to the script, so on
+        # the machine where the owner's tools/.identity_deny really exists, running `me` made "no denylist" false
+        # and this case read "fails OPEN" on the one machine whose gate it is meant to prove.
         cf = os.path.join(repo, "clean.txt")
         with open(cf, "w", encoding="utf-8") as fh:
             fh.write("a perfectly clean line, no identity in it\n")
-        rfc = subprocess.run([sys.executable, "-I", me, cf], capture_output=True, text=True, cwd=repo,
+        nodeny = tempfile.mkdtemp(prefix="leakcheck_nodeny_")
+        me_nodeny = os.path.join(nodeny, os.path.basename(me))
+        shutil.copyfile(me, me_nodeny)
+        rfc = subprocess.run([sys.executable, "-I", me_nodeny, cf], capture_output=True, text=True, cwd=repo,
                              timeout=60)
+        shutil.rmtree(nodeny, ignore_errors=True)
         print("  a clean file with NO denylist FAILS CLOSED (non-zero)?  %s (exit %d)"
               % ("yes" if rfc.returncode != 0 else "NO - BROKEN, fails OPEN", rfc.returncode))
         ok &= rfc.returncode != 0
