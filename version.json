@@ -1,5 +1,5 @@
 {
   "version": "0.16.0",
   "url": "https://github.com/ververacing/verve/releases/latest",
-  "summary": "Smoother frame times: less work per frame and fewer saves during a race, same racing."
+  "summary": "Smoother starts, a difficulty slider that sets the AI level directly, yellow flags for cars stopped just off the line, and fixes."
 }
