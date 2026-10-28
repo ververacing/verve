@@ -1,7 +1,8 @@
 """Is this branch releasable? Mechanical checks only, and it REFUSES a verdict it cannot back.
 
-    python tools/release_check.py              # check dev016 against origin/main
+    python tools/release_check.py              # check HEAD (the checked-out commit) against origin/main
     python tools/release_check.py --base main --head dev016
+    python tools/release_check.py --machine pc2     # PC #2: sgfnk gates in place of sgf (a named deviation)
 
 Written 2026-10-12 at the owner's request: "I'd like to get more disciplined moving forward to make sure every
 release is high quality and really proven out to work really well."
@@ -29,9 +30,12 @@ THE BAR, each line a thing this script actually tests:
      outside the baseline's whole observed range in the worse direction - with three runs a side that is the
      strongest honest statement available, and it does not pretend to a significance test three points cannot
      support. Fewer than two runs a side REFUSES: a single point has no range, so it can neither show a regression
-     nor rule one out.
+     nor rule one out. (27 Oct) A GATING cell now REFUSES below MIN_GATING_ARM (6) a side, or when its base and
+     head runs were not interleaved in run time (see interleave_problem).
   4. EVIDENCE PER DEFAULT CHANGE - every R.* default that differs from base must have at least MIN_SIDE runs per arm
-     in results.csv, and a line in LESSONS.md. A default with no A/B is a guess.
+     in results.csv, and a line in LESSONS.md. A default with no A/B is a guess. A NEW R.* switch that defaults
+     ON (absent on base, `= true` on head) is a default change too: R.CV_SMOOTH shipped ON on 27 Oct and this item
+     printed "no R.* default value differs", because it only compared keys present on both sides.
   5. NO WITHDRAWN CLAIM IN SUPPORT - no switch being defaulted may have WITHDRAWN on its LESSONS line.
   6. IDENTITY GATE - leak_check clean over every file the push would publish.
   7. DOCS CURRENT - docs_check reports no drift.
@@ -60,12 +64,19 @@ APP_PATHS = ["lib", "Verve.lua", "diag.lua"]
 # The arm token is OPTIONAL. An earlier version of this regex demanded an `on` and an `off` arm per cell, which was a
 # pairing I had invented: the suite is a BASELINE-versus-HEAD comparison, not a switch A/B, so every row sits on the
 # same side. Completeness therefore failed for all three cells while a real regression went unexamined.
-SUITE_RE = re.compile(r"^(rc\d+[a-z]?)_(spa12|spa|bcn|mon|sgf)(?:_(on|off))?_\d+$")  # spa12 BEFORE spa, it is a prefix
+SUITE_RE = re.compile(r"^(rc\d+[a-z]?)_(spa12|spa|bcn|mon|sgfnk|sgf)(?:_(on|off))?_\d+$")  # spa12 BEFORE spa, sgfnk BEFORE sgf
 # Recomposed 2026-10-13 on the owner's yes (decision 0027). GATING cells are the two 12-lap races; the 2-lap
 # sprints are still run and scored but judged on opening-lap character, not on contact counts. The old suite put
 # nine of ten runs in the sprints, and a 12-lap cell's own spread is 1.40x against a sprint arm's 3.50x on identical
 # code - so the sprints cannot see a regression a long race can, and would need about n=10 to try.
-GATING_CELLS = {"mon": 3, "spa12": 3, "sgf": 3}     # cell -> runs needed; these decide releasability
+GATING_CELLS = {"mon": 6, "spa12": 6, "sgf": 6}     # cell -> runs needed; these decide releasability
+# (27 Oct, verve-47's gate fix) SIX A SIDE, INTERLEAVED, for the gating cells. Measured the same day: identical
+# settings gave 6 attacker-hits-car crashes in one Singapore set and 17 in another, so n=3 a side resolves only
+# huge effects, and a baseline run on another day carries that between-queue drift into the comparison (the
+# 2026-10-15 drift finding below). Interleaved = base and head rows alternate in run time; a block design (all base
+# rows, then all head rows) REFUSES. MAX_STREAK allows one retried run (A,B,B,A) without calling it a block.
+MIN_GATING_ARM = 6
+INTERLEAVE_MAX_STREAK = 2
 
 # `sgf` IS THE SINGAPORE FORMULA CELL (decision 0035): singapore_2020, uniform 20-car SF70H, 5 laps, ai-level 100,
 # with NEW_LATERAL_GRIP_ESTIMATION=1 and FIX_GRIP_MULT=1 STATED EXPLICITLY on every row. It gates because the two
@@ -93,6 +104,20 @@ GATING_CELLS = {"mon": 3, "spa12": 3, "sgf": 3}     # cell -> runs needed; these
 # version. Verified for this entry: ksc_spa12_gt3_keysoff_1..3 ran 2026-10-12 09:58-12:07, all before the
 # 2026-10-13 00:30 app commit; the arm columns differ in NO dimension; track, cars, ai_level and leader_laps match.
 BASELINE_ALIAS = {"spa12": "ksc_spa12_gt3_keysoff"}
+
+# NAMED DEVIATION, PC #2 ONLY (27 Oct). `sgfnk` is the sgf definition minus the two CSP grip keys, nothing else
+# changed, because CSP 3465 has no such keys. The 27 Oct email's item 30 said "on PC #2 that race runs without them",
+# and the owner answered "Yes to everything except 39 and 40". Decision 0035 still holds for sgf itself. sgfnk is
+# a different cell, not a weaker sgf, and its numbers never pool with sgf's. It applies only with --machine pc2.
+# A bare run on PC #2 reports sgf SHORT, which fails closed rather than passing quietly.
+MACHINE_CELLS = {"pc2": ("sgf", "sgfnk")}           # machine -> (gating cell replaced, its replacement)
+
+
+def use_machine(name):
+    """Swap one gating cell for the machine's named deviation, in place (NEEDED_CELLS is the same dict)."""
+    old, new = MACHINE_CELLS[name]
+    GATING_CELLS[new] = GATING_CELLS.pop(old)
+    return "named deviation (%s): gating cell %s replaces %s" % (name, new, old)
 
 # Rare events (heavy hits, DNFs) against a ZERO-SPREAD baseline cannot be resolved at n=3 - one event is
 # indistinguishable from noise, and demanding otherwise means the gate can never pass on those metrics however good
@@ -261,6 +286,32 @@ def nums(rows, key):
     return vals
 
 
+def interleave_problem(a, b):
+    """None when the base rows `a` and head rows `b` alternate in run time, else why not.
+
+    Rows are ordered by the timestamp in their diag file name. A row with no readable timestamp makes the order
+    unknowable, which refuses rather than passes.
+    """
+    seq = []
+    for side, rows in (("base", a), ("head", b)):
+        for r in rows:
+            s = stamp_of(r)
+            if not s:
+                return "%s row %s has no run timestamp, so the run order cannot be read" % (side, r.get("label"))
+            seq.append((s, side))
+    seq.sort()
+    streak, longest, worst, prev = 0, 0, None, None
+    for _, side in seq:
+        streak = streak + 1 if side == prev else 1
+        prev = side
+        if streak > longest:
+            longest, worst = streak, side
+    if longest > INTERLEAVE_MAX_STREAK:
+        return "not interleaved: %d %s runs in a row (at most %d) - run base and head alternately in one queue" % (
+            longest, worst, INTERLEAVE_MAX_STREAK)
+    return None
+
+
 def check_suite(rep, rows):
     """1 and 2: the suite must post-date the last app-code commit, and cover all three cells deeply enough.
 
@@ -333,6 +384,14 @@ def check_not_worse(rep, suite, fresh_prefix, all_rows=()):
         if len(a) < 2 or len(b) < 2:
             rep.refuse(name, "%s n=%d vs %s n=%d - a single run has no range, so this cell can neither show a "
                              "regression nor rule one out" % (base_label, len(a), fresh_prefix, len(b)))
+            continue
+        if len(a) < MIN_GATING_ARM or len(b) < MIN_GATING_ARM:
+            rep.refuse(name, "%s n=%d vs %s n=%d - a gating cell needs n>=%d a side" % (
+                base_label, len(a), fresh_prefix, len(b), MIN_GATING_ARM))
+            continue
+        why = interleave_problem(a, b)
+        if why:
+            rep.refuse(name, "%s vs %s: %s" % (base_label, fresh_prefix, why))
             continue
         bad, unresolved, notes, skipped, refused = [], [], [], [], []
         for key, higher_worse, label, floor in SUITE_METRICS:
@@ -435,12 +494,27 @@ def default_changes(base, head):
     rc, out, _ = sh("git", "diff", "%s..%s" % (base, head), "--", "lib", "Verve.lua", "diag.lua")
     if rc != 0:
         return None
+    return parse_default_changes(out)
+
+
+CHECK_NEW_ON = True   # a NEW switch defaulting ON counts as a change (selftest seeds turn this off to prove it bites)
+
+
+def parse_default_changes(diff_text):
+    """{R.KEY: (old, new)} from a unified diff. old is None for a NEW key that defaults ON (`= true`).
+
+    A new key at false, 0 or a tuning number is not counted: off-by-default changes nothing, and a new parameter
+    only matters through the switch that uses it.
+    """
     added, removed = {}, {}
-    for line in out.splitlines():
+    for line in diff_text.splitlines():
         m = re.match(r"^([+-])(R\.[A-Z0-9_]+)\s*=\s*([^\s;]+)", line)
         if m:
             (added if m.group(1) == "+" else removed)[m.group(2)] = m.group(3).rstrip(",")
-    return {k: (removed.get(k), v) for k, v in added.items() if k in removed and removed[k] != v}
+    out = {k: (removed.get(k), v) for k, v in added.items() if k in removed and removed[k] != v}
+    if CHECK_NEW_ON:
+        out.update({k: (None, v) for k, v in added.items() if k not in removed and v == "true"})
+    return out
 
 
 def check_evidence(rep, rows, base, head):
@@ -465,7 +539,7 @@ def check_evidence(rep, rows, base, head):
         withdrawn = bool(re.search(r"WITHDRAWN[^\n]*" + re.escape(bare), lessons)
                          or re.search(re.escape(bare) + r"[^\n]*WITHDRAWN", lessons))
         detail = "%s -> %s | %d harness rows mention it | LESSONS: %s" % (
-            old, new, n, "yes" if cited else "NO LINE")
+            "(new switch)" if old is None else old, new, n, "yes" if cited else "NO LINE")
         if withdrawn:
             rep.fail("default %s" % bare, detail + " | a LESSONS line marks it WITHDRAWN")
         elif n < MIN_SIDE * 2 or not cited:
@@ -525,9 +599,15 @@ def rule_checks():
     # THE DEPTH ITSELF, not just which cells. Found by a seeded defect: nothing here noticed the requirement being
     # lowered to one run a cell, which would let a single race per cell satisfy the gate while every other check
     # still passed. n>=3 is the project standard and a 12-lap cell's own spread is 1.40x, so one run has no range.
-    thin = sorted("%s=%d" % (c, n) for c, n in NEEDED_CELLS.items() if n < 3)
+    # (27 Oct) six a side for the gating cells, per cell AND per arm.
+    thin = sorted("%s=%d" % (c, n) for c, n in NEEDED_CELLS.items() if n < 6)
     if thin:
-        f.append("a gating cell requires fewer than 3 runs: %s" % ", ".join(thin))
+        f.append("a gating cell requires fewer than 6 runs: %s" % ", ".join(thin))
+    if MIN_GATING_ARM < 6:
+        f.append("MIN_GATING_ARM %d is below six a side" % MIN_GATING_ARM)
+    if DEFAULT_HEAD != "HEAD":
+        f.append("the default head is %r, not HEAD (a branch name that is absent locally refuses items 4 and 6)"
+                 % DEFAULT_HEAD)
     if MIN_SIDE < 3:
         f.append("MIN_SIDE %d is below the project's n>=3 standard" % MIN_SIDE)
 
@@ -542,16 +622,45 @@ def rule_checks():
     if "REFUSED" not in verdicts:
         f.append("a gating cell with a 1-run baseline was not refused: %s" % verdicts)
 
+    # Six a side with run timestamps: base run i at minute 2i, head at 2i+1 (interleaved), or every head run after
+    # every base run (block). The diag file name carries the stamp, as a real row's does.
+    def arms(pa, pb, base_extra, fresh_extra, n_base=6, n_fresh=6, block=False):
+        def row(p, i, minute, extra):
+            return dict(mk("%s_sgf_%d" % (p, i), 20), file="verve_diag_20261027_01%02d00.csv" % minute, **extra)
+        base = [row(pa, i, 2 * i, base_extra) for i in range(1, n_base + 1)]
+        fresh = [row(pb, i, (30 + i) if block else (2 * i + 1), fresh_extra) for i in range(1, n_fresh + 1)]
+        return base + fresh
+
+    def verdicts_of(rows, prefix):
+        r = Report()
+        check_not_worse(r, rows, prefix, all_rows=rows)
+        return [v for v, n, d in r.rows if "sgf" in n]
+
+    pace = {"pace_best_s": "110.5"}
+    if verdicts_of(arms("rc96a", "rc96b", pace, pace), "rc96b") != ["PASS"]:
+        f.append("an identical, interleaved 6-a-side cell did not PASS: %s"
+                 % verdicts_of(arms("rc96a", "rc96b", pace, pace), "rc96b"))
+    if "REFUSED" not in verdicts_of(arms("rc96a", "rc96b", pace, pace, block=True), "rc96b"):
+        f.append("a BLOCK design (all base runs, then all head runs) was not refused")
+    if "REFUSED" not in verdicts_of(arms("rc96a", "rc96b", pace, pace, n_fresh=5), "rc96b"):
+        f.append("a gating cell with 5 head runs (6 needed a side) was not refused")
+
+    # A NEW switch that defaults ON is a default change; a new one at false/0, or an unchanged one, is not.
+    seen = parse_default_changes("+R.NEW_ON = true  -- new\n+R.NEW_OFF = false\n+R.NEW_NUM = 0\n"
+                                 "-R.MOVED = 1\n+R.MOVED = 2\n-R.SAME = 1\n+R.SAME = 1\n")
+    if seen.get("R.NEW_ON") != (None, "true"):
+        f.append("a NEW R.* switch defaulting ON was not reported as a default change")
+    if "R.NEW_OFF" in seen or "R.NEW_NUM" in seen or "R.SAME" in seen:
+        f.append("an off-by-default or unchanged key was reported as a default change: %s" % sorted(seen))
+    if seen.get("R.MOVED") != ("1", "2"):
+        f.append("a changed default value was missed: %s" % sorted(seen))
+
     # PACE: absent, empty, zero or negative pace must REFUSE, never read as "0.0 BETTER". nums() coerces a
     # missing pace to 0.0 and pace_best_s is higher-worse, so a 0.0 would print mean < lo = BETTER - which is
     # what PC #1's rc17 did on mon, spa12 and sgf. Three seeded cases: a missing row, a 0.0 row, a valid row.
     def pace_verdicts(fresh_pace):
-        base = [dict(mk("rc98a_sgf_%d" % i, 20), pace_best_s="110.5") for i in (1, 2, 3)]
         extra = {} if fresh_pace is None else {"pace_best_s": fresh_pace}
-        fresh = [dict(mk("rc98b_sgf_%d" % i, 20), **extra) for i in (1, 2, 3)]
-        r = Report()
-        check_not_worse(r, base + fresh, "rc98b", all_rows=base + fresh)
-        return [v for v, n, d in r.rows if "sgf" in n]
+        return verdicts_of(arms("rc98a", "rc98b", pace, extra), "rc98b")
     if "REFUSED" not in pace_verdicts(None):
         f.append("a MISSING pace row did not REFUSE (would read as 0.0 BETTER): %s" % pace_verdicts(None))
     if "REFUSED" not in pace_verdicts("0.0"):
@@ -561,11 +670,7 @@ def rule_checks():
 
     # An ABSENT (empty) contact_events must REFUSE too; a genuine 0 must still be judged, not refused.
     def contact_verdicts(fresh_contact):
-        base = [dict(mk("rc97a_sgf_%d" % i, 20), pace_best_s="110.5") for i in (1, 2, 3)]
-        fresh = [dict(mk("rc97b_sgf_%d" % i, 20), pace_best_s="110.5", contact_events=fresh_contact)
-                 for i in (1, 2, 3)]
-        r = Report(); check_not_worse(r, base + fresh, "rc97b", all_rows=base + fresh)
-        return [v for v, n, d in r.rows if "sgf" in n]
+        return verdicts_of(arms("rc97a", "rc97b", pace, dict(pace, contact_events=fresh_contact)), "rc97b")
     if "REFUSED" not in contact_verdicts(""):
         f.append("an ABSENT contact_events did not REFUSE: %s" % contact_verdicts(""))
     if "REFUSED" in contact_verdicts("0"):
@@ -578,6 +683,22 @@ def rule_checks():
     m = SUITE_RE.match("rc16c_spa12_on_1")
     if not m or m.group(2) != "spa12":
         f.append("spa12 lost its precedence over spa in SUITE_RE")
+    m = SUITE_RE.match("rc017a_sgfnk_1")
+    if not m or m.group(2) != "sgfnk":
+        f.append("SUITE_RE does not read sgfnk as its own cell (got %r)" % (m and m.group(2)))
+
+    # The PC #2 deviation swaps sgf for sgfnk and nothing else; the default set keeps sgf.
+    if "sgf" not in GATING_CELLS or "sgfnk" in GATING_CELLS:
+        f.append("the default gating set is not {mon, spa12, sgf}: %s" % sorted(GATING_CELLS))
+    saved = dict(GATING_CELLS)
+    try:
+        use_machine("pc2")
+        if sorted(GATING_CELLS) != ["mon", "sgfnk", "spa12"] or GATING_CELLS.get("sgfnk") != saved.get("sgf"):
+            f.append("--machine pc2 did not give {mon, spa12, sgfnk} at sgf's depth: %s" % GATING_CELLS)
+    except KeyError as e:
+        f.append("--machine pc2 failed: %r" % e)
+    finally:
+        GATING_CELLS.clear(); GATING_CELLS.update(saved)
     return f
 
 
@@ -602,39 +723,77 @@ def selftest():
     print("  %s" % ("every rule holds" if not fails else "RULES BROKEN"))
 
     print("\n=== seeded rule defects (untrusted until each FAILS rule_checks) ===")
+    global MIN_GATING_ARM, INTERLEAVE_MAX_STREAK, DEFAULT_HEAD, CHECK_NEW_ON, SUITE_RE
     allok = True
     seeds = [
         ("a gating cell dropped from the requirement", "pop_sgf"),
         ("a character cell promoted to gating", "promote_spa"),
         ("the gating requirement lowered to 1 run", "loosen"),
+        ("gating depth back to 3 a side", "to3"),
+        ("per-arm depth lowered to 2", "arm2"),
+        ("interleaving not enforced", "nointerleave"),
+        ("default head a branch name again", "head"),
+        ("a new default-ON switch ignored", "newon"),
+        ("pc2 deviation leaves sgf gating", "pc2keep"),
+        ("sgfnk read as sgf by the label grammar", "nkre"),
     ]
     for name, kind in seeds:
         saved_needed, saved_chars = dict(NEEDED_CELLS), dict(CHARACTER_CELLS)
+        saved = (MIN_GATING_ARM, INTERLEAVE_MAX_STREAK, DEFAULT_HEAD, CHECK_NEW_ON, SUITE_RE)
+        saved_machine = dict(MACHINE_CELLS)
         if kind == "pop_sgf":
             NEEDED_CELLS.pop("sgf", None)
         elif kind == "promote_spa":
-            NEEDED_CELLS["spa"] = 3
-        else:
+            NEEDED_CELLS["spa"] = 6
+        elif kind == "loosen":
             for k in list(NEEDED_CELLS):
                 NEEDED_CELLS[k] = 1
+        elif kind == "to3":
+            for k in list(NEEDED_CELLS):
+                NEEDED_CELLS[k] = 3
+            MIN_GATING_ARM = 3
+        elif kind == "arm2":
+            MIN_GATING_ARM = 2
+        elif kind == "nointerleave":
+            INTERLEAVE_MAX_STREAK = 999
+        elif kind == "head":
+            DEFAULT_HEAD = "dev016"
+        elif kind == "pc2keep":
+            MACHINE_CELLS["pc2"] = ("sgf", "sgf")
+        elif kind == "nkre":
+            SUITE_RE = re.compile(r"^(rc\d+[a-z]?)_(spa12|spa|bcn|mon|sgf)(?:nk)?(?:_(on|off))?_\d+$")
+        else:
+            CHECK_NEW_ON = False
         got = rule_checks()
         NEEDED_CELLS.clear(); NEEDED_CELLS.update(saved_needed)
         CHARACTER_CELLS.clear(); CHARACTER_CELLS.update(saved_chars)
+        MIN_GATING_ARM, INTERLEAVE_MAX_STREAK, DEFAULT_HEAD, CHECK_NEW_ON, SUITE_RE = saved
+        MACHINE_CELLS.clear(); MACHINE_CELLS.update(saved_machine)
         print("  %-46s %s" % (name[:46], "caught" if got else "NOT CAUGHT"))
         allok &= bool(got)
     print("\n  %s" % ("every seeded defect caught" if allok else "SELFTEST NOT TRUSTWORTHY"))
     return 0 if (not fails and allok) else 1
 
 
+# HEAD, not a branch name: the default used to be "dev016", which is not a local branch on PC #2 (its branch is
+# pc1-dev016), so a bare run REFUSED items 4 and 6 with "could not read the diff" on 27 Oct.
+DEFAULT_HEAD = "HEAD"
+
+
 def main():
     if "--selftest" in sys.argv:
         return selftest()
-    base, head = "origin/main", "dev016"
+    base, head = "origin/main", DEFAULT_HEAD
     for i, a in enumerate(sys.argv):
         if a == "--base" and i + 1 < len(sys.argv):
             base = sys.argv[i + 1]
         if a == "--head" and i + 1 < len(sys.argv):
             head = sys.argv[i + 1]
+        if a == "--machine" and i + 1 < len(sys.argv):
+            if sys.argv[i + 1] not in MACHINE_CELLS:
+                print("release_check: unknown --machine %r (known: %s)" % (sys.argv[i + 1], ", ".join(MACHINE_CELLS)))
+                return 2
+            print("release_check: " + use_machine(sys.argv[i + 1]))
     print("release_check: %s against %s" % (head, base))
     rows = read_results()
     rep = Report()
