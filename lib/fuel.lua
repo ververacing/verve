@@ -66,6 +66,9 @@ F.RATE_LAPPED = true
 -- AC's own margin gets a start load that covers it (real fuel/lap), so no stop is planned. A race that genuinely
 -- needs a stop is left alone (greenLoad's per-car fits-one-tank gate). DEFAULT OFF until tested; set from G.shortFuel.
 F.SHORT_FUEL = false
+-- (F.TIMED leak fix) the timed-race and rate>1 lapped work belongs to G.timedFuel alone. Since item 28 Verve.lua calls
+-- F.update when timedFuel OR shortFuel, so without this a timedFuel-off race with shortFuel on still got the timed load.
+F.TIMED = true
 
 local st = {}             -- per-session state (F.reset)
 
@@ -181,9 +184,12 @@ local function gate(sim)
         st.fuelOn, st.rate = on, math.max(1, rate)
     end
     if not st.fuelOn then return nil end
-    local ss = F.timedSession(sim)
-    if ss then st.mode = 'timed'; return ss end
-    if F.RATE_LAPPED and st.rate > 1 then ss = lappedSession(sim); if ss then st.mode = 'lapped'; st.lapsRace = ss.laps or 0; return ss end end
+    local ss = nil
+    if F.TIMED then
+        ss = F.timedSession(sim)
+        if ss then st.mode = 'timed'; return ss end
+        if F.RATE_LAPPED and st.rate > 1 then ss = lappedSession(sim); if ss then st.mode = 'lapped'; st.lapsRace = ss.laps or 0; return ss end end
+    end
     -- (owner item 28) a SHORT lapped race at rate 1: greenLoad's per-car fits-one-tank gate decides which cars it acts on
     if F.SHORT_FUEL then ss = lappedSession(sim); if ss then st.mode = 'short'; st.lapsRace = ss.laps or 0; return ss end end
     return nil

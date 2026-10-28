@@ -593,6 +593,7 @@ function script.update(dt)
     Recovery.REPAIR_BODY  = G.repairOnTrack ~= false
     if G.recovery then Recovery.update(dt) end
     Fuel.SHORT_FUEL = G.shortFuel == true   -- (owner item 28) short-race fuel guard, read inside Fuel.update's gate
+    Fuel.TIMED = G.timedFuel == true        -- the timed / rate>1 branches run only with timedFuel itself on, not via shortFuel
     if G.timedFuel or G.shortFuel then pc('fuel', Fuel.update, sim, dt) else pcall(Fuel.offTick) end   -- timed races + short-race guard: green fuel load / pit-box guard (lib/fuel.lua)
     Troublespots.ENABLED = G.troubleSpots
     Troublespots.update(dt)
