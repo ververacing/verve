@@ -1,3 +1,27 @@
+0.16.0
+- Smoother starts: on the opening lap the AI no longer snaps on and off the throttle in the pack behind the leader. It
+  still holds back where it should, it just eases off and back on instead of stepping.
+- The difficulty slider now sets the AI level directly (95 means 95). If you preferred the old lap-time steps, turn
+  "Difficulty slider in lap-time steps" back on in the options.
+- Difficulty in other launchers: when a launcher does not tell Verve the AI level (reported with GT Life), Verve no longer
+  assumes maximum. Before, the difficulty stayed at maximum whatever you set.
+- Yellow flags: a car stopped a little way off the racing line now raises a yellow. Before, a car stopped just off the line
+  raised nothing and the next car arrived flat out.
+- Mid-pack drivers make mistakes at their own level's rate. Before, they made noticeably fewer than intended.
+- Ovals: only purpose-built ovals get oval racing. Several road layouts (Monza's older layouts, the Red Bull Ring national
+  layout, COTA East) were being treated as ovals.
+- Older Custom Shaders Patch: below build 3465 Verve now stands down for the session and shows one clear message, instead
+  of running with features missing.
+- Privacy: the anonymous race report (off unless you turn it on) now includes where Verve's first error happened, as a file
+  name and line number only. Never the error text, never a folder path. The privacy text in the app and the README say so,
+  and they now list everything the report contains.
+- README: only switch off "Control AI grip" if another mod is controlling AI grip. In our tests, switching it off with no
+  other grip mod made a Formula field crash more.
+- Tooltips: the "Human errors" and tactics tooltips now describe what those options actually do.
+- Small fixes from a code review: a rookie diving up the inside settles back into line as in 0.15.3, a car being recovered
+  after a crash is never held back by the start smoothing, and a race report the server rejects is no longer resent at
+  every game start.
+
 0.15.3
 - Smoother frame times: Verve makes far less throwaway data for Lua to clean up every frame, and saves what it has learned
   about a track's trouble spots every 5 minutes instead of every 20 seconds (and once more when you quit). The AI races
