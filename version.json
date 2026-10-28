@@ -1,5 +1,5 @@
 {
-  "version": "0.15.3",
+  "version": "0.16.0",
   "url": "https://github.com/ververacing/verve/releases/latest",
   "summary": "Smoother frame times: less work per frame and fewer saves during a race, same racing."
 }
