@@ -2041,6 +2041,42 @@ R.errN = 0                  -- racecraft's OWN fault count: lua_errors is an agg
 R.errFirst = nil            -- the first message seen this session, for the diag row
 R.NOSTATE = {}              -- (lean016) read-only stand-in for 'no recovery state': never write to it
 R.last = {}                 -- per-car applied values (offset/aggr/caution/state) -- diagnostics only
+-- (R.HINT_SHIP, 0.16.x) TIME GAP AHEAD, for lib/tyrehint.lua's clean-air fade. The geometry the faded hint was raced
+-- with (diag rows AB_5arm / HH_fadedA, 2026-10-30/31), unchanged: AHEAD = the nearest car whose nose is ahead of mine
+-- and within HINT_LAT_LINE of my lateral (same line); ALONGSIDE = any car within HINT_SIDE_M along the track and
+-- HINT_LAT_SIDE across, either side. Returns (s to the nearest AI car ahead, s to the PLAYER (car 0) if ahead, alongside),
+-- gaps as metres / my speed (floor 1 m/s), 1e9 = none. Reads latNow, which beginFrame fills every frame before
+-- tyrehint runs (Verve.lua). One O(n) scan, no allocation. Not used by evaluate.
+R.HINT_LAT_LINE = 0.30
+R.HINT_SIDE_M = 5.0
+R.HINT_LAT_SIDE = 0.60
+function R.timeGapAhead(i)
+    local s = ac.getSim()
+    local me = ac.getCar(i)
+    if not (s and me and me.splinePosition) then return 1e9, 1e9, false end
+    local tl = (s.trackLengthM and s.trackLengthM > 200) and s.trackLengthM or 7000
+    local myS, myLat = me.splinePosition, latNow[i] or 0
+    local gA, gP, side = 1e9, 1e9, false
+    for j = 0, s.carsCount - 1 do
+        if j ~= i then
+            local oc = ac.getCar(j)
+            if oc and oc.splinePosition then
+                local g = (oc.splinePosition - myS) % 1
+                local gm = (g < 0.5 and g or g - 1) * tl                 -- + ahead, - behind (m)
+                local dlat = math.abs((latNow[j] or 0) - myLat)
+                if gm >= 0 and dlat < R.HINT_LAT_LINE then
+                    if j ~= 0 then
+                        if gm < gA then gA = gm end
+                    elseif gm < gP then gP = gm end   -- car 0 = the player (offline AC), by index: the harness autopilot reads isAIControlled
+                end
+                if math.abs(gm) < R.HINT_SIDE_M and dlat < R.HINT_LAT_SIDE then side = true end
+            end
+        end
+    end
+    local v = math.max((me.speedKmh or 0) / 3.6, 1.0)
+    return gA < 1e8 and gA / v or 1e9, gP < 1e8 and gP / v or 1e9, side
+end
+
 function R.beginFrame()
     R.attacking = 0; R.defending = 0
     pcall(Strategy.tick)

@@ -133,6 +133,7 @@ local DEFAULTS = {
     paceAbs = true,      -- DEFAULT 0.14.8 (lib/drivers.lua D.PACE_ABS): a driver profile sets the car's pace outright
     ratingV2 = true,     -- DEFAULT 0.14.9; harness switch (lib/drivers.lua D.RATING_V2): real drivers rated as pros around a Veteran (owner 2026-09-29)
     classV2 = false,     -- harness switch (lib/classes.lua M.DETECT_V2): the v2 car-class detector (2026-09-30 inventory: 97 % vs 53 %)
+    aboveExpert = 100,   -- (0.16.x, lib/tyrehint.lua R.HINT_ABOVE) the "past 100" control: 100 = off; up to 120 raises the GT clean-air hint
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
 
@@ -149,6 +150,7 @@ local S = ac.storage({
     paceAbs = true,
     ratingV2 = true,
     classV2 = false,
+    aboveExpert = 100,
     autosave = true, schema = 1,
 })
 -- settings migration: 0.12 made crash repair + trouble spots core (they were opt-in experiments; a day-long
@@ -491,6 +493,7 @@ function script.update(dt)
         if G.raceFeed then pcall(Contacts.update, dt) end
         pcall(Racecraft.offSwitch, false, false, Difficulty.stockLevel)   -- (0.15.1) switched off mid-session: hand the cars back, once
         pcall(Fuel.offTick)                                                 -- (0.15.1) off across the green: no green load later
+        pcall(TyreHint.offTick)                                             -- (0.16.x) a raised or cut tyre hint handed back, once
         return
     end
     local ok, sim = pcall(ac.getSim)
@@ -515,6 +518,7 @@ function script.update(dt)
     Strategy.ENABLED      = G.strategy ~= false
     Racecraft.INTENSITY   = G.rcIntensity
     Racecraft.VARIABILITY = G.intensity     -- spreads per-driver aggression across the field
+    Racecraft.HINT_ABOVE  = tonumber(G.aboveExpert) or 100   -- (lib/tyrehint.lua) the Above-expert slider; 100 = off
     Overrides.autosave    = S.autosave
     Racecraft.beginFrame()
     pcall(Racecraft.offSwitch, true, G.controlGrip, Difficulty.stockLevel)   -- (0.15.1) 'Control AI grip' unticked: grip handed back, once
@@ -883,8 +887,8 @@ function script.windowMain()
     end
 
     ui.text('What Verve does (always on)')
-    ui.textWrapped('Human pace variability  -  class-aware tyre, wet and dirty-air physics  -  racecraft (overtaking, defending, blue flags, yellow flags)  -  self-recovery with crash repair (a stuck car is repaired and set back on the racing line; genuinely wrecked cars retire)  -  trouble-spot learning per track.')
-    if ui.itemHovered() then ui.setTooltip('These are Verve. They can\'t be half-enabled: turn Verve off to get stock AC.') end
+    ui.textWrapped('Human pace variability  -  class-aware tyre, wet and dirty-air physics  -  racecraft (overtaking, defending, blue flags, yellow flags)  -  self-recovery with crash repair (a stuck car is repaired and set back on the racing line; genuinely wrecked cars retire)  -  trouble-spot learning per track  -  at high difficulty, GT cars push harder on a clear road.')
+    if ui.itemHovered() then ui.setTooltip('These are Verve. They can\'t be half-enabled: turn Verve off to get stock AC.\nGT cars: from difficulty 90 up, a GT car with clear road ahead trusts its tyres more and is quicker. It eases off as it closes on another car, so it does not run into it. Other kinds of car are unchanged.') end
 
     ui.newLine()
     ui.text('Options')
@@ -896,6 +900,11 @@ function script.windowMain()
         ui.text('Race start'); ui.sameLine(150)
         comboFor('##raceStart', names[G.raceStart] or 'Calm', G.raceStart, { 'calm', 'racing', 'stock' }, function(o) setG('raceStart', o) end)
         if ui.itemHovered() then ui.setTooltip('How the AI launches and takes the first lap. Calm: staggered release and extra spacing into the first corners (the fewest first-lap pile-ups). Racing: half of that - backmarkers go for it, expect the occasional turn-1 tangle, as in real life. Stock: none of it, AC\'s own start.') end
+    end
+    do
+        local ax = ui.slider('Above-expert AI##ax', tonumber(G.aboveExpert) or 100, 100, 120, '%.0f')
+        if ax ~= G.aboveExpert then setG('aboveExpert', ax) end
+        if ui.itemHovered() then ui.setTooltip('For when difficulty 100 is not hard enough. Above 100, GT cars at full difficulty get faster still, up to 120. 100 = off (the normal game). Other kinds of car are unchanged.') end
     end
     toggle('Repair damage on track', 'repairOnTrack', 'On: a stuck or wrecked AI car is set back on the racing line with its body repaired (keeps the field alive; the default). Off: it is set back on the line but keeps its damage and pits for repairs like stock AC.')
     toggle('Tactics: set-up passes, late-brake lunges, switchbacks', 'strategy', 'Planned manoeuvres on top of the reactive racecraft, per class (a GT driver out-brakes, a formula driver sets it up on the straight, a stock car slingshots). On at any difficulty whenever this is ticked; each car\'s own pace decides how much of the playbook it uses (a Rookie never switchbacks, a Veteran does).')

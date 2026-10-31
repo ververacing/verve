@@ -128,6 +128,7 @@ local function classifyPhysics(i)
 end
 
 local autoCache = {}
+local autoWhy = {}   -- car index -> the rule that set its auto class: 'tags' | 'ui' | 'id' | 'physics' | 'default'
 local idCache = {}
 
 local function carIdOf(i)
@@ -407,9 +408,14 @@ function M.autoKeyOf(i)
         local ok, k = pcall(M.V2.detect, i)
         c = (ok and k) or M.DEFAULT
         autoCache[i] = c
+        autoWhy[i] = (ok and M.V2.why[i]) or 'default'
         return c
     end
-    local key = classifyTags(i) or classifyId(carIdOf(i)) or classifyPhysics(i) or M.DEFAULT
+    local key, why = classifyTags(i), 'tags'
+    if not key then key, why = classifyId(carIdOf(i)), 'id' end
+    if not key then key, why = classifyPhysics(i), 'physics' end
+    if not key then key, why = M.DEFAULT, 'default' end
+    autoWhy[i] = why
     -- low-downforce open-wheeler refinement: a "formula" car with little/no wing (Formula Ford,
     -- Vee, junior single-seaters) is a momentum car that races in slipstream packs, not a fragile
     -- F1. Route it to the close-racing formula_jr profile instead.
@@ -440,6 +446,17 @@ function M.multOf(i)
     return M.MULT[M.keyOf(i)] or M.MULT[M.DEFAULT]
 end
 
-function M.reset() autoCache = {}; idCache = {} end
+-- (R.HINT_SHIP) true when car i's class is only a GUESS: no user override, and the detector fell through to the
+-- physics fallback or the default. Tags, the ui class and id keywords count as known. lib/tyrehint.lua gives a
+-- guessed class no hint: "untested classes stay at x1.0" covers cars we only think are GT (verve-47 2026-10-31).
+function M.guessed(i)
+    local id = carIdOf(i)
+    if id and Overrides.classOverride(id) then return false end
+    M.autoKeyOf(i)
+    local w = autoWhy[i]
+    return w == 'physics' or w == 'default'
+end
+
+function M.reset() autoCache = {}; autoWhy = {}; idCache = {} end
 
 return M

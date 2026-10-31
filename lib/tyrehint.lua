@@ -11,7 +11,24 @@
 -- come in:   hint = base * (1 - COLD_TYRE * c),   c = clamp((optimum - core) / COLD_SPAN, 0, 1)
 -- Default OFF. The base/apply machinery is the same one the learned pace map will push with later (owner's idea,
 -- backlog 2026-10-10 11:50). Lives on the racecraft table so --racecraft {"COLD_TYRE":0.15} reaches it.
+--
+-- (R.HINT_SHIP, 0.16.x, decisions 47/48) CLEAN-AIR HINT. The same writer also RAISES the hint for GT cars at high
+-- levels, and fades it out as the car closes on the one ahead:
+--   hint = base * (1 + (mult(level, class) - 1) * f) * (1 - COLD_TYRE * c)
+-- mult: 1.0 at a launcher meter <= HINT_RAMP_LO (90), linear to HINT_CLASS[class] (gt 1.2) at 100, then on to
+-- HINT_CLASS_TOP (gt 1.3) across 100-120 (a meter above 100, or the Above-expert slider R.HINT_ABOVE for cars whose
+-- own level is >= 99.5). Driven by the field-wide METER, not each car's level, so the driver-profile spread moves
+-- as one. Only a class from real metadata gets it (Classes.guessed: a physics-guessed 'gt' stays 1.0).
+-- f: 0..1 from R.timeGapAhead - full at >= HINT_FAR_S of clear road on my line, none at <= HINT_NEAR_S or alongside
+-- anyone; the PLAYER ahead uses the tight HINT_PLAYER_NEAR_S / FAR_S window, so a chasing AI keeps its grip until
+-- it is on the human's gearbox. The hint term moves HINT_RATE per 1 Hz tick and is re-asserted every second while
+-- mult > 1: exactly the cadence of the diag rows that tested it (AB_5arm, HH_fadedA 2026-10-31).
+-- Measured (spa12, 18 GT3, level 100, n=4): faded x1.2 med-best -3.9 s vs x1.0, h40 8 vs 6, incidents 16.2 vs 20.2;
+-- plain x1.1 -3.65 s, h40 16. SF70H fails at x1.05+ (F1 sgfnk 2026-10-31): formula stays 1.0.
 local R = require('lib.racecraft')
+local Classes = require('lib.classes')
+local Career = require('lib.career')
+local Difficulty = require('lib.difficulty')
 
 local T = {}
 R.COLD_TYRE = 0      -- 0 = off. 0.15 = up to 15 % less assumed tyre grip at full coldness (harness A/B)
@@ -19,23 +36,73 @@ R.COLD_SPAN = 40     -- degrees C below optimum for the full effect
 R.COLD_LAPS = 2      -- the cut applies only on a session's first COLD_LAPS laps and on an out-lap: tyres cold BY CIRCUMSTANCE.
                      -- Against the data optimum all race it never ended where tyres never reach it - GT3 at Monza runs 72-80 C
                      -- v 85-95 C, so the AI lost ~4 % grip all race (suite rc16a 2026-10-10: top-3 +3.0 s/lap)
+R.HINT_SHIP = true   -- DEFAULT 0.16.x (decisions 47/48): the clean-air hint above. false = today's writes exactly
+R.HINT_CLASS = { gt = 1.2 }       -- mult at meter 100, per class key; a class not listed stays 1.0 (formula FAILED 2026-10-31)
+R.HINT_CLASS_TOP = { gt = 1.3 }   -- mult at hint level 120 (the top of the Above-expert range)
+R.HINT_RAMP_LO = 90  -- meter at or below this: 1.0 ("95 means 95": the hint must not make a low level secretly fast)
+R.HINT_ABOVE = 100   -- the Above-expert slider (Verve.lua sets it from G.aboveExpert every frame); 100 = off
+R.HINT_NEAR_S = 1.0  -- fade window to an AI car ahead on my line (s): f = 0 at or under NEAR, 1 at or over FAR
+R.HINT_FAR_S = 2.0
+R.HINT_PLAYER_NEAR_S = 0.3   -- the same, to the PLAYER ahead (verve-47 2026-10-31; untested - its own suite cell)
+R.HINT_PLAYER_FAR_S = 0.8
+R.HINT_RATE = 0.02   -- the hint term (1 + (mult - 1) * f) moves at most this much per 1 Hz tick
+R.TYRE_HINT_FORCE = nil   -- harness: a number replaces mult() for every AI car (ladders on the shipped code)
 
 local base, cur, outLap = {}, {}, {}   -- per car: its own ai.ini HINT, what we last set (only cars we changed), and the
                                        -- lap count it left the pit lane on (its out-lap runs until the next line crossing)
-local acc = 0
+local hMul, hF, hTerm = {}, {}, {}     -- per car (HINT_SHIP): mult, the fade target f, and the slewed applied term
+local hA, hP, hS = {}, {}, {}          -- per car: the gaps f was computed from (AI ahead s, player ahead s, alongside), for diag
+local acc, tick = 0, 0
+
+local function fwin(t, near, far)
+    if far <= near then far = near + 0.01 end
+    local f = (t - near) / (far - near)
+    if f < 0 then return 0 elseif f > 1 then return 1 end
+    return f
+end
+
+-- the clean-air mult for car i this second (1.0 = no hint)
+local function multFor(i)
+    local force = tonumber(R.TYRE_HINT_FORCE)
+    if force then return force end
+    if Classes.guessed(i) then return 1.0 end
+    local key = Classes.keyOf(i)
+    local top = R.HINT_CLASS[key]
+    if not top then return 1.0 end
+    local meter = tonumber(Career.meter)
+    if not meter then return 1.0 end           -- level unknown: Verve stands down (as difficulty.lua does)
+    local hl = meter
+    local above = tonumber(R.HINT_ABOVE) or 100
+    if above > 100 then
+        local own = Difficulty.levelFor(i) or Difficulty.stockLevel(i)
+        if own and own * 100 >= 99.5 then hl = hl + (above - 100) end
+    end
+    local lo = tonumber(R.HINT_RAMP_LO) or 90
+    if hl <= lo then return 1.0 end
+    if hl <= 100 then return 1 + (top - 1) * (hl - lo) / math.max(1, 100 - lo) end
+    local hi = R.HINT_CLASS_TOP[key] or top
+    return top + (hi - top) * math.min(1, (hl - 100) / 20)
+end
+
+-- switched off mid-session (the levers, or Verve itself - Verve.lua's off path calls this): hand every changed car its
+-- own value back, once
+function T.offTick()
+    if next(cur) then
+        for i, _ in pairs(cur) do if base[i] then pcall(physics.setAITyresHint, i, base[i]) end end
+        cur = {}
+    end
+    if next(hTerm) then hMul, hF, hTerm, hA, hP, hS = {}, {}, {}, {}, {}, {} end
+end
 
 function T.update(sim, dt)
     local k = tonumber(R.COLD_TYRE) or 0
-    if k <= 0 then
-        if next(cur) then      -- switched off mid-session: hand every changed car its own value back, once
-            for i, _ in pairs(cur) do if base[i] then pcall(physics.setAITyresHint, i, base[i]) end end
-            cur = {}
-        end
-        return
-    end
+    local ship = R.HINT_SHIP == true
+    if k <= 0 and not ship then T.offTick(); return end
     acc = acc + (dt or 0)
     if acc < 0.25 then return end              -- 4 Hz: tyre temperature moves slowly
     acc = 0
+    tick = tick + 1
+    local hintTick = tick % 4 == 0             -- 1 Hz: the fade's cadence
     local span = math.max(1, tonumber(R.COLD_SPAN) or 40)
     for i = 0, sim.carsCount - 1 do
         local c = ac.getCar(i)
@@ -44,31 +111,59 @@ function T.update(sim, dt)
                 base[i] = 1.0
                 pcall(function() base[i] = ac.INIConfig.carData(i, 'ai.ini'):get('TYRES', 'HINT', 1.0) end)
             end
-            -- (R.COLD_LAPS) the window: the opening laps, or an out-lap (set every tick in the pit lane, so it holds the lap
-            -- count the car rejoins on; a count that went backwards is a new session and clears it)
-            local lapN = c.lapCount or 0
-            if c.isInPitlane then outLap[i] = lapN elseif outLap[i] and (lapN > outLap[i] or lapN < outLap[i] - 1) then outLap[i] = nil end
-            local inWindow = lapN < (tonumber(R.COLD_LAPS) or 2) or outLap[i] ~= nil
-            local t, n, opt = 0, 0, 0
-            for w = 0, 3 do
-                local wh = c.wheels[w]
-                if wh and type(wh.tyreCoreTemperature) == 'number' then
-                    t = t + wh.tyreCoreTemperature; n = n + 1
-                    if (wh.tyreOptimumTemperature or 0) > opt then opt = wh.tyreOptimumTemperature end
+            local cold = 0
+            if k > 0 then
+                -- (R.COLD_LAPS) the window: the opening laps, or an out-lap (set every tick in the pit lane, so it holds the lap
+                -- count the car rejoins on; a count that went backwards is a new session and clears it)
+                local lapN = c.lapCount or 0
+                if c.isInPitlane then outLap[i] = lapN elseif outLap[i] and (lapN > outLap[i] or lapN < outLap[i] - 1) then outLap[i] = nil end
+                local inWindow = lapN < (tonumber(R.COLD_LAPS) or 2) or outLap[i] ~= nil
+                local t, n, opt = 0, 0, 0
+                for w = 0, 3 do
+                    local wh = c.wheels[w]
+                    if wh and type(wh.tyreCoreTemperature) == 'number' then
+                        t = t + wh.tyreCoreTemperature; n = n + 1
+                        if (wh.tyreOptimumTemperature or 0) > opt then opt = wh.tyreOptimumTemperature end
+                    end
+                end
+                if n > 0 and opt > 0 then
+                    cold = inWindow and math.max(0, math.min(1, (opt - t / n) / span)) or 0   -- outside it: the car's own hint
                 end
             end
-            if n > 0 and opt > 0 then
-                local cold = inWindow and math.max(0, math.min(1, (opt - t / n) / span)) or 0   -- outside it: the car's own hint
-                local want = base[i] * (1 - k * cold)
-                if math.abs(want - (cur[i] or base[i])) > 0.004 then
-                    pcall(physics.setAITyresHint, i, want); cur[i] = want
+            local push = false
+            if hintTick then
+                -- never the player's car (car 0), even on the harness autopilot, where it reads isAIControlled (smoke sm16 2026-10-31)
+                local m = (ship and i ~= 0) and multFor(i) or 1.0
+                if m > 1.0005 then
+                    local tA, tP, side = R.timeGapAhead(i)
+                    local f = 0
+                    if not side then
+                        f = fwin(tA, R.HINT_NEAR_S, R.HINT_FAR_S)
+                        local fp = fwin(tP, R.HINT_PLAYER_NEAR_S, R.HINT_PLAYER_FAR_S)
+                        if fp < f then f = fp end
+                    end
+                    -- slewed in HINT units (as tested: the applied hint moved <= 0.02 a second, so 1.0 -> 1.2 takes 10 s)
+                    local goal = 1 + (m - 1) * f
+                    local h = hTerm[i] or 1                -- start from stock, ramp up
+                    local rate = tonumber(R.HINT_RATE) or 0.02
+                    if h < goal then h = math.min(h + rate, goal) elseif h > goal then h = math.max(h - rate, goal) end
+                    hMul[i], hF[i], hTerm[i] = m, f, h
+                    hA[i], hP[i], hS[i] = tA, tP, side
+                    push = true                            -- re-assert every second: CSP can reset a hint
+                elseif hTerm[i] then
+                    hMul[i], hF[i], hTerm[i], hA[i], hP[i], hS[i] = nil, nil, nil, nil, nil, nil
                 end
+            end
+            local want = base[i] * (hTerm[i] or 1) * (1 - k * cold)
+            if push or math.abs(want - (cur[i] or base[i])) > 0.004 then
+                pcall(physics.setAITyresHint, i, want); cur[i] = want
             end
         end
     end
 end
 
--- diag hook: the hint Verve is currently applying to car i (nil = the car's own)
+-- diag hooks: the hint Verve is currently applying to car i (nil = the car's own), and the clean-air parts of it
 function T.hintOf(i) return cur[i] end
+function T.fadeOf(i) return hF[i], hMul[i], hA[i], hP[i], hS[i] end
 
 return T
