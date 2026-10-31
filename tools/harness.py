@@ -863,6 +863,40 @@ def best_laps_from_race_out(t_launch):
     return best
 
 
+def best_laps_from_feed(t_launch):
+    """Fallback for best_laps_from_race_out (verve-47 2026-10-31): {car_index: best_lap_s} from AC's own lap time
+    (lap_ms) in Verve's race feed (lib/feed.lua 'lap' events), or {} if this run left no feed with lap times.
+
+    WHY: AC writes race_out.json FRESH but with NO laps at all when any car has not taken the flag at the moment
+    Verve's stop-at-lap quit fires (a -1 in raceResult; Verve.lua:332). PC #2 confirmed it on 2026-10-31 (sm16_off:
+    car 4 at spline 0.975, 46 km/h, at leader + 10 s). The feed records every lap as it is completed, so it survives.
+    Same value as race_out to the millisecond (sm16c_gt100: 18/18 cars, AI best and median-best identical). It can
+    miss each car's LAST lap (the quit lands before the feed's next tick), so it is a fallback, never the source."""
+    fdir = os.path.join(DOCS, "verve_feed")
+    try:
+        cands = [os.path.join(fdir, f) for f in os.listdir(fdir) if f.endswith(".jsonl")
+                 and os.path.getmtime(os.path.join(fdir, f)) >= t_launch]
+    except OSError:
+        return {}
+    if not cands:
+        return {}
+    best = {}
+    try:
+        for line in open(max(cands, key=os.path.getmtime), encoding="utf-8", errors="replace"):
+            if '"type":"lap"' not in line:
+                continue
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            t = (e.get("lap_ms") or 0) / 1000.0
+            if t > 10 and isinstance(e.get("car"), int):
+                best[e["car"]] = min(best.get(e["car"], 1e9), t)
+    except OSError:
+        return {}
+    return best
+
+
 AC_LOG_CUT = "<Limit exceeded, truncating the rest>"   # AC's last line once log.txt reaches ~10k lines
 
 
@@ -1487,7 +1521,18 @@ def run_once(args, arm, run_idx):
     m["finished"] = finished
     m["quiet_finish"] = 1 if quiet_finish else ""
     # exact lap times from AC itself (only when AC exited cleanly): AI best / median-of-best, player best
-    best = best_laps_from_race_out(t_launch)
+    ro_best = best_laps_from_race_out(t_launch)
+    best = dict(ro_best)
+    # (2026-10-31) a car race_out has no laps for gets its feed lap time instead; the row says which source it used
+    # (pace_src: race_out | feed | mixed | ""), so no report can mix the two without seeing it
+    fd_best = best_laps_from_feed(t_launch)
+    filled = [k for k in fd_best if k not in best]
+    for k in filled:
+        best[k] = fd_best[k]
+    m["pace_src"] = ("mixed" if ro_best and filled else "feed" if filled else "race_out" if ro_best else "")
+    m["pace_feed_cars"] = len(filled) if filled else ""
+    if filled:
+        print(f"  !! race_out had no laps for {len(filled)} car(s): their pace is from the race feed (pace_src={m['pace_src']})")
     ai_best = sorted(v for k, v in best.items() if k != 0)
     m["ai_level"] = getattr(args, "ai_level", 0) or ""
     m["ai_best_lap_s"] = round(ai_best[0], 2) if ai_best else ""
@@ -1500,11 +1545,17 @@ def run_once(args, arm, run_idx):
         m["spread_full_pct"] = round((ai_best[-1] / ai_best[0] - 1) * 100, 2)
     else:
         m["spread_median_pct"] = m["spread_full_pct"] = ""
-    if best:
-        shutil.copy2(RACE_OUT, os.path.join(RESULTS_DIR, f"race_out_{time.strftime('%Y%m%d_%H%M%S')}_{label}.json"))
+    # (2026-10-31) copy THIS run's race_out ALWAYS, an empty one as ..._empty.json: a lapless file is the evidence of
+    # the -1 shutdown (raceResult) and used to be lost, which left the 31 Oct trace without it
+    try:
+        if os.path.getmtime(RACE_OUT) >= t_launch:
+            sfx = "" if ro_best else "_empty"
+            shutil.copy2(RACE_OUT, os.path.join(RESULTS_DIR, f"race_out_{time.strftime('%Y%m%d_%H%M%S')}_{label}{sfx}.json"))
+    except OSError:
+        pass
     # did the machine keep real time? (AC's CPU occupancy: when the physics thread runs out of budget the sim
     # advances slower than the wall clock and every wall-clock judgement here drifts with it)
-    rt_med, rt_worst, rt_laps, _ = realtime.ratio(diag, RACE_OUT if best else None)
+    rt_med, rt_worst, rt_laps, _ = realtime.ratio(diag, RACE_OUT if ro_best else None)
     m["realtime_ratio"] = rt_med if rt_med is not None else ""
     m["realtime_worst"] = rt_worst if rt_worst is not None else ""
     if rt_med is not None and rt_med < realtime.SUSPECT:
