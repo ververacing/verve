@@ -408,6 +408,11 @@ R.PULL_LEAD = 0.4; R.PULL_SLEW = 0.8; R.PULL_DROP = 15; R.PULL_LOOK = 4.0; R.PUL
 R.PULL_OVL = 0.5; R.PULL_OVL_P = 0.7; R.PULL_CAUT = 0.05; R.PULL_EXIT_T = 1.0; R.PULL_EXIT_S = 2.0; R.PULL_COOL = 4.0
 R.pullArmN = 0; R.pullOutN = 0; R.pullComN = 0; R.pullAbN = 0; R.pullExitN = 0; R.pullFbN = 0; R.pullLostN = 0
 R.pullLog = {}; R.pullW = 0   -- per-move ring (32 reused records), R.pullW = records written; diag drains it
+R.PULL_ARM_M = 14             -- (verve-47 2026-11-01, after the 4-lap smoke: 60/61 aborts from ~18 m back) arm only within ~3 car lengths,
+                              -- and pull out only if the overlap is REACHABLE by the brake: gap - closing x tB <= 4.6 x (1 - PULL_OVL[_P]);
+                              -- otherwise stay armed in the tow and wait for the next straight.
+R.pullUnrN = 0                -- brake points where an armed car held its pull-out (overlap not reachable), one per brake
+R.pullGapH = {}               -- gap (m, 2 m bins, index 1 = 0-2 m, 31 = 60 m+) at each pull-out decision, reachable or not
 R.TOW_CORNER = 0              -- >0: the tow attack floor is off when a corner begins within this many seconds of travel (straight-only, for real)
 R.PASS_FINISH = 0             -- >0: a committed quicker driver (PASS_COMMIT) offline beside the car ahead, within this many car lengths of level,
                               -- finishes the pass: caution floored at PASS_CAUT, full aggression, later braking on the inside (A/B 2026-09-19)
@@ -842,6 +847,7 @@ local function pullFinish(i, p, verdict, won, exitSpd, exitTv, lap, now)
     r.car, r.tgt, r.lap, r.tArm, r.tOut, r.src, r.side, r.need = i, p.tgt, lap, p.tArm, p.tOut, p.src, p.sideK, p.need
     r.ovl, r.verdict, r.apexSpd, r.apexTv, r.exitSpd, r.exitTv, r.won = p.ovl, verdict, p.apexSpd, p.apexTv, exitSpd, exitTv, won
     r.caut, r.latRate = p.caut, p.latRate
+    r.tp, r.pOvl, r.gapOut = p.tp, p.pOvl, p.gapOut                -- teleport in the window (exclude from latRate), projection at pull-out
     R.pullW = R.pullW + 1
     if verdict >= 3 then R.pullLostN = R.pullLostN + 1 end
     p.ph, p.cool, p.latPrev, p.ovl, p.apexSpd, p.apexTv, p.caut = 0, now + R.PULL_COOL, nil, 0, 0, -1, 0
@@ -2097,14 +2103,19 @@ local evalBody = function()
             local p = cv2.pl[i]
             if not p then
                 p = { ph = 0, tgt = -1, t0 = 0, tArm = 0, cool = 0, side = 0, sideK = 0, off = 0, need = 0, src = 0, tOut = 0, tB = 0,
-                      ovl = 0, apexS = -1, tApex = 0, apexSpd = 0, apexTv = -1, latPrev = nil, latRate = 0, caut = 0, exitR = 0 }
+                      ovl = 0, apexS = -1, tApex = 0, apexSpd = 0, apexTv = -1, latPrev = nil, latRate = 0, caut = 0, exitR = 0,
+                      tp = 0, pOvl = 0, gapOut = 0, unrT = 0 }
                 cv2.pl[i] = p
             end
             local now = os.clock()
             local h = (dt > 0 and dt < 0.5) and dt or 0.016
             local ys = cv2.ys
             if p.ph >= 2 then                                     -- darting check: my own lateral rate (track units / s) during the move
-                if p.latPrev then local r = math.abs(myLat - p.latPrev) / h; if r > p.latRate then p.latRate = r end end
+                if p.latPrev then
+                    local r = math.abs(myLat - p.latPrev) / h
+                    if r > 10 or Recovery.rampCap(i) < 1e9 then p.tp = 1          -- a reposition in the window, not steering
+                    elseif r > p.latRate then p.latRate = r end
+                end
                 p.latPrev = myLat
             end
             local tc = (p.ph >= 1 and p.tgt >= 0) and ac.getCar(p.tgt) or nil
@@ -2113,7 +2124,7 @@ local evalBody = function()
             local ovl = 1 - tGap * trackLen / 4.6                  -- the PASS_ABORT measure: 1 = level, 0 = a car length back
             local safety = yielding or blockSide ~= 0
             if p.ph == 0 then
-                if now >= p.cool and state == 1 and aheadIdx >= 0 and not safety and spd > R.TOW_MIN and gapA * trackLen < R.TOW_M
+                if now >= p.cool and state == 1 and aheadIdx >= 0 and not safety and spd > R.TOW_MIN and gapA * trackLen < R.PULL_ARM_M
                    and spd >= aheadSpd + R.PULL_CLOSE and math.abs((latNow[aheadIdx] or 0) - myLat) < 0.25 then
                     local st, lim = me.steer, 0.1
                     if R.STEER_FRAC then local fr = R.steerIn(me); if fr then st, lim = fr, R.TOW_STEER end end
@@ -2141,7 +2152,17 @@ local evalBody = function()
                     if tB and tB <= R.PULL_LEAD + 1.5 then          -- (the room scan only near the brake)
                         local aLat = latNow[p.tgt] or 0
                         local need, room = roomSides(i, me, mySpline, aLat, gapA, p.tgt, sim.carsCount)
-                        if tB <= R.PULL_LEAD + need / math.max(0.1, R.PULL_SLEW) then
+                        local gapM = tGap * trackLen                -- centre to centre, the ovl measure's own distance
+                        local pOvl = 1 - (gapM - (spd - aheadSpd) / 3.6 * math.max(tB, 0)) / 4.6   -- projected overlap at the brake
+                        local reach = pOvl >= ((p.tgt == 0) and R.PULL_OVL_P or R.PULL_OVL)
+                        local fire = tB <= R.PULL_LEAD + need / math.max(0.1, R.PULL_SLEW)
+                        if fire and now >= p.unrT then
+                            local hb = math.max(1, math.min(31, math.floor(gapM / 2) + 1))
+                            R.pullGapH[hb] = (R.pullGapH[hb] or 0) + 1
+                            if not reach then R.pullUnrN = R.pullUnrN + 1 end
+                            p.unrT = now + math.max(tB, 0) + 0.5        -- one decision per brake point
+                        end
+                        if fire and reach then
                             local _, ins = cornerAhead((mySpline + v * math.max(tB, 0) / trackLen) % 1)
                             local side, sk = 0, 0
                             if ins ~= 0 and room[ins] >= need then side, sk = ins, 1                       -- the inside fits
@@ -2150,6 +2171,7 @@ local evalBody = function()
                                 p.ph, p.side, p.sideK, p.need, p.src, p.tOut, p.t0 = 2, side, sk, need, src, tB, now
                                 p.off = clamp(aLat + side * need, -CV.RS_EDGE, CV.RS_EDGE)
                                 p.tArm = now - p.tArm; p.latPrev, p.latRate = myLat, 0
+                                p.tp, p.pOvl, p.gapOut = 0, pOvl, gapM
                                 p.tB = now + math.max(tB, 0)
                                 p.apexS = (aB and ys) and ((aB + 0.5) / ys.nb) or -1
                                 R.pullOutN = R.pullOutN + 1; if src == 2 then R.pullFbN = R.pullFbN + 1 end
