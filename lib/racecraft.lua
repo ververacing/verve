@@ -413,6 +413,12 @@ R.PULL_ARM_M = 14             -- (verve-47 2026-11-01, after the 4-lap smoke: 60
                               -- otherwise stay armed in the tow and wait for the next straight.
 R.pullUnrN = 0                -- brake points where an armed car held its pull-out (overlap not reachable), one per brake
 R.pullGapH = {}               -- gap (m, 2 m bins, index 1 = 0-2 m, 31 = 60 m+) at each pull-out decision, reachable or not
+R.PULL_REACH = 0.65; R.PULL_REACH_P = 0.8   -- (verve-47 2026-11-01, gate re-smoke: projection optimistic, 0.52 -> 0.07 actual) the PULL-OUT
+                              -- needs this projected overlap (vs the player: _P); the commit at the brake still tests the ACTUAL ovl vs PULL_OVL[_P]
+R.PULL_TOW = 0.5              -- while ARMED (phase 1) the caution is floored at -this away from the brake (tB false or > PULL_LEAD + 1 s):
+                              -- tow to close, pull to pass. AC's following distance parked armed cars 8-14 m back. 0 = off.
+R.PULL_NOLUNGE = false        -- true: while ARMED the strategy lunge is not evaluated (an armed car waits for the straight-line pass)
+R.pullTowN = 0; R.pullNlN = 0 -- car-frames with the armed tow floor applied / with the lunge suppressed by NOLUNGE
 R.TOW_CORNER = 0              -- >0: the tow attack floor is off when a corner begins within this many seconds of travel (straight-only, for real)
 R.PASS_FINISH = 0             -- >0: a committed quicker driver (PASS_COMMIT) offline beside the car ahead, within this many car lengths of level,
                               -- finishes the pass: caution floored at PASS_CAUT, full aggression, later braking on the inside (A/B 2026-09-19)
@@ -1566,7 +1572,10 @@ local evalBody = function()
             -- (R.PULL) a straight-line pass that has pulled out / committed / is aborting owns the line: no planned manoeuvre on top
             local plq = R.PULL and cv2.pl and cv2.pl[i]
             local ov = nil
-            if not (plq and plq.ph >= 2 and plq.ph <= 4) then ov = Strategy.evaluate(i, { dt = dt, gapA = gapA, spd = spd, aheadSpd = aheadSpd, aheadIdx = aheadIdx,
+            -- (R.PULL_NOLUNGE) and while merely ARMED: wait for the straight-line pass instead of diving from behind
+            local nolunge = plq and plq.ph == 1 and R.PULL_NOLUNGE
+            if nolunge then R.pullNlN = R.pullNlN + 1 end
+            if not (plq and plq.ph >= 2 and plq.ph <= 4) and not nolunge then ov = Strategy.evaluate(i, { dt = dt, gapA = gapA, spd = spd, aheadSpd = aheadSpd, aheadIdx = aheadIdx,
                 prog = progZ, dLat = dLat, myLat = myLat, wide = wide, baseA = baseA, prof = prof, classKey = classKey,
                 off = off, passGap = K.PASS_GAP, attackGap = attackGap, fasterMargin = fasterM, isOval = R.isOval, lap = myLap, crowd = crowd, lapped = lappedAhead,
                 wild = wild or nil, wLunge = R.WILD_LUNGE * (wm > 0 and R.WILD_TILT_LUNGE or 1), wCool = R.WILD_COOL, wReach = R.WILD_REACH, wDive0 = R.WILD_DIVE0 }) end
@@ -2133,6 +2142,7 @@ local evalBody = function()
                     if not edge and R.PASS_OPP > 0 and cv2.oppU and (cv2.oppU[i] or 0) > now then edge = true end
                     if edge and type(st) == 'number' and math.abs(st) < lim then
                         p.ph, p.tgt, p.tArm = 1, aheadIdx, now; R.pullArmN = R.pullArmN + 1
+                        if R.PULL_NOLUNGE then Strategy.clear(i, 'pull') end   -- (no stale lunge while it is not evaluated)
                     end
                 end
             elseif p.ph == 1 then
@@ -2149,12 +2159,15 @@ local evalBody = function()
                             if cornerAhead((mySpline + v * tt / trackLen) % 1) then tB = tt - R.PULL_BRAKE_FB; break end
                         end
                     end
+                    if R.PULL_TOW > 0 and (not tB or tB > R.PULL_LEAD + 1.0) and caut > -R.PULL_TOW then   -- (R.PULL_TOW) close up in the tow
+                        caut = -R.PULL_TOW; R.pullTowN = R.pullTowN + 1
+                    end
                     if tB and tB <= R.PULL_LEAD + 1.5 then          -- (the room scan only near the brake)
                         local aLat = latNow[p.tgt] or 0
                         local need, room = roomSides(i, me, mySpline, aLat, gapA, p.tgt, sim.carsCount)
                         local gapM = tGap * trackLen                -- centre to centre, the ovl measure's own distance
                         local pOvl = 1 - (gapM - (spd - aheadSpd) / 3.6 * math.max(tB, 0)) / 4.6   -- projected overlap at the brake
-                        local reach = pOvl >= ((p.tgt == 0) and R.PULL_OVL_P or R.PULL_OVL)
+                        local reach = pOvl >= ((p.tgt == 0) and R.PULL_REACH_P or R.PULL_REACH)
                         local fire = tB <= R.PULL_LEAD + need / math.max(0.1, R.PULL_SLEW)
                         if fire and now >= p.unrT then
                             local hb = math.max(1, math.min(31, math.floor(gapM / 2) + 1))
