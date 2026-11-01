@@ -422,6 +422,7 @@ R.pullTowN = 0; R.pullNlN = 0 -- car-frames with the armed tow floor applied / w
 R.PULL_AGGR = 0               -- >0: in the same armed window as PULL_TOW, AI aggression is raised to at least this (smoke 3: caution cannot
                               -- beat AC's following distance; aggression is the next lever). Counter pullAggrN = car-frames raised. 0 = off.
 R.pullAggrN = 0
+R.PULL_TOW_STEER = true      -- (audit C1) the armed tow floor / PULL_AGGR only with the wheel straight (the arm test's steer check). false = 8b84529
 R.TOW_CORNER = 0              -- >0: the tow attack floor is off when a corner begins within this many seconds of travel (straight-only, for real)
 R.PASS_FINISH = 0             -- >0: a committed quicker driver (PASS_COMMIT) offline beside the car ahead, within this many car lengths of level,
                               -- finishes the pass: caution floored at PASS_CAUT, full aggression, later braking on the inside (A/B 2026-09-19)
@@ -2180,6 +2181,11 @@ local evalBody = function()
                         end
                     end
                     local away = not tB or tB > R.PULL_LEAD + 1.0  -- the closing window: armed, the brake not yet near
+                    if away and R.PULL_TOW_STEER then              -- (audit C1) ...and on a STRAIGHT: ysBrake reads false from mid-corner
+                        local st, lim = me.steer, 0.1             -- to the exit, so without this the floor ran through corners
+                        if R.STEER_FRAC then local fr = R.steerIn(me); if fr then st, lim = fr, R.TOW_STEER end end
+                        away = type(st) == 'number' and math.abs(st) < lim
+                    end
                     if R.PULL_TOW > 0 and away and caut > -R.PULL_TOW then   -- (R.PULL_TOW) close up in the tow
                         caut = -R.PULL_TOW; R.pullTowN = R.pullTowN + 1
                     end
