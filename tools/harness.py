@@ -889,6 +889,10 @@ def best_laps_from_feed(t_launch):
                 e = json.loads(line)
             except ValueError:
                 continue
+            # (audit B1) skip the 'first' lap (it can be the grid-to-line run; feed.lua:266 says lap-time consumers must)
+            # and any lap AC counted cuts on
+            if e.get("first") is True or (e.get("cuts") or 0) > 0:
+                continue
             t = (e.get("lap_ms") or 0) / 1000.0
             if t > 10 and isinstance(e.get("car"), int):
                 best[e["car"]] = min(best.get(e["car"], 1e9), t)

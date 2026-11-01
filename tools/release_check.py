@@ -253,6 +253,35 @@ def cells_of(suite, prefix):
     return out
 
 
+def dedupe(suite):
+    """(audit B3) one row per suite label: a re-run under the SAME label (a killed attempt that still wrote a row, or a
+    retry) would otherwise count twice toward n and the interleave. Keeps the newest by run stamp; returns (rows, dropped
+    labels). A retry under a NEW label (e.g. _1r) does not match SUITE_RE and was never counted."""
+    best = {}
+    for r in suite:
+        lab = r["label"]
+        if lab not in best or stamp_of(r) > stamp_of(best[lab]):
+            best[lab] = r
+    dropped = sorted({r["label"] for r in suite if best[r["label"]] is not r})
+    return [r for r in suite if best[r["label"]] is r], dropped
+
+
+def mixed_commits(rows):
+    """(audit B3) the distinct non-empty verve_commit values in one prefix's rows; more than one = a mixed-build suite."""
+    return sorted({(r.get("verve_commit") or "").strip() for r in rows} - {""})
+
+
+def prior_prefix(suite, fresh_prefix):
+    """(audit B2) the suite run BEFORE the freshest one: the other prefix whose newest row is latest in run time.
+    A string sort put "rc017a" before "rc16c" ('0' < '1'), so a mixed-padding history picked an old suite."""
+    newest = {}
+    for r in suite:
+        p = SUITE_RE.match(r["label"]).group(1)
+        if p != fresh_prefix:
+            newest[p] = max(newest.get(p, ""), stamp_of(r))
+    return max(newest, key=lambda p: (newest[p], p)) if newest else None
+
+
 def short_cells(counts):
     """Which GATING cells the freshest suite has too few runs of, as "cell(n of m)" strings.
 
@@ -323,6 +352,9 @@ def check_suite(rep, rows):
         return None
     last_app = out.strip()
     suite = [r for r in rows if SUITE_RE.match(r.get("label") or "")]
+    suite, dropped = dedupe(suite)
+    if dropped:
+        rep.ok("suite retries", "%d label(s) had more than one row; kept the newest of each: %s" % (len(dropped), " ".join(dropped)))
     if not suite:
         rep.fail("suite freshness", "no regression-suite rows in results.csv at all")
         return None
@@ -360,11 +392,15 @@ def check_not_worse(rep, suite, fresh_prefix, all_rows=()):
     if not suite or not fresh_prefix:
         rep.refuse("not worse", "no suite to compare")
         return
-    others = sorted({SUITE_RE.match(r["label"]).group(1) for r in suite} - {fresh_prefix})
-    if not others:
+    base_prefix = prior_prefix(suite, fresh_prefix)   # (audit B2) by run time, not string sort
+    if not base_prefix:
         rep.refuse("not worse", "%s is the only suite prefix on record - nothing to compare against" % fresh_prefix)
         return
-    base_prefix = others[-1]          # rc16a < rc16b < rc16c sorts correctly for this naming scheme
+    for pfx in (fresh_prefix, base_prefix):            # (audit B3) one build per side
+        mc = mixed_commits([r for r in suite if SUITE_RE.match(r["label"]).group(1) == pfx])
+        if len(mc) > 1:
+            rep.refuse("not worse", "suite %s mixes builds (verve_commit %s) - one build per side" % (pfx, ", ".join(mc)))
+            return
     new, old = cells_of(suite, fresh_prefix), cells_of(suite, base_prefix)
     # ONLY THE GATING CELLS. Decision 0027 made the 2-lap sprints character-only, and this loop was still
     # judging them - so a single heavy hit in a Spa sprint (heavy80 0.3 against a 0.0-0.0 baseline) could refuse
@@ -675,6 +711,18 @@ def rule_checks():
         f.append("an ABSENT contact_events did not REFUSE: %s" % contact_verdicts(""))
     if "REFUSED" in contact_verdicts("0"):
         f.append("a genuine-0 contact_events was wrongly refused (0 must be judged): %s" % contact_verdicts("0"))
+
+    # (audit B2) the prior suite is chosen by run time: rc16c (Oct 13) must lose to rc017b (Oct 28) for rc018b
+    pp = [dict(mk("rc16c_mon_1", 20), file="d_20261013_010000.csv"), dict(mk("rc017b_mon_1", 20), file="d_20261028_010000.csv"),
+          dict(mk("rc018b_mon_1", 20), file="d_20261102_010000.csv")]
+    if prior_prefix(pp, "rc018b") != "rc017b":
+        f.append("the prior suite was not chosen by run time (got %r, want rc017b over rc16c)" % prior_prefix(pp, "rc018b"))
+    # (audit B3) a label with two rows counts once (the newest); one prefix with two verve_commit values is mixed
+    dd, drop = dedupe([dict(mk("rc95b_mon_1", 20), file="d_20261101_010000.csv"), dict(mk("rc95b_mon_1", 20), file="d_20261101_020000.csv")])
+    if len(dd) != 1 or drop != ["rc95b_mon_1"] or stamp_of(dd[0]) != "20261101_020000":
+        f.append("a duplicate suite label was not reduced to its newest row: %r %r" % (dd, drop))
+    if len(mixed_commits([{"verve_commit": "aaa"}, {"verve_commit": "bbb"}, {"verve_commit": ""}])) != 2:
+        f.append("mixed verve_commit values in one prefix were not detected")
 
     for cell in list(GATING_CELLS) + list(CHARACTER_CELLS):
         m = SUITE_RE.match("rc16c_%s_on_1" % cell)

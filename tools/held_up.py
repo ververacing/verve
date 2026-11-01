@@ -53,6 +53,12 @@ def main():
         for s in snaps:
             g = {c["i"]: c for c in s["grid"]}
             t = s["t"]
+            # (audit B4) an open episode whose cars pit or retire is CLOSED as "pit": skipping the pair while keeping the
+            # episode open ran its clock through the stop and inflated time-to-pass
+            for key in list(open_ep):
+                ca, cb = g.get(key[0]), g.get(key[1])
+                if ca is None or cb is None or ca["ret"] or ca["pit"] or cb["ret"] or cb["pit"]:
+                    episodes.append((key[0], key[1], t - open_ep.pop(key), "pit"))
             for A, ca in g.items():
                 if ca["ret"] or ca["pit"]: continue
                 for B, cb in g.items():
@@ -83,12 +89,14 @@ def main():
         print("== %s: %d episodes (faster driver within %d m of a slower one, from lap 1)" % (label, len(episodes), a.gap))
         names = {0: "rookie", 1: "midfield", 2: "veteran"}
         for (ta, tb), eps in sorted(by.items()):
+            npit = sum(1 for e in eps if e[1] == "pit")
+            eps = [e for e in eps if e[1] != "pit"]   # (audit B4) a pit or retirement is neither a pass nor a failure to pass
             secs = [e[0] for e in eps]; passes = [e for e in eps if e[1] == "pass"]
             held = [e[0] for e in passes]
-            print("   %-8s behind %-8s: %3d episodes, %3d passed (%.0f%%), time to pass median %4.0f s (max %4.0f), %d unresolved at the flag, %d fell back" % (
+            print("   %-8s behind %-8s: %3d episodes, %3d passed (%.0f%%), time to pass median %4.0f s (max %4.0f), %d unresolved at the flag, %d fell back, %d ended by a pit or retirement" % (
                 names[ta], names[tb], len(eps), len(passes), 100.0 * len(passes) / max(1, len(eps)),
                 st.median(held) if held else 0, max(held) if held else 0,
-                sum(1 for e in eps if e[1] == "race_end"), sum(1 for e in eps if e[1] == "fell_back")))
+                sum(1 for e in eps if e[1] == "race_end"), sum(1 for e in eps if e[1] == "fell_back"), npit))
 
 if __name__ == "__main__":
     main()

@@ -457,6 +457,28 @@ function M.guessed(i)
     return w == 'physics' or w == 'default'
 end
 
-function M.reset() autoCache = {}; autoWhy = {}; idCache = {} end
+-- (audit R2, verve-47 2026-11-01) may car i get the clean-air hint? Only the class every hint row raced: an EXACT 'gt3'
+-- tag (whole tag, lowercased and trimmed; not a substring, since '#gte-gt3' is also on every GT2/GTE car), or a user
+-- class override (the user's own call). GT4 / GT2 / Super Trofeo / road cars stay x1.0 until their own race cell.
+-- One pcall'd tag read per car per session, cached. Classes.keyOf is unchanged.
+local gt3Cache = {}
+function M.hintEligible(i)
+    local id = carIdOf(i)
+    if id and Overrides.classOverride(id) then return true end
+    local e = gt3Cache[i]
+    if e == nil then
+        e = false
+        pcall(function()
+            local t = ac.getCarTags(i)
+            if t then for _, v in ipairs(t) do
+                if tostring(v):lower():match('^%s*(.-)%s*$') == 'gt3' then e = true end
+            end end
+        end)
+        gt3Cache[i] = e
+    end
+    return e
+end
+
+function M.reset() autoCache = {}; autoWhy = {}; idCache = {}; gt3Cache = {} end
 
 return M

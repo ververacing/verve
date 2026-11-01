@@ -212,6 +212,7 @@ local function sessionReset(restart)
     frameMs, frameN, luaErrors, firstErrAt = 0, 0, 0, nil; errSeen = { n = 0 }
     harnessStarted, harnessStartT, autopilotArmed, harnessT, harnessEndT = false, 0, false, 0, 0
     pcall(Classes.reset)
+    pcall(TyreHint.reset)                     -- (audit A3) per-car hint state is keyed by index: clear it per session
     pcall(Human.reset)            -- per-track distances
     pcall(Racecraft.reset)
     shiftSet = {}; launchDone = {}

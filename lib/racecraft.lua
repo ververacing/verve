@@ -2312,7 +2312,7 @@ function R.timeGapAhead(i)
     for j = 0, s.carsCount - 1 do
         if j ~= i then
             local oc = ac.getCar(j)
-            if oc and oc.splinePosition then
+            if oc and oc.splinePosition and not oc.isInPitlane then   -- (audit A4) a pit-box car neither fades nor zeroes the hint
                 local g = (oc.splinePosition - myS) % 1
                 local gm = (g < 0.5 and g or g - 1) * tl                 -- + ahead, - behind (m)
                 local dlat = math.abs((latNow[j] or 0) - myLat)

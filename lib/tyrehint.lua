@@ -65,7 +65,7 @@ end
 local function multFor(i)
     local force = tonumber(R.TYRE_HINT_FORCE)
     if force then return force end
-    if Classes.guessed(i) then return 1.0 end
+    if not Classes.hintEligible(i) then return 1.0 end   -- (audit R2) an exact 'gt3' tag or a user class override; else untested
     local key = Classes.keyOf(i)
     local top = R.HINT_CLASS[key]
     if not top then return 1.0 end
@@ -92,6 +92,14 @@ function T.offTick()
         cur = {}
     end
     if next(hTerm) then hMul, hF, hTerm, hA, hP, hS = {}, {}, {}, {}, {}, {} end
+end
+
+-- (audit A3) a new session: hand any changed car back, then forget every per-car value (keyed by car index, which a
+-- new session can reuse for a different car); base is re-read from that car's own ai.ini on its first tick
+function T.reset()
+    T.offTick()
+    base, outLap = {}, {}
+    acc, tick = 0, 0
 end
 
 function T.update(sim, dt)

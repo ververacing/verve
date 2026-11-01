@@ -194,9 +194,9 @@ function C.detect()
         end
     end)
     if C.active then
-        C.info = string.format('Career %s/%s (event level %d, ramp %.2f, meter %d)', C.series, C.event, C.eventLevel or 0, C.ramp, C.meter)
+        C.info = string.format('Career %s/%s (event level %d, ramp %.2f, meter %s)', C.series, C.event, C.eventLevel or 0, C.ramp or 0, tostring(C.meter))   -- (audit A2) meter is nil with no AI_LEVEL anywhere: %d threw
     else
-        C.info = string.format('Not a career event (meter %d)', C.meter)
+        C.info = string.format('Not a career event (meter %s)', tostring(C.meter))
     end
     pcall(function() ac.log('Verve career: ' .. C.info) end)
 end
