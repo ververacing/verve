@@ -1578,7 +1578,24 @@ local evalBody = function()
             -- (R.PULL_NOLUNGE) and while merely ARMED: wait for the straight-line pass instead of diving from behind
             local nolunge = plq and plq.ph == 1 and R.PULL_NOLUNGE
             if nolunge then R.pullNlN = R.pullNlN + 1 end
+            -- (Strategy.LUNGE_MAX_M) the lunge gate's inputs: metres to the car ahead and the projected overlap at the brake,
+            -- PULL's projection (ysBrake, else the cornerAhead fallback). Only while the gate is on and a lunge is in range.
+            local lgGap, lgPOvl, lgTB, lgSrc = nil, nil, nil, nil
+            if Strategy.LUNGE_MAX_M and aheadIdx >= 0 and gapA < K.PASS_GAP * 1.5 then
+                lgGap, lgSrc = gapA * trackLen, 1
+                local tB = ysBrake(mySpline, spd)
+                if tB == nil then
+                    lgSrc = 2
+                    for k = 1, 4 do
+                        local tt = k * R.PULL_LOOK / 4
+                        if cornerAhead((mySpline + spd / 3.6 * tt / trackLen) % 1) then tB = tt - R.PULL_BRAKE_FB; break end
+                    end
+                end
+                lgTB = math.max(0, tonumber(tB) or 0)            -- false (no brake within LOOK) / none found -> 0: overlap must exist now
+                lgPOvl = 1 - (lgGap - (spd - aheadSpd) / 3.6 * lgTB) / 4.6
+            end
             if not (plq and plq.ph >= 2 and plq.ph <= 4) and not nolunge then ov = Strategy.evaluate(i, { dt = dt, gapA = gapA, spd = spd, aheadSpd = aheadSpd, aheadIdx = aheadIdx,
+                lgGap = lgGap, lgPOvl = lgPOvl, lgTB = lgTB, lgSrc = lgSrc,
                 prog = progZ, dLat = dLat, myLat = myLat, wide = wide, baseA = baseA, prof = prof, classKey = classKey,
                 off = off, passGap = K.PASS_GAP, attackGap = attackGap, fasterMargin = fasterM, isOval = R.isOval, lap = myLap, crowd = crowd, lapped = lappedAhead,
                 wild = wild or nil, wLunge = R.WILD_LUNGE * (wm > 0 and R.WILD_TILT_LUNGE or 1), wCool = R.WILD_COOL, wReach = R.WILD_REACH, wDive0 = R.WILD_DIVE0 }) end
@@ -2434,7 +2451,7 @@ function R.beginFrame()
         local rm = cv2.roomEn and cv2.room or nil
         -- SLOW-CAR YELLOW map (R.YELLOW_SLOW > 0 only, built once the track is scaled): typical speed per bin, one sample per car per crossing
         local ys = nil
-        if ((type(R.YELLOW_SLOW) == 'number' and R.YELLOW_SLOW > 0) or (tonumber(R.PASS_OPP) or 0) > 0 or R.PULL == true) and scaled then   -- (R.PASS_OPP and R.PULL read it too)
+        if ((type(R.YELLOW_SLOW) == 'number' and R.YELLOW_SLOW > 0) or (tonumber(R.PASS_OPP) or 0) > 0 or R.PULL == true or Strategy.LUNGE_MAX_M ~= nil) and scaled then   -- (R.PASS_OPP and R.PULL read it too)
             ys = cv2.ys
             if not ys then ys = { nb = clamp(math.floor(trackLen / CV.YS_M), 50, 1000), v = {}, n = {}, b = {} }; cv2.ys = ys end
         end

@@ -37,6 +37,21 @@ local MIN_TIER = { setup = 1, lunge = 1, slingshot = 1, switchback = 2 }
 local COOLDOWN = 12.0   -- s after a manoeuvre before the same car plans another (7 -> 12: one move per car per lap was too many)
 S.EAGER_SCALE = 0.5     -- attempt-rate scale (GT3 A/B 2026-09-14: +83% overtaking but +80% incidents at 1.0). Harness: --strategy
 S.PACK_MAX = 3          -- no planned moves inside a pack this big (the opening-lap melee is where the extra incidents were). Harness: --strategy
+-- LUNGE GATE (verve-47 2026-11-01, DESIGN_lungegate_20261101.md). nil = today. Set: a lunge may only START with the target
+-- within LUNGE_MAX_M (centre to centre) AND a projected overlap at the brake >= LUNGE_OVL (racecraft passes c.lgGap / c.lgPOvl,
+-- PULL's projection). Blocked = no lunge this frame, the car stays in the tow. Wild cars exempt; other moves unchanged.
+S.LUNGE_MAX_M = nil
+S.LUNGE_OVL = 0.5
+S.lgAllowN, S.lgBlockN, S.lgBlockGapN, S.lgBlockOvlN, S.lgLateN = 0, 0, 0, 0, 0   -- corners, ONE outcome each: allow | late (blocked, then allowed) | block
+S.lgLog, S.lgW = {}, 0  -- 32-slot reused ring of gate decisions; diag drains it into ev:lgate rows
+local function lgRec(i, c, allowed, why)
+    local k = (S.lgW % 32) + 1
+    local r = S.lgLog[k]
+    if not r then r = {}; S.lgLog[k] = r end
+    r.car, r.tgt, r.lap, r.gap, r.pOvl, r.tB, r.src, r.allowed, r.why = i, c.aheadIdx, c.lap or 0, c.lgGap or -1, c.lgPOvl or -9,
+        c.lgTB or -1, c.lgSrc or 0, allowed, why
+    S.lgW = S.lgW + 1
+end
 local SAMPLE_D = 0.004  -- spline fraction between racing-line samples (matches racecraft)
 local TURN     = 0.01   -- (1 - dot) between tangents that counts as "turning"
 -- PASSING PACKAGE (owner decisions 3 and 4, 2026-09-28). Every switch defaults to 0.14.8's behaviour. Harness: --strategy {...}
@@ -355,6 +370,26 @@ function S.evaluate(i, c)
         local insideOpen = c.dLat * g.inside < 0.3
         if insideOpen and (closing or c.wild) and (book.lunge or 0) > 0 and tier >= MIN_TIER.lunge
            and roll < math.min(0.95, eager * (0.4 + 0.6 * risk) * book.lunge * (c.wild and c.wLunge or 1) * mom) then   -- (a wild car: no run needed, x R.WILD_LUNGE)
+            if S.LUNGE_MAX_M and not c.wild then                -- (S.LUNGE_MAX_M) the lunge gate; a wild car is exempt
+                local why = 0
+                if not c.lgGap or c.lgGap > S.LUNGE_MAX_M then why = 1
+                elseif (c.lgPOvl or -9) < (S.LUNGE_OVL or 0.5) then why = 2 end
+                if why ~= 0 then                                  -- no lunge this frame: stay in the tow (no switchback fallback)
+                    if st.lgB ~= st.corners then
+                        st.lgB, st.lgWhy = st.corners, why
+                        S.lgBlockN = S.lgBlockN + 1
+                        if why == 1 then S.lgBlockGapN = S.lgBlockGapN + 1 else S.lgBlockOvlN = S.lgBlockOvlN + 1 end
+                        lgRec(i, c, 0, why)
+                    end
+                    return nil
+                end
+                if st.lgB == st.corners then              -- (audit C3b) ONE outcome per corner: a block that later allowed is 'late', not both
+                    S.lgLateN = S.lgLateN + 1; S.lgBlockN = S.lgBlockN - 1
+                    if st.lgWhy == 1 then S.lgBlockGapN = S.lgBlockGapN - 1 else S.lgBlockOvlN = S.lgBlockOvlN - 1 end
+                    st.lgB = nil
+                else S.lgAllowN = S.lgAllowN + 1 end
+                lgRec(i, c, 1, 0)
+            end
             start(i, 'lunge', { car = c.aheadIdx, side = g.inside, cl = cl })
             S.last[i] = CODE.lunge
             return { target = g.inside * c.off * (1.4 - 0.4 * cl), caut = -0.5 * book.lunge * (1 - 0.4 * cl), aggr = 0.2, hold = 1.0, code = CODE.lunge }
@@ -406,6 +441,7 @@ function S.reset()
     S.episodes = {}
     S.last = {}
     S.attempts, S.ok, S.byType, S.byTypeOK = 0, 0, {}, {}
+    S.lgAllowN, S.lgBlockN, S.lgBlockGapN, S.lgBlockOvlN, S.lgLateN, S.lgW = 0, 0, 0, 0, 0, 0
 end
 
 return S
