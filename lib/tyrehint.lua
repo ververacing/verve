@@ -45,13 +45,19 @@ R.HINT_NEAR_S = 1.0  -- fade window to an AI car ahead on my line (s): f = 0 at 
 R.HINT_FAR_S = 2.0
 R.HINT_PLAYER_NEAR_S = 0.3   -- the same, to the PLAYER ahead (verve-47 2026-10-31; untested - its own suite cell)
 R.HINT_PLAYER_FAR_S = 0.8
+R.HINT_FADE = 'gap'  -- (TP 2026-11-01, DESIGN_hint016_tp) the AI-ahead fade: 'gap' = NEAR/FAR on the time gap (as shipped);
+                     -- 'ttc' = HINT_TTC_LO/HI on the time to contact (R.timeGapAhead's 4th value), so a steady follower keeps the hint
+R.HINT_FLOOR = 0     -- (TP) the AI-ahead f never goes under this (0 = as shipped). The player window and alongside are not floored
+R.HINT_TTC_LO = 1.5; R.HINT_TTC_HI = 3.0
+R.HINT_TTC_NEAR_S = 0.3; R.HINT_TTC_FAR_S = 0.6   -- (audit C4) 'ttc' mode also caps f by this short time-gap window
+R.HINT_RATE_DOWN = 0.10; R.HINT_RATE_UP = 0.02   -- (TP) 'ttc' only: the hint term's fall / rise per 1 Hz tick ('gap' keeps HINT_RATE both ways)
 R.HINT_RATE = 0.02   -- the hint term (1 + (mult - 1) * f) moves at most this much per 1 Hz tick
 R.TYRE_HINT_FORCE = nil   -- harness: a number replaces mult() for every AI car (ladders on the shipped code)
 
 local base, cur, outLap = {}, {}, {}   -- per car: its own ai.ini HINT, what we last set (only cars we changed), and the
                                        -- lap count it left the pit lane on (its out-lap runs until the next line crossing)
 local hMul, hF, hTerm = {}, {}, {}     -- per car (HINT_SHIP): mult, the fade target f, and the slewed applied term
-local hA, hP, hS = {}, {}, {}          -- per car: the gaps f was computed from (AI ahead s, player ahead s, alongside), for diag
+local hA, hP, hS, hT = {}, {}, {}, {}  -- per car: the gaps f was computed from (AI ahead s, player ahead s, alongside, TTC s), for diag
 local acc, tick = 0, 0
 
 local function fwin(t, near, far)
@@ -91,7 +97,7 @@ function T.offTick()
         for i, _ in pairs(cur) do if base[i] then pcall(physics.setAITyresHint, i, base[i]) end end
         cur = {}
     end
-    if next(hTerm) then hMul, hF, hTerm, hA, hP, hS = {}, {}, {}, {}, {}, {} end
+    if next(hTerm) then hMul, hF, hTerm, hA, hP, hS, hT = {}, {}, {}, {}, {}, {}, {} end
 end
 
 -- (audit A3) a new session: hand any changed car back, then forget every per-car value (keyed by car index, which a
@@ -143,10 +149,15 @@ function T.update(sim, dt)
                 -- never the player's car (car 0), even on the harness autopilot, where it reads isAIControlled (smoke sm16 2026-10-31)
                 local m = (ship and i ~= 0) and multFor(i) or 1.0
                 if m > 1.0005 then
-                    local tA, tP, side = R.timeGapAhead(i)
+                    local tA, tP, side, ttc = R.timeGapAhead(i)
                     local f = 0
                     if not side then
-                        f = fwin(tA, R.HINT_NEAR_S, R.HINT_FAR_S)
+                        if R.HINT_FADE == 'ttc' then f = fwin(ttc or 1e9, tonumber(R.HINT_TTC_LO) or 1.5, tonumber(R.HINT_TTC_HI) or 3.0)
+                            -- (audit C4) and never right on a gearbox: at equal speed 1.5 m back reads ttc 3 s = f 1, so cap with a short time gap
+                            f = math.min(f, fwin(tA, tonumber(R.HINT_TTC_NEAR_S) or 0.3, tonumber(R.HINT_TTC_FAR_S) or 0.6))
+                        else f = fwin(tA, R.HINT_NEAR_S, R.HINT_FAR_S) end
+                        local fl = tonumber(R.HINT_FLOOR) or 0
+                        if f < fl then f = fl end                  -- (TP) the AI-ahead floor, before the player cap
                         local fp = fwin(tP, R.HINT_PLAYER_NEAR_S, R.HINT_PLAYER_FAR_S)
                         if fp < f then f = fp end
                     end
@@ -154,12 +165,16 @@ function T.update(sim, dt)
                     local goal = 1 + (m - 1) * f
                     local h = hTerm[i] or 1                -- start from stock, ramp up
                     local rate = tonumber(R.HINT_RATE) or 0.02
-                    if h < goal then h = math.min(h + rate, goal) elseif h > goal then h = math.max(h - rate, goal) end
+                    local up, down = rate, rate
+                    if R.HINT_FADE == 'ttc' then          -- (TP, verve-47) a closing event lasts 1-2 s: fade fast, recover slowly
+                        up, down = tonumber(R.HINT_RATE_UP) or rate, tonumber(R.HINT_RATE_DOWN) or rate
+                    end
+                    if h < goal then h = math.min(h + up, goal) elseif h > goal then h = math.max(h - down, goal) end
                     hMul[i], hF[i], hTerm[i] = m, f, h
-                    hA[i], hP[i], hS[i] = tA, tP, side
+                    hA[i], hP[i], hS[i], hT[i] = tA, tP, side, ttc
                     push = true                            -- re-assert every second: CSP can reset a hint
                 elseif hTerm[i] then
-                    hMul[i], hF[i], hTerm[i], hA[i], hP[i], hS[i] = nil, nil, nil, nil, nil, nil
+                    hMul[i], hF[i], hTerm[i], hA[i], hP[i], hS[i], hT[i] = nil, nil, nil, nil, nil, nil, nil
                 end
             end
             local want = base[i] * (hTerm[i] or 1) * (1 - k * cold)
@@ -172,6 +187,6 @@ end
 
 -- diag hooks: the hint Verve is currently applying to car i (nil = the car's own), and the clean-air parts of it
 function T.hintOf(i) return cur[i] end
-function T.fadeOf(i) return hF[i], hMul[i], hA[i], hP[i], hS[i] end
+function T.fadeOf(i) return hF[i], hMul[i], hA[i], hP[i], hS[i], hT[i] end
 
 return T

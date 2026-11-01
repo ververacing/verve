@@ -2319,13 +2319,17 @@ R.last = {}                 -- per-car applied values (offset/aggr/caution/state
 R.HINT_LAT_LINE = 0.30
 R.HINT_SIDE_M = 5.0
 R.HINT_LAT_SIDE = 0.60
+R.HINT_CLOSE_MIN = 0.5     -- (TP, R.HINT_FADE 'ttc') m/s: the closing-speed floor of the time-to-contact, so a steady follower reads gap / 0.5
+-- (TP 2026-11-01) 4th return: the time to contact with the AI cars ahead on my line, min over them of gap / max(closing, HINT_CLOSE_MIN)
 function R.timeGapAhead(i)
     local s = ac.getSim()
     local me = ac.getCar(i)
-    if not (s and me and me.splinePosition) then return 1e9, 1e9, false end
+    if not (s and me and me.splinePosition) then return 1e9, 1e9, false, 1e9 end
     local tl = (s.trackLengthM and s.trackLengthM > 200) and s.trackLengthM or 7000
     local myS, myLat = me.splinePosition, latNow[i] or 0
     local gA, gP, side = 1e9, 1e9, false
+    local myV, ttc = (me.speedKmh or 0) / 3.6, 1e9
+    local cmin = tonumber(R.HINT_CLOSE_MIN) or 0.5
     for j = 0, s.carsCount - 1 do
         if j ~= i then
             local oc = ac.getCar(j)
@@ -2336,6 +2340,8 @@ function R.timeGapAhead(i)
                 if gm >= 0 and dlat < R.HINT_LAT_LINE then
                     if j ~= 0 then
                         if gm < gA then gA = gm end
+                        local tt = gm / math.max(myV - (oc.speedKmh or 0) / 3.6, cmin)
+                        if tt < ttc then ttc = tt end
                     elseif gm < gP then gP = gm end   -- car 0 = the player (offline AC), by index: the harness autopilot reads isAIControlled
                 end
                 if math.abs(gm) < R.HINT_SIDE_M and dlat < R.HINT_LAT_SIDE then side = true end
@@ -2343,7 +2349,7 @@ function R.timeGapAhead(i)
         end
     end
     local v = math.max((me.speedKmh or 0) / 3.6, 1.0)
-    return gA < 1e8 and gA / v or 1e9, gP < 1e8 and gP / v or 1e9, side
+    return gA < 1e8 and gA / v or 1e9, gP < 1e8 and gP / v or 1e9, side, ttc
 end
 
 function R.beginFrame()
