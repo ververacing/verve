@@ -397,6 +397,17 @@ R.TOW_ATTACK = 0              -- >0: on a STRAIGHT (steer < 0.1), above TOW_MIN 
                               -- TOW_EDGE, the applied caution is floored at -this (corners untouched). Tow diagnostic 2026-09-21: a veteran
                               -- in the tow LOSES 0.6-1.2 m/s to the car ahead - AC's AI following distance, and Verve never got under 1.0
 R.TOW_MIN = 150; R.TOW_M = 60; R.TOW_EDGE = 0.15
+R.PASS_OPP = 0                -- >0: OPPORTUNIST - the car ahead this many km/h under its own bin's typical speed (cv2.ys) for PASS_OPP_T s ->
+                              -- the tow floor at -PASS_OPP_CAUT on the straight for PASS_OPP_HOLD s, no pace rating needed (A/B; F1 25 stock 12 / 0.25)
+R.PASS_OPP_T = 0.25; R.PASS_OPP_HOLD = 3.0; R.PASS_OPP_CAUT = 0.5
+R.PULL = false                -- STRAIGHT-LINE PASS (verve-47 2026-11-01, DESIGN_pullout_20261101.md): armed in the tow with a pace edge (or the OPP
+                              -- hold) and closing -> pull out PULL_LEAD s + the lateral time before the braking point (cv2.ys), just clear of the
+                              -- car ahead; at the brake commit (overlap >= PULL_OVL, +PULL_CAUT, no brake-hint change) or abort (PASS_ABORT body);
+                              -- past the apex release to the line over PULL_EXIT_T s. The lunge is suppressed while a move is pulled/committed/aborting.
+R.PULL_LEAD = 0.4; R.PULL_SLEW = 0.8; R.PULL_DROP = 15; R.PULL_LOOK = 4.0; R.PULL_BRAKE_FB = 1.0; R.PULL_CLOSE = 1.0
+R.PULL_OVL = 0.5; R.PULL_OVL_P = 0.7; R.PULL_CAUT = 0.05; R.PULL_EXIT_T = 1.0; R.PULL_EXIT_S = 2.0; R.PULL_COOL = 4.0
+R.pullArmN = 0; R.pullOutN = 0; R.pullComN = 0; R.pullAbN = 0; R.pullExitN = 0; R.pullFbN = 0; R.pullLostN = 0
+R.pullLog = {}; R.pullW = 0   -- per-move ring (32 reused records), R.pullW = records written; diag drains it
 R.TOW_CORNER = 0              -- >0: the tow attack floor is off when a corner begins within this many seconds of travel (straight-only, for real)
 R.PASS_FINISH = 0             -- >0: a committed quicker driver (PASS_COMMIT) offline beside the car ahead, within this many car lengths of level,
                               -- finishes the pass: caution floored at PASS_CAUT, full aggression, later braking on the inside (A/B 2026-09-19)
@@ -759,6 +770,83 @@ local function cornerAhead(prog)
     return isCorner, insideSign
 end
 
+-- ROAD SPACE geometry (R.ROADSPACE, and R.PULL's side pick): the centre-to-centre gap that clears a car, and the free lateral
+-- room per side of the car ahead (at lateral aLat) out to just past it. Returns need and the reused table room[-1|1]: read it
+-- before the next call. Factored out of the road-space rule unchanged (the per-call room table is now one reused table).
+local roomT = { [-1] = 0, [1] = 0 }   -- read immediately; the next call overwrites it
+local function roomSides(i, me, mySpline, aLat, gapA, aheadIdx, carsCount)
+    local half = 6.0                                          -- half track width here (m): track units per metre
+    pcall(function() local sd = ac.getTrackAISplineSides(mySpline); if sd then half = math.max(3.0, (sd.x + sd.y) * 0.5) end end)
+    local carW = CV.RS_CARW_M
+    pcall(function() local ab = me.aabbSize; if ab and ab.x > 0.8 and ab.x < 4.0 then carW = ab.x end end)
+    local need = (carW + CV.RS_MARGIN_M) / half               -- centre-to-centre lateral gap that clears a car
+    roomT[-1], roomT[1] = aLat + CV.RS_EDGE, CV.RS_EDGE - aLat   -- how far from the car ahead I may sit, per side
+    local back, fwd = CV.RS_BACK_M / trackLen, gapA + CV.RS_FWD_M / trackLen
+    for j = 0, carsCount - 1 do
+        if j ~= i and j ~= aheadIdx then
+            local oc = ac.getCar(j)
+            if oc and oc.splinePosition and ((oc.speedKmh or 0) > K.BLOCK_SPEED or (R.RS_SEE_STOPPED and not oc.isInPitlane)) then
+                local sd = oc.splinePosition - mySpline; if sd < -0.5 then sd = sd + 1 elseif sd > 0.5 then sd = sd - 1 end
+                if sd > -back and sd < fwd then                       -- from just behind me to just past the car ahead
+                    local dl = (latNow[j] or 0) - aLat
+                    local s = (dl >= 0) and 1 or -1
+                    local r = math.abs(dl) - need                     -- I must clear that car too
+                    if r < roomT[s] then roomT[s] = r end
+                end
+            end
+        end
+    end
+    return need, roomT
+end
+
+-- (R.PULL) the next braking point from the typical-speed map: scanning forward from my bin, the first trusted bin more than
+-- PULL_DROP km/h under the fastest trusted bin seen so far. Returns seconds to it at my speed, its bin, and the apex bin (the
+-- first bin after it where the map speeds up again); nil when my bin is untrusted (the caller falls back), false when the map
+-- is trusted but shows no brake within PULL_LOOK s.
+local function ysBrake(s, spd)
+    local ys = cv2.ys
+    if not ys or spd < 1 then return nil end
+    local nb = ys.nb
+    local x = (s % 1) * nb
+    local b0 = math.floor(x) % nb
+    if (ys.n[b0] or 0) < CV.YS_MIN then return nil end
+    local binM = trackLen / nb
+    local v = spd / 3.6
+    local maxK = math.min(nb - 1, math.ceil(R.PULL_LOOK * v / binM) + 1)
+    local top = ys.v[b0]
+    for k = 1, maxK do
+        local b = (b0 + k) % nb
+        if (ys.n[b] or 0) >= CV.YS_MIN then
+            local vb = ys.v[b]
+            if vb > top then top = vb
+            elseif vb < top - R.PULL_DROP then
+                local ab, av = b, vb                              -- the apex: walk on while the map keeps slowing
+                for k2 = 1, 40 do
+                    local b2 = (b + k2) % nb
+                    if (ys.n[b2] or 0) < CV.YS_MIN or ys.v[b2] > av then break end
+                    ab, av = b2, ys.v[b2]
+                end
+                return (k - (x - math.floor(x))) * binM / v, b, ab
+            end
+        end
+    end
+    return false                                              -- a trusted map, no brake within PULL_LOOK: keep waiting (no fallback)
+end
+
+-- (R.PULL) close one move: write its record into the 32-slot ring (records reused, no garbage) and cool the car down.
+-- verdict 1 commit, 2 abort, 3 lost (the target got away / a safety layer took the line), 4 timeout (no brake reached in 3 s)
+local function pullFinish(i, p, verdict, won, exitSpd, exitTv, lap, now)
+    local k = (R.pullW % 32) + 1
+    local r = R.pullLog[k]
+    if not r then r = {}; R.pullLog[k] = r end
+    r.car, r.tgt, r.lap, r.tArm, r.tOut, r.src, r.side, r.need = i, p.tgt, lap, p.tArm, p.tOut, p.src, p.sideK, p.need
+    r.ovl, r.verdict, r.apexSpd, r.apexTv, r.exitSpd, r.exitTv, r.won = p.ovl, verdict, p.apexSpd, p.apexTv, exitSpd, exitTv, won
+    r.caut, r.latRate = p.caut, p.latRate
+    R.pullW = R.pullW + 1
+    if verdict >= 3 then R.pullLostN = R.pullLostN + 1 end
+    p.ph, p.cool, p.latPrev, p.ovl, p.apexSpd, p.apexTv, p.caut = 0, now + R.PULL_COOL, nil, 0, 0, -1, 0
+end
+
 -- ROOM MAP accessor (R.ROOM): 0 = wide or fast road, 1 = a slow corridor. tight = slow x max(narrow, ROOM_WFLOOR): narrow ramps
 -- from ROOM_WHI (7 m half-width -> 0) to ROOM_WLO (3.5 m -> 1); slow is the larger of the radius term (ROOM_RHI 150 m -> 0 ..
 -- ROOM_RLO 30 m -> 1) and the learned-pace term (ROOM_VHI 140 km/h -> 0 .. ROOM_VLO 60 -> 1). By construction Silverstone
@@ -1007,7 +1095,7 @@ local evalBody = function()
                     end
                     -- SLOW-CAR YELLOW (R.YELLOW_SLOW): far under the speed its own bit of road is normally driven at (cv2.ys, beginFrame).
                     -- Capped on its own (ysCap), never as the nearest hazard: in front of a wreck it would hide the wreck and lift the cap.
-                    if not hazard and cv2.ys and d > 0 and d < yellowRange and math.abs(ocLat) < R.YELLOW_LAT and not oc.isInPitlane then   -- (cv2.ys exists only while the switch is on)
+                    if not hazard and R.YELLOW_SLOW > 0 and cv2.ys and d > 0 and d < yellowRange and math.abs(ocLat) < R.YELLOW_LAT and not oc.isInPitlane then   -- (cv2.ys exists only while the switch is on)
                         local ys = cv2.ys
                         local nb = ys.nb
                         local ob = math.floor(oc.splinePosition * nb) % nb
@@ -1469,10 +1557,13 @@ local evalBody = function()
             end
             -- STRATEGY: a planned manoeuvre (set-up, late-brake lunge, switchback, slingshot) overrides the
             -- reactive pass above. Skill- and difficulty-gated inside; nil = no opinion.
-            local ov = Strategy.evaluate(i, { dt = dt, gapA = gapA, spd = spd, aheadSpd = aheadSpd, aheadIdx = aheadIdx,
+            -- (R.PULL) a straight-line pass that has pulled out / committed / is aborting owns the line: no planned manoeuvre on top
+            local plq = R.PULL and cv2.pl and cv2.pl[i]
+            local ov = nil
+            if not (plq and plq.ph >= 2 and plq.ph <= 4) then ov = Strategy.evaluate(i, { dt = dt, gapA = gapA, spd = spd, aheadSpd = aheadSpd, aheadIdx = aheadIdx,
                 prog = progZ, dLat = dLat, myLat = myLat, wide = wide, baseA = baseA, prof = prof, classKey = classKey,
                 off = off, passGap = K.PASS_GAP, attackGap = attackGap, fasterMargin = fasterM, isOval = R.isOval, lap = myLap, crowd = crowd, lapped = lappedAhead,
-                wild = wild or nil, wLunge = R.WILD_LUNGE * (wm > 0 and R.WILD_TILT_LUNGE or 1), wCool = R.WILD_COOL, wReach = R.WILD_REACH, wDive0 = R.WILD_DIVE0 })
+                wild = wild or nil, wLunge = R.WILD_LUNGE * (wm > 0 and R.WILD_TILT_LUNGE or 1), wCool = R.WILD_COOL, wReach = R.WILD_REACH, wDive0 = R.WILD_DIVE0 }) end
             if ov then
                 if ov.target ~= nil then target = ov.target end
                 caut = caut + (ov.caut or 0)
@@ -1488,27 +1579,7 @@ local evalBody = function()
                and (myLap >= 2 or (myLap == 1 and mySpline >= K.OPENLAP_TAIL)
                     or (R.RS_OL_METER > 0 and crowd <= R.RS_OL_CROWD and Strategy.tierOf(i) >= 2 and Strategy.meterOK(R.RS_OL_METER)) or (wild and R.WILD_START))
                and runAdv > K.OUTSIDE_MIN_ADV * (1.4 - baseA) * CV.RS_ADV then
-                local half = 6.0                                          -- half track width here (m): track units per metre
-                pcall(function() local sd = ac.getTrackAISplineSides(mySpline); if sd then half = math.max(3.0, (sd.x + sd.y) * 0.5) end end)
-                local carW = CV.RS_CARW_M
-                pcall(function() local ab = me.aabbSize; if ab and ab.x > 0.8 and ab.x < 4.0 then carW = ab.x end end)
-                local need = (carW + CV.RS_MARGIN_M) / half               -- centre-to-centre lateral gap that clears a car
-                local room = { [-1] = dLat + CV.RS_EDGE, [1] = CV.RS_EDGE - dLat }   -- how far from the car ahead I may sit, per side
-                local back, fwd = CV.RS_BACK_M / trackLen, gapA + CV.RS_FWD_M / trackLen
-                for j = 0, sim.carsCount - 1 do
-                    if j ~= i and j ~= aheadIdx then
-                        local oc = ac.getCar(j)
-                        if oc and oc.splinePosition and ((oc.speedKmh or 0) > K.BLOCK_SPEED or (R.RS_SEE_STOPPED and not oc.isInPitlane)) then
-                            local sd = oc.splinePosition - mySpline; if sd < -0.5 then sd = sd + 1 elseif sd > 0.5 then sd = sd - 1 end
-                            if sd > -back and sd < fwd then                       -- from just behind me to just past the car ahead
-                                local dl = (latNow[j] or 0) - dLat
-                                local s = (dl >= 0) and 1 or -1
-                                local r = math.abs(dl) - need                     -- I must clear that car too
-                                if r < room[s] then room[s] = r end
-                            end
-                        end
-                    end
-                end
+                local need, room = roomSides(i, me, mySpline, dLat, gapA, aheadIdx, sim.carsCount)   -- (factored out for R.PULL, unchanged)
                 local side = 0
                 if isCorner and inside ~= 0 and room[inside] >= need then side = inside              -- the inside fits: take it
                 elseif room[1] >= need or room[-1] >= need then side = (room[1] >= room[-1]) and 1 or -1   -- else the roomier side
@@ -1988,11 +2059,151 @@ local evalBody = function()
             if clear and ap and prof.pace - ap.pace >= R.TOW_EDGE and caut > -R.TOW_ATTACK then caut = -R.TOW_ATTACK; R.towN = (R.towN or 0) + 1 end
             end
         end
+        -- OPPORTUNIST (R.PASS_OPP, F1 25 brief via verve-47 2026-10-31): the car ahead has run PASS_OPP km/h under the typical
+        -- speed of ITS OWN bit of road (cv2.ys) for PASS_OPP_T s -> go now, on the straight: the tow floor's geometry (straight,
+        -- above TOW_MIN, within TOW_M, no corner within TOW_CORNER s), held PASS_OPP_HOLD s from the trigger. Judged against the
+        -- road, not against my pace rating, so it needs no profile on either car and fires behind the player too (verve-47).
+        if R.PASS_OPP > 0 and cv2.ys and aheadIdx >= 0 and myLap >= 2 and spd > R.TOW_MIN and gapA * trackLen < R.TOW_M then
+            local oc = ac.getCar(aheadIdx)
+            local ys = cv2.ys
+            local now = os.clock()
+            cv2.oppS = cv2.oppS or {}; cv2.oppU = cv2.oppU or {}
+            if oc and oc.splinePosition and not oc.isInPitlane then
+                local ob = math.floor(oc.splinePosition * ys.nb) % ys.nb
+                local tv = (ys.n[ob] or 0) >= CV.YS_MIN and ys.v[ob] or nil
+                if tv and (oc.speedKmh or 0) < tv - R.PASS_OPP then
+                    cv2.oppS[aheadIdx] = cv2.oppS[aheadIdx] or now
+                    if now - cv2.oppS[aheadIdx] >= R.PASS_OPP_T then cv2.oppU[i] = now + R.PASS_OPP_HOLD end
+                elseif tv then
+                    cv2.oppS[aheadIdx] = nil
+                end
+            end
+            if (cv2.oppU[i] or 0) > now then
+                local st, lim = me.steer, 0.1
+                if R.STEER_FRAC then local fr = R.steerIn(me); if fr then st, lim = fr, R.TOW_STEER end end
+                local clear = type(st) == 'number' and math.abs(st) < lim
+                if clear and R.TOW_CORNER > 0 then
+                    local look = spd / 3.6 * R.TOW_CORNER / math.max(1, trackLen)
+                    clear = not (cornerAhead(mySpline) or cornerAhead(mySpline + look * 0.5) or cornerAhead(mySpline + look))
+                end
+                if clear and caut > -R.PASS_OPP_CAUT then caut = -R.PASS_OPP_CAUT; R.oppN = (R.oppN or 0) + 1 end
+            end
+        end
+        -- STRAIGHT-LINE PASS (R.PULL): one reused state table per car. Phases 0 idle, 1 armed, 2 pulled out, 3 committed,
+        -- 4 aborting, 5 exit. Runs after the line layers so its target holds; a yield or a blockage sweep ends the move ('lost').
+        local pullStep = nil
+        if R.PULL and myLap >= 2 then
+            cv2.pl = cv2.pl or {}
+            local p = cv2.pl[i]
+            if not p then
+                p = { ph = 0, tgt = -1, t0 = 0, tArm = 0, cool = 0, side = 0, sideK = 0, off = 0, need = 0, src = 0, tOut = 0, tB = 0,
+                      ovl = 0, apexS = -1, tApex = 0, apexSpd = 0, apexTv = -1, latPrev = nil, latRate = 0, caut = 0, exitR = 0 }
+                cv2.pl[i] = p
+            end
+            local now = os.clock()
+            local h = (dt > 0 and dt < 0.5) and dt or 0.016
+            local ys = cv2.ys
+            if p.ph >= 2 then                                     -- darting check: my own lateral rate (track units / s) during the move
+                if p.latPrev then local r = math.abs(myLat - p.latPrev) / h; if r > p.latRate then p.latRate = r end end
+                p.latPrev = myLat
+            end
+            local tc = (p.ph >= 1 and p.tgt >= 0) and ac.getCar(p.tgt) or nil
+            local tGap = (tc and tc.splinePosition) and ((tc.splinePosition - mySpline) % 1) or 0.5
+            if tGap > 0.5 then tGap = tGap - 1 end                -- < 0: I am ahead of the target
+            local ovl = 1 - tGap * trackLen / 4.6                  -- the PASS_ABORT measure: 1 = level, 0 = a car length back
+            local safety = yielding or blockSide ~= 0
+            if p.ph == 0 then
+                if now >= p.cool and state == 1 and aheadIdx >= 0 and not safety and spd > R.TOW_MIN and gapA * trackLen < R.TOW_M
+                   and spd >= aheadSpd + R.PULL_CLOSE and math.abs((latNow[aheadIdx] or 0) - myLat) < 0.25 then
+                    local st, lim = me.steer, 0.1
+                    if R.STEER_FRAC then local fr = R.steerIn(me); if fr then st, lim = fr, R.TOW_STEER end end
+                    local edge = false
+                    if prof then local ap = Drivers.statsOf(aheadIdx); edge = ap ~= nil and prof.pace - ap.pace >= R.TOW_EDGE end
+                    if not edge and R.PASS_OPP > 0 and cv2.oppU and (cv2.oppU[i] or 0) > now then edge = true end
+                    if edge and type(st) == 'number' and math.abs(st) < lim then
+                        p.ph, p.tgt, p.tArm = 1, aheadIdx, now; R.pullArmN = R.pullArmN + 1
+                    end
+                end
+            elseif p.ph == 1 then
+                if aheadIdx ~= p.tgt or state ~= 1 or safety or gapA * trackLen > R.TOW_M or spd < aheadSpd - R.PULL_CLOSE then
+                    p.ph = 0                                      -- disarm quietly: no move was made
+                else
+                    local v = spd / 3.6
+                    local tB, _, aB = ysBrake(mySpline, spd)
+                    local src = 1
+                    if tB == nil then                             -- untrusted map here: the corner look-ahead minus a fixed brake lead
+                        src = 2
+                        for k = 1, 4 do
+                            local tt = k * R.PULL_LOOK / 4
+                            if cornerAhead((mySpline + v * tt / trackLen) % 1) then tB = tt - R.PULL_BRAKE_FB; break end
+                        end
+                    end
+                    if tB and tB <= R.PULL_LEAD + 1.5 then          -- (the room scan only near the brake)
+                        local aLat = latNow[p.tgt] or 0
+                        local need, room = roomSides(i, me, mySpline, aLat, gapA, p.tgt, sim.carsCount)
+                        if tB <= R.PULL_LEAD + need / math.max(0.1, R.PULL_SLEW) then
+                            local _, ins = cornerAhead((mySpline + v * math.max(tB, 0) / trackLen) % 1)
+                            local side, sk = 0, 0
+                            if ins ~= 0 and room[ins] >= need then side, sk = ins, 1                       -- the inside fits
+                            elseif room[1] >= need or room[-1] >= need then side, sk = (room[1] >= room[-1]) and 1 or -1, 2 end   -- the free side
+                            if side ~= 0 then
+                                p.ph, p.side, p.sideK, p.need, p.src, p.tOut, p.t0 = 2, side, sk, need, src, tB, now
+                                p.off = clamp(aLat + side * need, -CV.RS_EDGE, CV.RS_EDGE)
+                                p.tArm = now - p.tArm; p.latPrev, p.latRate = myLat, 0
+                                p.tB = now + math.max(tB, 0)
+                                p.apexS = (aB and ys) and ((aB + 0.5) / ys.nb) or -1
+                                R.pullOutN = R.pullOutN + 1; if src == 2 then R.pullFbN = R.pullFbN + 1 end
+                                Strategy.clear(i, 'pull')
+                            end
+                        end
+                    end
+                end
+            elseif p.ph == 2 then
+                if safety or not tc or tGap * trackLen > 2 * R.TOW_M then pullFinish(i, p, 3, -1, 0, -1, myLap, now)
+                elseif now >= p.tB then                           -- the braking point: commit or abort
+                    p.ovl, p.caut, p.t0 = ovl, caut, now
+                    if ovl >= ((p.tgt == 0) and R.PULL_OVL_P or R.PULL_OVL) then p.ph = 3; R.pullComN = R.pullComN + 1
+                    else p.ph = 4; R.pullAbN = R.pullAbN + 1 end
+                elseif now - p.t0 > 3.0 then pullFinish(i, p, 4, -1, 0, -1, myLap, now)
+                else target = p.off; pullStep = R.PULL_SLEW end
+            end
+            if p.ph == 3 or p.ph == 4 then
+                if safety or not tc then pullFinish(i, p, 3, -1, 0, -1, myLap, now)
+                else
+                    local passed
+                    if p.apexS >= 0 then passed = ((mySpline - p.apexS) % 1) < 0.5 or now - p.t0 > 4.0
+                    else passed = now - p.t0 > 3.0 end            -- (fallback map: no apex bin)
+                    if passed then
+                        p.ph, p.tApex, p.apexSpd = 5, now, spd
+                        local b = ys and math.floor(mySpline * ys.nb) % ys.nb
+                        p.apexTv = (b and (ys.n[b] or 0) >= CV.YS_MIN) and ys.v[b] or -1
+                        p.exitR = math.abs(curOffset[i] or 0) / math.max(0.1, R.PULL_EXIT_T)
+                        R.pullExitN = R.pullExitN + 1
+                    elseif p.ph == 3 then                         -- committed: hold the side, brake normally or a touch earlier
+                        target = p.off; caut = caut + R.PULL_CAUT
+                    else                                          -- aborting: the PASS_ABORT body (lift; tuck in once fully behind)
+                        caut = caut + 0.5
+                        if ovl <= 0 then target = clamp(latNow[p.tgt] or 0, -0.85, 0.85) else target = curOffset[i] or 0 end
+                    end
+                end
+                if caut > K.CAUT_MAX then caut = K.CAUT_MAX end
+            end
+            if p.ph == 5 then                                     -- exit: release to the line over PULL_EXIT_T, sample the exit at PULL_EXIT_S
+                local age = now - p.tApex
+                if age < R.PULL_EXIT_T and not safety then target = 0; pullStep = math.max(0.05, p.exitR) end
+                if age >= R.PULL_EXIT_S then
+                    local b = ys and math.floor(mySpline * ys.nb) % ys.nb
+                    local tv = (b and (ys.n[b] or 0) >= CV.YS_MIN) and ys.v[b] or -1
+                    pullFinish(i, p, (p.ovl >= ((p.tgt == 0) and R.PULL_OVL_P or R.PULL_OVL)) and 1 or 2, tGap < 0 and 1 or 0, spd, tv, myLap, now)
+                end
+            end
+        end
+
         if R.CAUT_FLOOR > 0 and not wild and caut < -R.CAUT_FLOOR then caut = -R.CAUT_FLOOR end   -- (R.CAUT_FLOOR) boldness floor, after tow + pass-finish
 
         -- slew the offset (anti-dart)
         local cur = curOffset[i] or 0
-        local step = K.OFFSET_SLEW * (dt > 0 and dt < 0.5 and dt or 0.016)
+        local step = (pullStep or K.OFFSET_SLEW) * (dt > 0 and dt < 0.5 and dt or 0.016)   -- (R.PULL) its own slew during a move
         if target > cur + step then cur = cur + step
         elseif target < cur - step then cur = cur - step
         else cur = target end
@@ -2182,7 +2393,7 @@ function R.beginFrame()
         local rm = cv2.roomEn and cv2.room or nil
         -- SLOW-CAR YELLOW map (R.YELLOW_SLOW > 0 only, built once the track is scaled): typical speed per bin, one sample per car per crossing
         local ys = nil
-        if type(R.YELLOW_SLOW) == 'number' and R.YELLOW_SLOW > 0 and scaled then
+        if ((type(R.YELLOW_SLOW) == 'number' and R.YELLOW_SLOW > 0) or (tonumber(R.PASS_OPP) or 0) > 0 or R.PULL == true) and scaled then   -- (R.PASS_OPP and R.PULL read it too)
             ys = cv2.ys
             if not ys then ys = { nb = clamp(math.floor(trackLen / CV.YS_M), 50, 1000), v = {}, n = {}, b = {} }; cv2.ys = ys end
         end
