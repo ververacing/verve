@@ -419,6 +419,9 @@ R.PULL_TOW = 0.5              -- while ARMED (phase 1) the caution is floored at
                               -- tow to close, pull to pass. AC's following distance parked armed cars 8-14 m back. 0 = off.
 R.PULL_NOLUNGE = false        -- true: while ARMED the strategy lunge is not evaluated (an armed car waits for the straight-line pass)
 R.pullTowN = 0; R.pullNlN = 0 -- car-frames with the armed tow floor applied / with the lunge suppressed by NOLUNGE
+R.PULL_AGGR = 0               -- >0: in the same armed window as PULL_TOW, AI aggression is raised to at least this (smoke 3: caution cannot
+                              -- beat AC's following distance; aggression is the next lever). Counter pullAggrN = car-frames raised. 0 = off.
+R.pullAggrN = 0
 R.TOW_CORNER = 0              -- >0: the tow attack floor is off when a corner begins within this many seconds of travel (straight-only, for real)
 R.PASS_FINISH = 0             -- >0: a committed quicker driver (PASS_COMMIT) offline beside the car ahead, within this many car lengths of level,
                               -- finishes the pass: caution floored at PASS_CAUT, full aggression, later braking on the inside (A/B 2026-09-19)
@@ -2106,7 +2109,7 @@ local evalBody = function()
         end
         -- STRAIGHT-LINE PASS (R.PULL): one reused state table per car. Phases 0 idle, 1 armed, 2 pulled out, 3 committed,
         -- 4 aborting, 5 exit. Runs after the line layers so its target holds; a yield or a blockage sweep ends the move ('lost').
-        local pullStep = nil
+        local pullStep, pullAggr = nil, false
         if R.PULL and myLap >= 2 then
             cv2.pl = cv2.pl or {}
             local p = cv2.pl[i]
@@ -2159,9 +2162,11 @@ local evalBody = function()
                             if cornerAhead((mySpline + v * tt / trackLen) % 1) then tB = tt - R.PULL_BRAKE_FB; break end
                         end
                     end
-                    if R.PULL_TOW > 0 and (not tB or tB > R.PULL_LEAD + 1.0) and caut > -R.PULL_TOW then   -- (R.PULL_TOW) close up in the tow
+                    local away = not tB or tB > R.PULL_LEAD + 1.0  -- the closing window: armed, the brake not yet near
+                    if R.PULL_TOW > 0 and away and caut > -R.PULL_TOW then   -- (R.PULL_TOW) close up in the tow
                         caut = -R.PULL_TOW; R.pullTowN = R.pullTowN + 1
                     end
+                    if R.PULL_AGGR > 0 and away then pullAggr = true end   -- (R.PULL_AGGR) applied at the aggression write below
                     if tB and tB <= R.PULL_LEAD + 1.5 then          -- (the room scan only near the brake)
                         local aLat = latNow[p.tgt] or 0
                         local need, room = roomSides(i, me, mySpline, aLat, gapA, p.tgt, sim.carsCount)
@@ -2246,6 +2251,7 @@ local evalBody = function()
 
         physics.setAISplineOffset(i, clamp(cur, -1, 1), false)
         if wild and openingLap == 0 and not nursing and not yielding then aggr = math.max(aggr, R.WILD_AFLOOR) end   -- (R.WILD_AFLOOR) elbows out once the start has faded
+        if pullAggr and aggr < R.PULL_AGGR then aggr = R.PULL_AGGR; R.pullAggrN = R.pullAggrN + 1 end   -- (R.PULL_AGGR) armed: try to close AC's gap
         physics.setAIAggression(i, clamp(aggr, 0, 1))
         -- what we actually applied this frame, for the diagnostics log (reused table: no per-frame garbage)
         local L = R.last[i] or {}
