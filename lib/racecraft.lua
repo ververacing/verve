@@ -1006,33 +1006,6 @@ function R.finishHandBack(i, gripOn, behaviourOn, stockLevel)
     pcall(Drivers.handBack, i, stockLevel and stockLevel(i))
     R.finishN = (R.finishN or 0) + 1
 end
--- (0.16.1, community ask) the top 3 flash their headlights crossing the line: 3 flashes 0.5 s apart from the frame the car takes
--- the flag. The ONE write a finished car still gets after its hand-back, for ~1.5 s, through the control override (the only
--- AI-capable light control in CSP 3465: ac.CarControlsInput.headlightsFlash; there is no AI turn-signal / hazard setter).
--- Every other control is set to "leave AC's value" (as recovery's releaseControls does), so only the lights change.
-R.FINISH_FLASH = true; R.flashT = {}; R.flashK = {}; R.flashN = 0
-function R.finishFlash(i, car)
-    if not R.FINISH_FLASH then return end
-    local t = R.flashT[i]
-    if t == nil then
-        local pos = car.racePosition or 0
-        t = (pos >= 1 and pos <= 3) and os.clock() or false
-        R.flashT[i] = t
-    end
-    if not t then return end
-    local k = math.floor((os.clock() - t) / 0.5)
-    if k > 2 then R.flashT[i] = false; return end
-    if k == R.flashK[i] then return end
-    R.flashK[i] = k
-    pcall(function()
-        local c = ac.overrideCarControls(i)
-        if c then
-            c.steer = math.huge; c.requestedGearIndex = 0; c.clutch = 1; c.gas = 0; c.brake = 0; c.handbrake = 0
-            c.headlightsFlash = true
-            R.flashN = R.flashN + 1
-        end
-    end)
-end
 -- (0.15.1) the top-driver grip (R.TOP_GRIP x gripW) moves at most R.TOP_EASE per second on a moving car: Clear drivers mid-race
 -- gave two unprofiled midfielders TOP_UNPROF's +0.13..0.16 grip in one frame, side by side into the Parabolica, and they collided
 -- (mc15b_clear_1, 1 Oct). The grid, the pits and the first value of a session are set at once.
@@ -2626,7 +2599,6 @@ function R.reset()
     R.hurtSeen, R.hurtLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
     R.topCap = {}; R.finished = {}; R.finishN = 0   -- (0.16.1 cooldown) per session
-    R.flashT = {}; R.flashK = {}; R.flashN = 0   -- (0.16.1 finish flash) per session
     letbyT, letbyDone, letbyFor = {}, {}, {}
     cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {}, thrLast = {}, thrTog = {}, thrPrev = {}, thrSnap = {}, cvEng = {}, thrOut = {}, thrSlew = {} }; R.cv2 = cv2
     R.crawlN = 0; R.topV = {}; R.aggV = {}

@@ -541,7 +541,6 @@ function script.update(dt)
             -- cooldown lap (its throttle limiter) and AC's own drive to the pits are all that is left
             if car.isRaceFinished then
                 if not Racecraft.finished[i] then Racecraft.finishHandBack(i, G.controlGrip, behaviourOn, Difficulty.stockLevel) end
-                Racecraft.finishFlash(i, car)   -- (R.FINISH_FLASH) the top 3 flash their lights at the line
                 return
             end
             if car.isInPitlane then Racecraft.pitRelease(i); return end   -- never touch a car doing a pit stop (player or AI); (H.MISTAKE_V2) drop a mistake's cap
