@@ -1426,8 +1426,9 @@ def run_once(args, arm, run_idx):
                 if quiet_finish:
                     print(f"  !! lap {leader_lap}/{args.laps} reached and the diagnostics have been quiet {age:.0f} s, but AC never quit - closing it")
                 else:
-                    # let Verve close AC itself (replay autosave); fall back to the kill after 90 s
-                    for _ in range(18):
+                    # let Verve close AC itself (replay autosave); fall back to the kill after --after-flag-s (default 90 s).
+                    # (0.16.1) a cooldown-lap smoke needs the field's whole slow lap back to the pits: Verve quits once all are parked
+                    for _ in range(max(1, int(getattr(args, 'after_flag_s', 90) or 90) // 5)):
                         if proc.poll() is not None:
                             break
                         time.sleep(5)
@@ -1669,6 +1670,7 @@ def main():
     ap.add_argument("--csp", help="JSON of CSP per-user config overrides for this run only, e.g. {\"new_behaviour\":{\"AI_RACE_RUBBERBANDING\":{\"ENABLED\":1}}}")
     ap.add_argument("--minutes", type=int, default=0, help="TIMED race of N minutes (LAPS 0; AC adds a lap after the clock). --laps then only fills race.ini's RACE_LAPS "
                     "record: AC fuels a timed field for 1.2 laps whatever it says (--settings timedFuel true fuels it for the clock)")
+    ap.add_argument("--after-flag-s", type=int, default=90, help="seconds to wait after the leader's flag for Verve to close AC itself before the kill (default 90; a CSP AI-cooldown-lap smoke needs the slow lap back to the pits)")
     ap.add_argument("--stop-laps", type=int, default=0, help="heavy sprint: end the race gracefully once the leader completes N laps (fuel load of --laps, duration of N)")
     ap.add_argument("--csp-min", type=int, default=0, help="TEST ONLY: raise Verve's CSP minimum build for this run (e.g. 99999 to force the stand-down); 0 = use Verve's own CSP_MIN")
     ap.add_argument("--fuel", type=float, default=0, help="litres in every car when the autopilot arms (0 = AC decides); e.g. 20 for a quali-load pace probe")
