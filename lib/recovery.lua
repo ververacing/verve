@@ -9,6 +9,8 @@ local Troublespots = require('lib.troublespots')
 
 local R = {}
 R.ENABLED = true
+R.NO_REPOSITION = false   -- (community 0.16.1) user setting rescueCrashed, inverted (off by default = today). true = no car is ever moved or repaired by Verve and
+                          -- nothing holds it against AC's own retirement (Verve.lua also clears CRASH_REPAIR): stock AC's fate
 R.CRASH_REPAIR = false    -- experimental: repair a stuck car ON TRACK (no pit) and set it back on the racing line
 -- DRIVE = take the controls of a stuck AI car ourselves (gas/steer/reverse bursts via ac.overrideCarControls).
 -- OFF by default now. The 1 Hz rejoin traces showed every car we had ever driven ending up in NEUTRAL at
@@ -397,6 +399,7 @@ R.wildCar = {}             -- [i] = true (Verve.lua, Racecraft.WILD_NOLEARN): a 
 
 -- may this car be repositioned automatically right now?
 local function dropsAllowed(i)
+    if R.NO_REPOSITION then return false end   -- (rescueCrashed off) no reposition of any kind
     if dropFailed[i] then return false end
     if (dropCount[i] or 0) >= R.DROP_MAX_PER_CAR then return false end
     if R.dropsOff then return false end
@@ -560,6 +563,9 @@ end
 -- 2026-09-29): a grid larger than the track's pit boxes shares boxes - test that case before trusting it there.
 local function parkInPits(i, why)
     if parked[i] or not R.raceSession or i == 0 then return end   -- never the player's car: a human may take the wheel back
+    -- (rescueCrashed off) no pit teleport and no hold: hand the car to AC for good (hopeless = no protection, no re-arming),
+    -- so AC's own retirement decides its fate, as in stock AC
+    if R.NO_REPOSITION then hopeless[i] = hopeless[i] or os.clock(); giveUp(i); return end
     parked[i] = true
     if type(R.gateRetry[i]) == 'number' and not R.wildCar[i] then R.rateN = R.rateN + 1 end   -- (GATE_FAIL_RETRY) a parked car can't use a retry: a granted one
     R.gateRetry[i] = false                                               -- counts as the miss it was, and none is granted after this
@@ -640,6 +646,9 @@ end
 -- off to the roomier side. A beached car can't drive itself across the gravel, so this is what actually
 -- gets it to REJOIN. Gated by dropSafe unless `force` (a last-resort so a car is never abandoned).
 local function putBackOnLine(sim, i, progress, center, force, skipGate)
+    -- (rescueCrashed off) backstop for every AI caller (gate stage, box rescue's forceRecover, rescues). Car 0 is exempt:
+    -- the player's 'Reset my car' button (Verve.lua) stays; every automatic path to car 0 is already shut by dropsAllowed
+    if R.NO_REPOSITION and i ~= 0 then return false end
     if not center then return false end
     local reqProgress = progress     -- where the car got stuck (the gate moves the landing spot; the escape must see the corner)
     local callerSkip = skipGate      -- the gate's second stage passes true (the same-spot escape sets skipGate itself below)
@@ -953,7 +962,7 @@ local carBody = function()
                     end
                     R.boxCmp[i] = cmp; R.boxWear[i] = wear   -- refuelling: the stop is live
                     boxFuel[i] = fuel
-                    if boxT[i] > BOX_LIMBO_T then
+                    if boxT[i] > BOX_LIMBO_T and not R.NO_REPOSITION then   -- (rescueCrashed off) a car AC left in its box stays there, as stock
                         -- AC parked it here and forgot it (stock AC does this too: Baku 2026-09-24, Verve off,
                         -- 2 and 5 cars stranded). forceRecover repairs and puts it back on the racing line --
                         -- and unlike AC's resetCarState it does move a car out of the pit lane. Give it two
@@ -983,7 +992,7 @@ local carBody = function()
                 -- because this timer had filled up on the grid.)
                 if not inBox and spd < STOP_SPEED and not terminalDamage(car) and hasMoved[i] and R.raceSession then
                     pitStuckT[i] = (pitStuckT[i] or 0) + dt
-                    pcall(function() physics.preventAIFromRetiring(i) end)
+                    if not R.NO_REPOSITION then pcall(function() physics.preventAIFromRetiring(i) end) end
                     if pitStuckT[i] > PIT_STUCK_T then
                         -- Wedged at the pit exit (AC's own damage-pit teleport sent it out and it hit the exit
                         -- wall -- 07:05 race, car 16, 18 km/h of damage). It's a stuck car like any other: set it
@@ -1292,7 +1301,7 @@ R.SUSP_FIX_MAX = 2         -- repairs per car per race; the next crawl retires i
 R.SUSP_FIX_PIT = false     -- also ask a repaired car to pit once (off: at Baku the pit lane lost lap counts and parked a car)
 R.suspFixCar = {}; R.suspOwe = {}   -- per-car repair count; the owed pit stop { crossed = bool } until the car passes the line
 function R.suspLimp(i, car, spd, dt)
-    if (R.SUSP_LIMP <= 0 and R.SUSP_FIX <= 0) or parked[i] then return end
+    if (R.SUSP_LIMP <= 0 and R.SUSP_FIX <= 0) or parked[i] or R.NO_REPOSITION then return end   -- (rescueCrashed off) no fix, no park
     local owe = R.suspOwe[i]
     if owe then                                              -- one stop, not one per lap: cancel once the line is behind it
         local sp = car.splinePosition or 0.5

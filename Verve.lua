@@ -134,6 +134,7 @@ local DEFAULTS = {
     ratingV2 = true,     -- DEFAULT 0.14.9; harness switch (lib/drivers.lua D.RATING_V2): real drivers rated as pros around a Veteran (owner 2026-09-29)
     classV2 = false,     -- harness switch (lib/classes.lua M.DETECT_V2): the v2 car-class detector (2026-09-30 inventory: 97 % vs 53 %)
     aboveExpert = 100,   -- (0.16.x, lib/tyrehint.lua R.HINT_ABOVE) the "past 100" control: 100 = off; up to 120 raises the GT clean-air hint
+    rescueCrashed = true, -- (0.16.1, community ask; lib/recovery.lua R.NO_REPOSITION) off: Verve never moves, repairs or protects a crashed car
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
 
@@ -151,6 +152,7 @@ local S = ac.storage({
     ratingV2 = true,
     classV2 = false,
     aboveExpert = 100,
+    rescueCrashed = true,
     autosave = true, schema = 1,
 })
 -- settings migration: 0.12 made crash repair + trouble spots core (they were opt-in experiments; a day-long
@@ -594,7 +596,8 @@ function script.update(dt)
     managed = n
 
     Recovery.ENABLED = G.recovery
-    Recovery.CRASH_REPAIR = G.crashRepair
+    Recovery.NO_REPOSITION = G.rescueCrashed == false   -- (0.16.1) off = stock AC's fate for a crashed car (no move, repair or hold)
+    Recovery.CRASH_REPAIR = G.crashRepair and not Recovery.NO_REPOSITION   -- crashRepair is core; the user's rescue switch still turns it off
     Recovery.REPAIR_BODY  = G.repairOnTrack ~= false
     if G.recovery then Recovery.update(dt) end
     Fuel.SHORT_FUEL = G.shortFuel == true   -- (owner item 28) short-race fuel guard, read inside Fuel.update's gate
@@ -888,7 +891,7 @@ function script.windowMain()
     end
 
     ui.text('What Verve does (always on)')
-    ui.textWrapped('Human pace variability  -  class-aware tyre, wet and dirty-air physics  -  racecraft (overtaking, defending, blue flags, yellow flags)  -  self-recovery with crash repair (a stuck car is repaired and set back on the racing line; genuinely wrecked cars retire)  -  trouble-spot learning per track  -  at high difficulty, GT cars push harder on a clear road.')
+    ui.textWrapped('Human pace variability  -  class-aware tyre, wet and dirty-air physics  -  racecraft (overtaking, defending, blue flags, yellow flags)  -  self-recovery (a stuck car drives itself out; with Rescue crashed cars on, it is also repaired and set back on the racing line, and genuinely wrecked cars retire)  -  trouble-spot learning per track  -  at high difficulty, GT cars push harder on a clear road.')
     if ui.itemHovered() then ui.setTooltip('These are Verve. They can\'t be half-enabled: turn Verve off to get stock AC.\nGT cars: from difficulty 90 up, a GT car with clear road ahead trusts its tyres more and is quicker. It eases off as it closes on another car, so it does not run into it. Other kinds of car are unchanged.') end
 
     ui.newLine()
@@ -907,7 +910,8 @@ function script.windowMain()
         if ax ~= G.aboveExpert then setG('aboveExpert', ax) end
         if ui.itemHovered() then ui.setTooltip('For when difficulty 100 is not hard enough. Above 100, GT cars at full difficulty get faster still, up to 120. 100 = off (the normal game). Other kinds of car are unchanged.') end
     end
-    toggle('Repair damage on track', 'repairOnTrack', 'On: a stuck or wrecked AI car is set back on the racing line with its body repaired (keeps the field alive; the default). Off: it is set back on the line but keeps its damage and pits for repairs like stock AC.')
+    toggle('Rescue crashed cars', 'rescueCrashed', 'On: a stuck or wrecked car is repaired and put back on the track (the default). Off: crashed cars are left to the game: a car that can\'t continue retires, as in stock AC.')
+    toggle('Repair damage on track', 'repairOnTrack', 'When a crashed car is rescued (above). On: its body is repaired (the default). Off: it keeps its damage and pits for repairs like stock AC.')
     toggle('Tactics: set-up passes, late-brake lunges, switchbacks', 'strategy', 'Planned manoeuvres on top of the reactive racecraft, per class (a GT driver out-brakes, a formula driver sets it up on the straight, a stock car slingshots). On at any difficulty whenever this is ticked; each car\'s own pace decides how much of the playbook it uses (a Rookie never switchbacks, a Veteran does).')
     -- (0.16, decision 0032) The text now says what the code actually does: races only (which the session gate
     -- enforces), including one left early (T.abort sends it at the next launch), and the install number, which
