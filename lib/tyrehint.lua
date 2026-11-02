@@ -120,7 +120,11 @@ function T.update(sim, dt)
     local span = math.max(1, tonumber(R.COLD_SPAN) or 40)
     for i = 0, sim.carsCount - 1 do
         local c = ac.getCar(i)
-        if c and c.isAIControlled and c.wheels then
+        if c and c.isAIControlled and c.isRaceFinished then
+            -- (0.16.1, CSP cooldown lap) past the flag: the car's own hint back once, then nothing more is written to it
+            if cur[i] and base[i] then pcall(physics.setAITyresHint, i, base[i]) end
+            cur[i] = nil; hMul[i], hF[i], hTerm[i], hA[i], hP[i], hS[i], hT[i] = nil, nil, nil, nil, nil, nil, nil
+        elseif c and c.isAIControlled and c.wheels then
             if base[i] == nil then
                 base[i] = 1.0
                 pcall(function() base[i] = ac.INIConfig.carData(i, 'ai.ini'):get('TYRES', 'HINT', 1.0) end)

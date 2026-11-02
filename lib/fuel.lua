@@ -259,7 +259,7 @@ local function greenLoad(sim, ss, trackM)
     local dur, extra = (ss.durationMinutes or 0) * 60, ss.hasAdditionalLap and 1 or 0
     for i = 0, sim.carsCount - 1 do
         local car = ac.getCar(i)
-        if eligible(car) then
+        if eligible(car) and not car.isRaceFinished then   -- (0.16.1) nothing written past the flag
             local fpl = fplOf(i, car, trackM)
             local laps = (st.mode == 'lapped' or st.mode == 'short') and ((ss.laps or 0) + extra)
                 or (math.ceil(dur / lapEst(i, car, trackM)) + extra)

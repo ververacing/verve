@@ -801,7 +801,7 @@ local carBody = function()
             local gs = gateStage[i]
             if gs and os.clock() - gs.t > 0.25 then            -- a few physics frames after the touch-down before the split
                 gateStage[i] = nil
-                putBackOnLine(sim, i, gs.progress, gs.center, true, true)
+                if not car.isRaceFinished then putBackOnLine(sim, i, gs.progress, gs.center, true, true) end   -- (0.16.1) never past the flag
             end
             -- Record which way EVERY car is racing (incl. a manually-driven player) while it's up to speed,
             -- so a reset -- the unstick button especially -- can face it the right way. Done before the
@@ -835,7 +835,7 @@ local carBody = function()
                 end
             end
             if not car.isAIControlled then return end
-            if R.WET_TYRES and physics.setAIRainTyres then
+            if R.WET_TYRES and physics.setAIRainTyres and not car.isRaceFinished then   -- (0.16.1) nothing written past the flag
                 local wet = 0
                 pcall(function() wet = sim.rainWetness or sim.roadWetness or 0 end)
                 local want = R.wetHint[i]
@@ -856,7 +856,11 @@ local carBody = function()
                     end
                 end
             end
-            if car.isRaceFinished then endRec(i); return end   -- past the flag: AC is taking it to the pits, whatever that looks like (Baku 2026-09-20)
+            if car.isRaceFinished then                         -- past the flag: AC is taking it to the pits, whatever that looks like (Baku 2026-09-20)
+                -- (0.16.1) a car mid rejoin ramp keeps its last throttle cap otherwise: hand it back once, then stop
+                if rejoinUntil[i] then rejoinUntil[i] = nil; pcall(physics.setAIThrottleLimit, i, 1) end
+                endRec(i); return
+            end
             if parked[i] then return end                -- retired by us: sitting in its pit box, leave it be
             local pt = pendingTemps[i]
             if pt then
@@ -1248,7 +1252,7 @@ function R.update(dt_)
         for i = 0, sim.carsCount - 1 do
             pcall(function()
                 local c = ac.getCar(i)
-                if c and c.isAIControlled and not c.isRetired then physics.setAIThrottleLimit(i, 1); physics.setAITopSpeed(i, 1e9); physics.setAIStopCounter(i, 0) end
+                if c and c.isAIControlled and not c.isRetired and not c.isRaceFinished then physics.setAIThrottleLimit(i, 1); physics.setAITopSpeed(i, 1e9); physics.setAIStopCounter(i, 0) end   -- (0.16.1) never a cooldown-lap car
             end)
             overriding[i] = true; releaseControls(i)      -- and any stale control override from before the (re)load
         end

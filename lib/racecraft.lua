@@ -967,7 +967,7 @@ function R.offSwitch(on, gripOn, stockLevel)
     local sim = ac.getSim(); if not sim then return end
     for i = 0, sim.carsCount - 1 do
         local car = ac.getCar(i)
-        if car and car.isAIControlled and not Recovery.isParked(i) then
+        if car and car.isAIControlled and not Recovery.isParked(i) and not car.isRaceFinished then   -- (0.16.1) a finished car was handed back at the flag
             pcall(physics.setExtraAIGrip, i, 1.0)
             if dropAll then
                 pcall(physics.setAIThrottleLimit, i, 1.0); pcall(physics.setAITopSpeed, i, 1e9)   -- (no stop-counter write: Verve holds only parked cars, and AC's own post-incident wait is AC's)
@@ -982,6 +982,29 @@ function R.offSwitch(on, gripOn, stockLevel)
     end
     pcall(ac.log, dropAll and 'Verve: switched off - every car handed back to AC (grip, caution, caps, offset, aggression, level)'
         or 'Verve: AI grip control off - grip handed back to AC')
+end
+-- (0.16.1, community ask: CSP's AI cooldown lap) a car past the flag is handed back ONCE, then Verve writes nothing more to it,
+-- so CSP's cooldown limits (new_behaviour.ini [AI_RACE_COOLDOWN], a throttle limiter) are the only ones left. Called by Verve.lua's
+-- car loop the frame isRaceFinished turns true. Each value only if Verve changed it, never a blanket 1 / 1e9 (that would lift a
+-- CSP limit): the throttle only under a Verve cap, the top speed only if Verve's last write was a cap. Grip / caution / offset /
+-- aggression / level are written every frame by Verve, so those always go back. Recovery releases its own rejoin ramp.
+R.topCap = {}; R.finished = {}   -- (R.finished: the once-per-car latch Verve.lua's car loop reads, set by the hand-back below)
+function R.finishHandBack(i, gripOn, behaviourOn, stockLevel)
+    R.finished[i] = true
+    if gripOn then pcall(physics.setExtraAIGrip, i, 1.0) end
+    if behaviourOn then pcall(physics.setAICaution, i, 1.0) end
+    if cv2.thr[i] or cv2.mvThr[i] then pcall(physics.setAIThrottleLimit, i, 1.0) end
+    if (R.topCap[i] or 1e9) < 1e9 then pcall(physics.setAITopSpeed, i, 1e9) end
+    if (cv2.bg[i] or cv2.mvBg[i]) and cv2.base[i] then pcall(physics.setAIBrakeHint, i, cv2.base[i]) end
+    if R.last[i] then
+        pcall(physics.setAISplineOffset, i, 0, false)
+        local b = R.baseAggr[i]; if b and b >= 0 then pcall(physics.setAIAggression, i, b) end
+        R.last[i].state = 0; R.last[i].yield = false; R.last[i].block = 0
+    end
+    cv2.thr[i] = nil; cv2.mvThr[i] = nil; cv2.bg[i] = nil; cv2.mvBg[i] = nil; R.topCap[i] = nil
+    pcall(Strategy.clear, i, 'finish')
+    pcall(Drivers.handBack, i, stockLevel and stockLevel(i))
+    R.finishN = (R.finishN or 0) + 1
 end
 -- (0.15.1) the top-driver grip (R.TOP_GRIP x gripW) moves at most R.TOP_EASE per second on a moving car: Clear drivers mid-race
 -- gave two unprofiled midfielders TOP_UNPROF's +0.13..0.16 grip in one frame, side by side into the Parabolica, and they collided
@@ -1142,7 +1165,7 @@ local evalBody = function()
                     -- stopped or off-track cars aren't rivals to attack/defend against (the blockage scan and
                     -- the yellow handle them). A repaired car once "attacked" a wreck parked 40 m out in the
                     -- gravel and drove itself off the road doing it.
-                    if ocSpd >= K.BLOCK_SPEED and math.abs(ocLat) <= K.OFFLINE_MAX then
+                    if ocSpd >= K.BLOCK_SPEED and math.abs(ocLat) <= K.OFFLINE_MAX and not oc.isRaceFinished then   -- (0.16.1) a car on its cooldown lap is no rival
                         if d > 0 and d < gapA then
                             gapA = d; aheadSpd = ocSpd; aheadIdx = j
                             local L2 = R.last[j]
@@ -1213,6 +1236,7 @@ local evalBody = function()
             end
         end
         pcall(function() cap = math.min(cap, Recovery.rampCap(i)) end)
+        R.topCap[i] = cap                       -- (0.16.1 cooldown) Verve's last top-speed write: finishHandBack lifts only a real cap
         pcall(function() physics.setAITopSpeed(i, cap) end)
         -- CONVOY v2: throttle only (see the constants). Left alone for a car recovery is driving (its own throttle ramp).
         local thr = 1.0
@@ -2574,6 +2598,7 @@ function R.reset()
     R.fmOnlyN = 0               -- cumulative premise counter: zeroed per SESSION, never per frame
     R.hurtSeen, R.hurtLap = {}, {}
     curOffset = {}; holdSign = {}; holdUntil = {}; pounceT = {}; commitState = {}; commitUntil = {}; gridLat = {}
+    R.topCap = {}; R.finished = {}; R.finishN = 0   -- (0.16.1 cooldown) per session
     letbyT, letbyDone, letbyFor = {}, {}, {}
     cv2 = { clock = nil, back = {}, thr = {}, bg = {}, base = {}, react = {}, lane = nil, depth = 0, crossed = {}, mvThr = {}, mvBg = {}, thrLast = {}, thrTog = {}, thrPrev = {}, thrSnap = {}, cvEng = {}, thrOut = {}, thrSlew = {} }; R.cv2 = cv2
     R.crawlN = 0; R.topV = {}; R.aggV = {}

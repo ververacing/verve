@@ -99,7 +99,11 @@ function E.update(sim, dt)
     local now = os.clock()
     for i = 0, sim.carsCount - 1 do
         local c = ac.getCar(i)
-        if c and c.isAIControlled and not c.isInPitlane and not ((tonumber(R.ERS_SPLIT) or 0) > 0 and i % 2 == 0) then
+        if c and c.isAIControlled and c.isRaceFinished then
+            -- (0.16.1, CSP cooldown lap) past the flag: AC's own program back once (only if Verve set another), then nothing
+            local f = info[i]
+            if f and f.set and f.set ~= f.def then pcall(physics.setMGUKDelivery, i, f.def); f.set = f.def end
+        elseif c and c.isAIControlled and not c.isInPitlane and not ((tonumber(R.ERS_SPLIT) or 0) > 0 and i % 2 == 0) then
             local id = ''; pcall(function() id = ac.getCarID(i) or '' end)
             local f = info[i]
             if f == nil or (f and f.id ~= id) then f = study(i, c, id) end
