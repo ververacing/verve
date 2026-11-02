@@ -723,6 +723,15 @@ local function toggle(label, key, help)
     if help and ui.itemHovered() then ui.setTooltip(help) end
 end
 
+-- (0.16.1) tooltips the main window and the compact quick-settings window (windowQuick) share, so the two never drift apart
+local TIP = {
+    humanErrors = 'One visible mistake per driver every few laps: a late brake and lock-up, a missed apex, or a snap and lift. The rate follows pace, so a rookie errs every 2-3 laps, a midfielder every 4-5, a veteran every 9-15, and the quickest driver in a class less often still. Offs are rare and spins rarer. Formula, Prototype and Hypercar get half those off and spin odds, and on NASCAR and drift cars a mistake never becomes an off or a spin. Race sessions only, never the opening lap, never your own car.',
+    raceStart = 'How the AI launches and takes the first lap. Calm: staggered release and extra spacing into the first corners (the fewest first-lap pile-ups). Racing: half of that - backmarkers go for it, expect the occasional turn-1 tangle, as in real life. Stock: none of it, AC\'s own start.',
+    aboveExpert = 'For when difficulty 100 is not hard enough. Above 100, GT cars at full difficulty get faster still, up to 120. 100 = off (the normal game). Other kinds of car are unchanged.',
+    rescueCrashed = 'On: a stuck or wrecked car is repaired and put back on the track (the default). Off: crashed cars are left to the game: a car that can\'t continue retires, as in stock AC.',
+    strategy = 'Planned manoeuvres on top of the reactive racecraft, per class (a GT driver out-brakes, a formula driver sets it up on the straight, a stock car slingshots). On at any difficulty whenever this is ticked; each car\'s own pace decides how much of the playbook it uses (a Rookie never switchbacks, a Veteran does).',
+}
+
 local function comboFor(tag, previewText, currentKey, opts, onPick)
     ui.setNextItemWidth(120)
     ui.combo(tag, previewText, nil, function()
@@ -827,6 +836,29 @@ local function classOverrideList()
     end
 end
 
+-- (0.16.1, community ask: "would be nice if it showed up on the setup menu") the few settings people change before a race, in
+-- one compact panel: the main window's settings panel (manifest FUNCTION_SETTINGS + FLAGS SETTINGS, the gear icon) and the
+-- setup-screen window if CSP shows one there. Same keys, same tooltips (TIP) as the main window.
+function script.windowQuick()
+    if cspStoodDown then ui.textWrapped('Verve is off: it needs a newer Custom Shaders Patch.'); return end
+    if ui.checkbox('Enable Verve', G.enabled) then setG('enabled', not G.enabled) end
+    toggle('Human errors', 'humanErrors', TIP.humanErrors)
+    do
+        local names = { calm = 'Calm', racing = 'Racing', stock = 'Stock' }
+        ui.text('Race start'); ui.sameLine(150)
+        comboFor('##raceStartQ', names[G.raceStart] or 'Calm', G.raceStart, { 'calm', 'racing', 'stock' }, function(o) setG('raceStart', o) end)
+        if ui.itemHovered() then ui.setTooltip(TIP.raceStart) end
+    end
+    do
+        local ax = ui.slider('Above-expert AI##axQ', tonumber(G.aboveExpert) or 100, 100, 120, '%.0f')
+        if ax ~= G.aboveExpert then setG('aboveExpert', ax) end
+        if ui.itemHovered() then ui.setTooltip(TIP.aboveExpert) end
+    end
+    toggle('Rescue crashed cars', 'rescueCrashed', TIP.rescueCrashed)
+    toggle('Tactics: set-up passes, late-brake lunges, switchbacks', 'strategy', TIP.strategy)
+    ui.textColored('Everything else is in the Verve AI app window.', rgbm(0.6, 0.6, 0.6, 1))
+end
+
 function script.windowMain()
     ui.pushFont(ui.Font.Title)
     ui.textColored('Verve', rgbm(0.98, 0.85, 0.02, 1))   -- brand yellow (#FBDA06 on near-black)
@@ -903,23 +935,23 @@ function script.windowMain()
 
     ui.newLine()
     ui.text('Options')
-    toggle('Human errors', 'humanErrors', 'One visible mistake per driver every few laps: a late brake and lock-up, a missed apex, or a snap and lift. The rate follows pace, so a rookie errs every 2-3 laps, a midfielder every 4-5, a veteran every 9-15, and the quickest driver in a class less often still. Offs are rare and spins rarer. Formula, Prototype and Hypercar get half those off and spin odds, and on NASCAR and drift cars a mistake never becomes an off or a spin. Race sessions only, never the opening lap, never your own car.')
+    toggle('Human errors', 'humanErrors', TIP.humanErrors)
     toggle('Difficulty slider in lap-time steps (90 = +5%, 80 = +10%)', 'sliderCurve', 'AC\'s own level scale is not linear: on race cars 90 is 2% slower than 100 but 80 is 17% slower, and below that the AI gets erratic. On, the slider means measured lap-time steps for the car class you are racing: 100 = expert pace, 90 = +5%, 80 = +10%, 70 = +15%. Off, the raw AC level. Since 0042 the field always follows the slider: a grid whose opponents sit at other levels keeps its spacing and is shifted so the fastest car is at the slider.')
     toggle('Career: scale difficulty across the series', 'careerCurve', 'In AC career events the difficulty meter picks a pace band and each event moves you through it: soft first series, a real fight at the end, never leaving the band. Off = every career event at the meter\'s flat level. (Outside career the meter always applies as set.)')
     do
         local names = { calm = 'Calm', racing = 'Racing', stock = 'Stock' }
         ui.text('Race start'); ui.sameLine(150)
         comboFor('##raceStart', names[G.raceStart] or 'Calm', G.raceStart, { 'calm', 'racing', 'stock' }, function(o) setG('raceStart', o) end)
-        if ui.itemHovered() then ui.setTooltip('How the AI launches and takes the first lap. Calm: staggered release and extra spacing into the first corners (the fewest first-lap pile-ups). Racing: half of that - backmarkers go for it, expect the occasional turn-1 tangle, as in real life. Stock: none of it, AC\'s own start.') end
+        if ui.itemHovered() then ui.setTooltip(TIP.raceStart) end
     end
     do
         local ax = ui.slider('Above-expert AI##ax', tonumber(G.aboveExpert) or 100, 100, 120, '%.0f')
         if ax ~= G.aboveExpert then setG('aboveExpert', ax) end
-        if ui.itemHovered() then ui.setTooltip('For when difficulty 100 is not hard enough. Above 100, GT cars at full difficulty get faster still, up to 120. 100 = off (the normal game). Other kinds of car are unchanged.') end
+        if ui.itemHovered() then ui.setTooltip(TIP.aboveExpert) end
     end
-    toggle('Rescue crashed cars', 'rescueCrashed', 'On: a stuck or wrecked car is repaired and put back on the track (the default). Off: crashed cars are left to the game: a car that can\'t continue retires, as in stock AC.')
+    toggle('Rescue crashed cars', 'rescueCrashed', TIP.rescueCrashed)
     toggle('Repair damage on track', 'repairOnTrack', 'When a crashed car is rescued (above). On: its body is repaired (the default). Off: it keeps its damage and pits for repairs like stock AC.')
-    toggle('Tactics: set-up passes, late-brake lunges, switchbacks', 'strategy', 'Planned manoeuvres on top of the reactive racecraft, per class (a GT driver out-brakes, a formula driver sets it up on the straight, a stock car slingshots). On at any difficulty whenever this is ticked; each car\'s own pace decides how much of the playbook it uses (a Rookie never switchbacks, a Veteran does).')
+    toggle('Tactics: set-up passes, late-brake lunges, switchbacks', 'strategy', TIP.strategy)
     -- (0.16, decision 0032) The text now says what the code actually does: races only (which the session gate
     -- enforces), including one left early (T.abort sends it at the next launch), and the install number, which
     -- the owner chose to keep and describe rather than remove.
