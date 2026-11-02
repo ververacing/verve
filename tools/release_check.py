@@ -36,6 +36,11 @@ THE BAR, each line a thing this script actually tests:
      in results.csv, and a line in LESSONS.md. A default with no A/B is a guess. A NEW R.* switch that defaults
      ON (absent on base, `= true` on head) is a default change too: R.CV_SMOOTH shipped ON on 27 Oct and this item
      printed "no R.* default value differs", because it only compared keys present on both sides.
+     (B5, 1 Nov) Any module table counts (S.LUNGE_MAX_M lives in strategy.lua and was invisible to an R-only pattern),
+     a NEW key counts when it defaults to `true` or to a quoted string (a mode: R.HINT_FADE 'gap'), evidence rows and
+     the LESSONS line match the WHOLE key (REPOSITION_FAR is not NO_REPOSITION), and every counted key must have a line
+     in docs/DECLARED_DEFAULTS.md. A NEW key at a number (S.LUNGE_MAX_M = 12 on its first release) is not counted: its
+     DECLARED_DEFAULTS line plus the director's review is the control for that case.
   5. NO WITHDRAWN CLAIM IN SUPPORT - no switch being defaulted may have WITHDRAWN on its LESSONS line.
   6. IDENTITY GATE - leak_check clean over every file the push would publish.
   7. DOCS CURRENT - docs_check reports no drift.
@@ -544,13 +549,39 @@ def parse_default_changes(diff_text):
     """
     added, removed = {}, {}
     for line in diff_text.splitlines():
-        m = re.match(r"^([+-])(R\.[A-Z0-9_]+)\s*=\s*([^\s;]+)", line)
+        m = KEY_RE.match(line)
         if m:
             (added if m.group(1) == "+" else removed)[m.group(2)] = m.group(3).rstrip(",")
     out = {k: (removed.get(k), v) for k, v in added.items() if k in removed and removed[k] != v}
     if CHECK_NEW_ON:
-        out.update({k: (None, v) for k, v in added.items() if k not in removed and v == "true"})
+        out.update({k: (None, v) for k, v in added.items() if k not in removed and new_counts(v)})
     return out
+
+
+# (B5) a module-level default: column 0 in the diff, any module table (R. racecraft/recovery/tyrehint, S. strategy, D., T., ...)
+KEY_RE = re.compile(r"^([+-])([A-Z][A-Za-z]{0,2}\.[A-Z][A-Z0-9_]*)\s*=\s*([^\s;]+)")
+CHECK_NEW_MODE = True   # (B5) a NEW key at a quoted string (a mode switch) counts; selftest seeds turn this off to prove it bites
+
+
+def new_counts(v):
+    """A NEW key is a default change when it defaults ON (`true`) or to a mode (a quoted string)."""
+    return v == "true" or (CHECK_NEW_MODE and len(v) >= 2 and v[0] in "'\"" and v[-1] == v[0])
+
+
+CHECK_DECLARED = True   # (B5) every counted default needs a docs/DECLARED_DEFAULTS.md line; selftest seeds turn this off
+WHOLE_KEY = True        # (B5) evidence matches the whole key; selftest seeds turn this off to prove it bites
+
+
+def mentions(text, bare):
+    """Does `text` name the switch `bare` as a whole key (not as part of a longer one)?"""
+    if not WHOLE_KEY:
+        return bare in text
+    return re.search(r"(?<![A-Za-z0-9_])" + re.escape(bare) + r"(?![A-Za-z0-9_])", text or "") is not None
+
+
+def declared_keys(text):
+    """docs/DECLARED_DEFAULTS.md: one line per counted default, `- R.KEY = value | evidence ... | LESSONS ...`."""
+    return set(re.findall(r"^\s*-\s*`?([A-Z][A-Za-z]{0,2}\.[A-Z][A-Z0-9_]*)", text or "", re.M))
 
 
 def check_evidence(rep, rows, base, head):
@@ -559,8 +590,12 @@ def check_evidence(rep, rows, base, head):
     if changed is None:
         rep.refuse("evidence per default", "could not read the diff")
         return
+    check_evidence_on(rep, rows, changed, base)
+
+
+def check_evidence_on(rep, rows, changed, base="base"):
     if not changed:
-        rep.ok("evidence per default", "no R.* default value differs from %s" % base)
+        rep.ok("evidence per default", "no module default value differs from %s" % base)
         return
     try:
         import io
@@ -568,12 +603,23 @@ def check_evidence(rep, rows, base, head):
     except OSError:
         rep.refuse("evidence per default", "could not read LESSONS.md")
         return
+    try:
+        declared = declared_keys(io.open(os.path.join(DOCS, "DECLARED_DEFAULTS.md"), encoding="utf-8", errors="replace").read())
+    except OSError:
+        declared = None
     for sw, (old, new) in sorted(changed.items()):
         bare = sw.split(".", 1)[1]
-        n = sum(1 for r in rows if bare in (r.get("arm") or ""))
-        cited = bare in lessons
-        withdrawn = bool(re.search(r"WITHDRAWN[^\n]*" + re.escape(bare), lessons)
-                         or re.search(re.escape(bare) + r"[^\n]*WITHDRAWN", lessons))
+        if declared is None:
+            rep.refuse("default %s" % bare, "could not read docs/DECLARED_DEFAULTS.md")
+            continue
+        if CHECK_DECLARED and sw not in declared:
+            rep.fail("default %s" % bare, "%s -> %s | not in docs/DECLARED_DEFAULTS.md (every default change needs a line there)"
+                     % ("(new switch)" if old is None else old, new))
+            continue
+        n = sum(1 for r in rows if mentions(r.get("arm") or "", bare))
+        cited = mentions(lessons, bare)
+        wk = (r"(?<![A-Za-z0-9_])" + re.escape(bare) + r"(?![A-Za-z0-9_])") if WHOLE_KEY else re.escape(bare)
+        withdrawn = bool(re.search(r"WITHDRAWN[^\n]*" + wk, lessons) or re.search(wk + r"[^\n]*WITHDRAWN", lessons))
         detail = "%s -> %s | %d harness rows mention it | LESSONS: %s" % (
             "(new switch)" if old is None else old, new, n, "yes" if cited else "NO LINE")
         if withdrawn:
@@ -690,6 +736,35 @@ def rule_checks():
         f.append("an off-by-default or unchanged key was reported as a default change: %s" % sorted(seen))
     if seen.get("R.MOVED") != ("1", "2"):
         f.append("a changed default value was missed: %s" % sorted(seen))
+    # (B5) an S.* key (strategy.lua), a NEW string mode, a new number (not counted), and a whole-key near-miss
+    seen = parse_default_changes("-S.LUNGE_OVL = 0.5\n+S.LUNGE_OVL = 0.3\n+R.NEW_MODE = 'gap'  -- a mode\n+S.NEW_NUM = 12\n")
+    if seen.get("S.LUNGE_OVL") != ("0.5", "0.3"):
+        f.append("an S.* default change was missed: %s" % sorted(seen))
+    if seen.get("R.NEW_MODE") != (None, "'gap'"):
+        f.append("a NEW string-mode default was not reported as a default change: %s" % sorted(seen))
+    if "S.NEW_NUM" in seen:
+        f.append("a NEW numeric key was counted (its control is the DECLARED_DEFAULTS line + review): %s" % sorted(seen))
+    if mentions('{"REPOSITION_FAR":4}', "REPOSITION") or not mentions('{"NO_REPOSITION":true}', "NO_REPOSITION") \
+            or mentions('{"NO_REPOSITION":true}', "REPOSITION"):
+        f.append("evidence matching is not whole-key (REPOSITION_FAR / NO_REPOSITION near-miss)")
+    if "R.HINT_SHIP" not in declared_keys("- R.HINT_SHIP = true | evidence ...\n") \
+            or "R.UNDECLARED" in declared_keys("- R.HINT_SHIP = true | mentions R.UNDECLARED in passing\n"):
+        f.append("the DECLARED_DEFAULTS reader is wrong (a declared key missed, or a key named mid-line taken as declared)")
+    r = Report()
+    saved_docs = globals()["DOCS"]
+    try:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            io_ = __import__("io")
+            io_.open(os.path.join(td, "LESSONS.md"), "w", encoding="utf-8").write("- R.UNDECLARED: a lesson\n")
+            io_.open(os.path.join(td, "DECLARED_DEFAULTS.md"), "w", encoding="utf-8").write("- R.OTHER = true | x\n")
+            globals()["DOCS"] = td
+            ev_rows = [{"arm": '{"racecraft": {"UNDECLARED": true}}'}] * 6
+            check_evidence_on(r, ev_rows, {"R.UNDECLARED": (None, "true")})
+    finally:
+        globals()["DOCS"] = saved_docs
+    if not any(v == "FAIL" and "UNDECLARED" in n for v, n, d in r.rows):
+        f.append("an undeclared default change was not failed: %s" % r.rows)
 
     # PACE: absent, empty, zero or negative pace must REFUSE, never read as "0.0 BETTER". nums() coerces a
     # missing pace to 0.0 and pace_best_s is higher-worse, so a 0.0 would print mean < lo = BETTER - which is
@@ -771,7 +846,7 @@ def selftest():
     print("  %s" % ("every rule holds" if not fails else "RULES BROKEN"))
 
     print("\n=== seeded rule defects (untrusted until each FAILS rule_checks) ===")
-    global MIN_GATING_ARM, INTERLEAVE_MAX_STREAK, DEFAULT_HEAD, CHECK_NEW_ON, SUITE_RE
+    global MIN_GATING_ARM, INTERLEAVE_MAX_STREAK, DEFAULT_HEAD, CHECK_NEW_ON, SUITE_RE, CHECK_NEW_MODE, WHOLE_KEY, KEY_RE, CHECK_DECLARED
     allok = True
     seeds = [
         ("a gating cell dropped from the requirement", "pop_sgf"),
@@ -784,10 +859,15 @@ def selftest():
         ("a new default-ON switch ignored", "newon"),
         ("pc2 deviation leaves sgf gating", "pc2keep"),
         ("sgfnk read as sgf by the label grammar", "nkre"),
+        ("(B5) a new string-mode default ignored", "newmode"),
+        ("(B5) evidence matched by substring again", "substr"),
+        ("(B5) only R.* keys parsed again", "ronly"),
+        ("(B5) DECLARED_DEFAULTS not enforced", "nodecl"),
     ]
     for name, kind in seeds:
         saved_needed, saved_chars = dict(NEEDED_CELLS), dict(CHARACTER_CELLS)
         saved = (MIN_GATING_ARM, INTERLEAVE_MAX_STREAK, DEFAULT_HEAD, CHECK_NEW_ON, SUITE_RE)
+        saved_b5 = (CHECK_NEW_MODE, WHOLE_KEY, KEY_RE, CHECK_DECLARED)
         saved_machine = dict(MACHINE_CELLS)
         if kind == "pop_sgf":
             NEEDED_CELLS.pop("sgf", None)
@@ -810,9 +890,18 @@ def selftest():
             MACHINE_CELLS["pc2"] = ("sgf", "sgf")
         elif kind == "nkre":
             SUITE_RE = re.compile(r"^(rc\d+[a-z]?)_(spa12|spa|bcn|mon|sgf)(?:nk)?(?:_(on|off))?_\d+$")
+        elif kind == "newmode":
+            CHECK_NEW_MODE = False
+        elif kind == "substr":
+            WHOLE_KEY = False
+        elif kind == "nodecl":
+            CHECK_DECLARED = False
+        elif kind == "ronly":
+            KEY_RE = re.compile(r"^([+-])(R\.[A-Z0-9_]+)\s*=\s*([^\s;]+)")
         else:
             CHECK_NEW_ON = False
         got = rule_checks()
+        CHECK_NEW_MODE, WHOLE_KEY, KEY_RE, CHECK_DECLARED = saved_b5
         NEEDED_CELLS.clear(); NEEDED_CELLS.update(saved_needed)
         CHARACTER_CELLS.clear(); CHARACTER_CELLS.update(saved_chars)
         MIN_GATING_ARM, INTERLEAVE_MAX_STREAK, DEFAULT_HEAD, CHECK_NEW_ON, SUITE_RE = saved
