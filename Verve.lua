@@ -592,7 +592,7 @@ function script.update(dt)
                 local nowc = os.clock()
                 if (drsCd[i] or 0) < nowc then
                     local c = ac.overrideCarControls(i)
-                    if c then c.drs = true end
+                    if c then c.drs = true; c.kers = -1; c.mguhMode = -1 end   -- KERS / MGU-H: leave the car's own (struct defaults undocumented)
                     drsCd[i] = nowc + 1.0
                 end
             end

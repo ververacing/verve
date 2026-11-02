@@ -188,7 +188,9 @@ R.dropFlips = 0            -- diagnostics: drops that needed a second attempt to
 -- full lock, 0 km/h for 12-20 s, then a lurch off the road. That is why 253 of 254 repositioned cars
 -- on the F1 grid never rejoined, and it means our own recovery driving never had drive either.
 -- Per the API docs: steer = math.huge leaves AC's steering, gear 0 keeps AC's gear, clutch 1 (pedal up)
--- leaves AC's clutch, and gas/brake/handbrake 0 contribute nothing to the max-combine.
+-- leaves AC's clutch, and gas/brake/handbrake 0 contribute nothing to the max-combine. kers Skip (-1) and
+-- mguhMode -1 leave AC's own; the struct's defaults for those two are undocumented, so they are set explicitly.
+-- headlights / horn false: no light toggle or horn left latched.
 local function releaseControls(i)
     if not overriding[i] then return end
     overriding[i] = nil
@@ -197,6 +199,7 @@ local function releaseControls(i)
         if c then
             c.steer = math.huge; c.requestedGearIndex = 0; c.clutch = 1
             c.gas = 0; c.brake = 0; c.handbrake = 0
+            c.kers = -1; c.mguhMode = -1; c.headlights = false; c.horn = false
         end
     end)
 end
