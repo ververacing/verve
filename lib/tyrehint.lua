@@ -77,11 +77,24 @@ local function multFor(i)
     if not top then return 1.0 end
     local meter = tonumber(Career.meter)
     if not meter then return 1.0 end           -- level unknown: Verve stands down (as difficulty.lua does)
-    local hl = meter
     local above = tonumber(R.HINT_ABOVE) or 100
-    if above > 100 then
-        local own = Difficulty.levelFor(i) or Difficulty.stockLevel(i)
-        if own and own * 100 >= 99.5 then hl = hl + (above - 100) end
+    local hl
+    if Career.active and Difficulty.CAREER_CURVE then
+        -- (0.16.2) CAREER: the hint follows the FIELD's career base level (how far into the career the event is),
+        -- not the launcher meter, so an early event low on the ramp is not given the full clean-air hint. Above-expert
+        -- is field-wide here (the base is field-wide), so no per-car own >= 99.5 test.
+        local base = Difficulty.careerBase(i)
+        if not base then return 1.0 end
+        hl = base * 100
+        if above > 100 then hl = hl + (above - 100) end
+    else
+        -- outside career: unchanged from 0.16.1 (rc018 evidence). The meter is the truth; Above-expert only lifts a car
+        -- already at the top of the slider.
+        hl = meter
+        if above > 100 then
+            local own = Difficulty.levelFor(i) or Difficulty.stockLevel(i)
+            if own and own * 100 >= 99.5 then hl = hl + (above - 100) end
+        end
     end
     local lo = tonumber(R.HINT_RAMP_LO) or 90
     if hl <= lo then return 1.0 end

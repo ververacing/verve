@@ -113,10 +113,7 @@ local function compute(i)
     local iniLevel = Career.carLevels[i] or Career.meter               -- launcher's number for this car (0..100+)
     if not iniLevel then return nil end
     if Career.active and D.CAREER_CURVE then
-        local startPct, endPct = bandFor(Career.meter or iniLevel)   -- (0.16) the car's own level if the
-                                                                     -- race-wide one was never readable
-        local pct = startPct + (endPct - startPct) * (Career.ramp or 0)
-        local base = pctToLevel(pct, (curveFor(i)))
+        local base = D.careerBase(i)   -- (0.16.2) the band/ramp base; the SAME maths lib/tyrehint's career hint reads
         -- keep the event's own relative spread between opponents (86..88 => +-1%), measured against the grid's
         -- own average so a harness-forced flat grid comes out at exactly the band level
         local sum, cnt = 0, 0
@@ -168,6 +165,18 @@ local function compute(i)
         D.sliderOverride = nil
     end
     return math.max(LEVEL_MIN, math.min(1.2, lvl / 100.0))
+end
+
+-- (0.16.2 career-hint) the band/ramp BASE level for car i, before the per-car spread (rel). The ONE place the band/curve
+-- maths lives: compute() calls this for its career base, and lib/tyrehint multFor reads it for the career-hint ramp. nil
+-- outside a career-curve event. Field-wide in a single-make career (curveFor(i) is the field's class): the pre-spread base.
+function D.careerBase(i)
+    if not (Career.active and D.CAREER_CURVE) then return nil end
+    local m = Career.meter or Career.carLevels[i]            -- compute()'s fallback when the race-wide meter was unreadable
+    if not m then return nil end
+    local startPct, endPct = bandFor(m)
+    local pct = startPct + (endPct - startPct) * (Career.ramp or 0)
+    return pctToLevel(pct, (curveFor(i)))
 end
 
 -- the level car i should run at this session (nil = leave AC's own)
