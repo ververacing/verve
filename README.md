@@ -41,6 +41,8 @@ racing, on **any** car and track. Toggle and tune everything in the in‑game pa
 
 In game, open the **Verve AI** app from the app sidebar and enable it. You can review each car's
 detected class and set per‑car levels on the grid before the lights.
+The settings button on the Verve AI window opens a compact panel with the main switches; everything else is in
+the app window.
 
 ## Before you race (three things that matter)
 1. **The difficulty slider is real.** 80 is a beginner field, 90 an intermediate one, 100 expert pace.
@@ -94,6 +96,10 @@ make sure you copied the whole `Verve` folder, `lib` included.
   lower for a more human, on‑the‑edge feel; above 1.20 for extra stick.
 - The **aggression slider** in Quick Race is respected — Verve uses it as the racecraft baseline for cars
   without a driver (a car with a driver uses that driver's aggression).
+- **Above-expert AI** (100 to 120) is for when difficulty 100 is not hard enough. Above 100, GT3 cars at full
+  difficulty get faster still. 100 = off (the normal game). Other kinds of car are unchanged.
+- **Rescue crashed cars** is on by default: a stuck or wrecked car is repaired and put back on the track. Off
+  leaves crashed cars to the game, and a car that can't continue retires, as in stock AC.
 - Settings and per‑car overrides are stored via CSP app storage, so **updates never wipe your
   tuning**.
 

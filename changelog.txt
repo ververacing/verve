@@ -1,3 +1,18 @@
+0.16.1
+- GT3 cars (cars tagged GT3 in their data) are quicker at high difficulty. Above difficulty 90, a GT3 car with clear road
+  ahead trusts its tyres more, and it eases back to normal as it closes on another car. In our tests at difficulty 100
+  (18 GT3 cars, 12 laps), the AI's best laps were about 1.6 s quicker at Monza and about 4.7 s quicker at Spa, with
+  contact and incidents within the 0.16.0 range. Other kinds of car are unchanged.
+- New "Above-expert AI" slider, for when difficulty 100 is not hard enough. Above 100, GT3 cars at full difficulty get
+  faster still, up to 120. 100 = off.
+- Cooldown lap: after the chequered flag Verve hands each car back to the game once and then leaves it alone, so the
+  cooldown lap runs as it does in stock AC.
+- New "Rescue crashed cars" switch. On (the default): a stuck or wrecked car is repaired and put back on the track, as
+  before. Off: crashed cars are left to the game, and a car that can't continue retires, as in stock AC.
+- Quick settings: the settings button on the Verve AI window opens a compact panel with Enable Verve, Human errors, Race
+  start, Above-expert AI, Rescue crashed cars and Tactics. The tooltips match the main window.
+- Career: an event that gives no AI level no longer causes an error in the career info line.
+
 0.16.0
 - Smoother starts: on the opening lap the AI no longer snaps on and off the throttle in the pack behind the leader. It
   still holds back where it should, it just eases off and back on instead of stepping.
