@@ -10,6 +10,7 @@ local Update    = require('lib.update')
 local Drivers   = require('lib.drivers')
 local Troublespots = require('lib.troublespots')
 local Feed      = require('lib.feed')
+local Presets   = require('lib.presets')
 local Career    = require('lib.career')       -- recognises AC career events; reads the launcher's difficulty numbers
 local Difficulty = require('lib.difficulty')  -- makes those numbers real (AC ignores them on some installs)
 local Telemetry = require('lib.telemetry')
@@ -178,6 +179,11 @@ local function commitGlobals() for k in pairs(DEFAULTS) do S[k] = G[k] end end
 local function revertGlobals() for k in pairs(DEFAULTS) do G[k] = S[k] end end
 local function resetGlobals() for k, v in pairs(DEFAULTS) do G[k] = v; if S.autosave then S[k] = v end end end
 local function globalsDirty() for k in pairs(DEFAULTS) do if G[k] ~= S[k] then return true end end return false end
+-- (presets) one UI-state table (name buffer + selected name), a once-per-session flag for the PRESET_LOAD
+-- harness hook, and the live snapshot the diag ev:settings read-back reports (Presets.KEYS = 15 preset keys)
+local presetUI = { name = '', sel = nil }
+local presetLoaded = false
+local function gsnapshot() local t = {}; for _, k in ipairs(Presets.KEYS) do t[k] = G[k] end; return t end
 
 -- detect other AI-control mods that also drive physics.setExtraAIGrip
 local otherAI = nil
@@ -215,6 +221,7 @@ local function sessionReset(restart)
     pcall(Difficulty.reset)
     frameMs, frameN, luaErrors, firstErrAt = 0, 0, 0, nil; errSeen = { n = 0 }
     harnessStarted, harnessStartT, autopilotArmed, harnessT, harnessEndT = false, 0, false, 0, 0
+    presetLoaded = false                      -- (presets) re-apply a harness PRESET_LOAD once per session
     pcall(Classes.reset)
     pcall(TyreHint.reset)                     -- (audit A3) per-car hint state is keyed by index: clear it per session
     pcall(Human.reset)            -- per-track distances
@@ -288,6 +295,14 @@ function script.update(dt)
             if type(Harness.human) == 'table' then for k, v in pairs(Harness.human) do hv(Human, k, v) end end
             if type(Harness.strategy) == 'table' then for k, v in pairs(Harness.strategy) do hv(Strategy, k, v) end end
             if Diag and Harness.label then Diag.label = tostring(Harness.label) end
+        end
+        -- (presets test hook, harness-only) load a named preset once per session, SESSION-ONLY (G only, never
+        -- setG, so a harness run never writes the person's stored settings/presets). Racecraft.PRESET_LOAD is
+        -- nil in normal play, so this is inert outside the harness.
+        if Racecraft.PRESET_LOAD and not presetLoaded then
+            presetLoaded = true
+            local p = Presets.load(tostring(Racecraft.PRESET_LOAD), DEFAULTS)
+            if p then for k, v in pairs(p) do G[k] = v end end
         end
         -- AC loads to a pre-session screen and waits for the Drive button; nothing (not even the AI grid)
         -- moves until it's pressed. Press it a few seconds after load, and keep trying until it takes.
@@ -637,6 +652,7 @@ function script.update(dt)
             ovalOneway = Racecraft.OVAL_ONEWAY, ovalChecked = Racecraft.ovalChecked,
             peak = Troublespots.peakHeat(), storeLen = Troublespots.storeLen, saveOk = Troublespots.lastSaveOk,
             per = diagPer, rc = Racecraft.last, recState = Recovery.stateOf, cv2 = Racecraft.cv2, episodes = Strategy.episodes,
+            gsnap = gsnapshot,   -- (presets) diag calls this ONCE at its one-shot for the ev:settings read-back (no per-frame table)
             recentDrops = Recovery.recentDrops, dropN = Recovery.dropN, dropOK = Recovery.dropOK, dropFailN = Recovery.dropFailN, dropFailClear = Recovery.dropFailClear, boxRescueN = Recovery.boxRescueN, boxSeenN = Recovery.boxSeenN, boxTryN = Recovery.boxTryN, boxOkN = Recovery.boxOkN, dropsOff = Recovery.dropsOff, fuelLoadN = Fuel.loadN, fuelBoxN = Fuel.boxFixN, fuelReN = Fuel.boxReN,
             mvN = Strategy.attempts, mvOK = Strategy.ok, mvT = Strategy.byTypeString(), gateN = Recovery.gateMoves,
             fmOnlyN = Racecraft.fmOnlyN,     -- premise counter for R.FASTER_MARGIN_X: 0 by construction at X=1.0
@@ -918,6 +934,27 @@ function script.windowMain()
             ui.textColored('all saved', rgbm(0.5, 0.75, 0.45, 1))
         end
     end
+    ui.newLine()
+
+    -- Presets: named snapshots of the global settings below (NOT per-car overrides)
+    ui.text('Presets'); ui.sameLine(150)
+    presetUI.name = ui.inputText('##presetName', presetUI.name)
+    ui.sameLine()
+    if ui.button('Save as##preset') and presetUI.name ~= '' then
+        Presets.save(presetUI.name, G); presetUI.sel = presetUI.name; presetUI.name = ''
+    end
+    presetUI.sel = presetUI.sel or Presets.DEFAULT
+    comboFor('##presetPick', presetUI.sel, presetUI.sel, Presets.names(), function(o) presetUI.sel = o end)
+    ui.sameLine()
+    if ui.button('Load##preset') then
+        local p = Presets.load(presetUI.sel, DEFAULTS)
+        if p then for k, v in pairs(p) do setG(k, v) end end
+    end
+    ui.sameLine()
+    if ui.button('Delete##preset') and presetUI.sel ~= Presets.DEFAULT then
+        Presets.delete(presetUI.sel); presetUI.sel = Presets.DEFAULT
+    end
+    if ui.itemHovered() then ui.setTooltip('Named snapshots of the settings below. Presets do NOT include per-car driver or class overrides.') end
     ui.newLine()
 
     if Watch.detail ~= '' then
