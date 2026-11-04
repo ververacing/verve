@@ -165,7 +165,7 @@ function T.update(sim, dt)
             if hintTick then
                 -- never the player's car (car 0), even on the harness autopilot, where it reads isAIControlled (smoke sm16 2026-10-31)
                 local m = (ship and i ~= 0) and multFor(i) or 1.0
-                if m > 1.0005 then
+                if m > 1.0005 or (R.TYRE_HINT_FORCE and m < 0.9995) then
                     local tA, tP, side, ttc = R.timeGapAhead(i)
                     local f = 0
                     if not side then
