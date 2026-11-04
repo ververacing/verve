@@ -174,7 +174,13 @@ local G = {}
 for k in pairs(DEFAULTS) do G[k] = S[k] end
 for _, k in ipairs(CORE) do G[k] = true end   -- core is always on (a harness override can still flip it for a run)
 
-local function setG(k, v) G[k] = v; if S.autosave then S[k] = v end end
+-- (fix 2026-11-04) never persist to the owner's store under the harness: a windowed harness run renders the
+-- settings sliders, which fire setG, so without this a --settings / preset test would overwrite the owner's S.
+local function setG(k, v) G[k] = v; if S.autosave and not Harness then S[k] = v end end
+-- (fix 2026-11-04) epsilon guard for ui.slider -> setG: a slider reads its value back with float drift (0.9 ->
+-- 0.89999998), so a bare `v ~= G[k]` is true every frame the window is open and re-saves a drifted float. Only
+-- commit a slider move larger than the drift.
+local function setGnum(k, v) if math.abs((tonumber(v) or 0) - (tonumber(G[k]) or 0)) > 1e-4 then setG(k, v) end end
 local function commitGlobals() for k in pairs(DEFAULTS) do S[k] = G[k] end end
 local function revertGlobals() for k in pairs(DEFAULTS) do G[k] = S[k] end end
 local function resetGlobals() for k, v in pairs(DEFAULTS) do G[k] = v; if S.autosave then S[k] = v end end end
@@ -886,7 +892,7 @@ function script.windowQuick()
     end
     do
         local ax = ui.slider('Above-expert AI##axQ', tonumber(G.aboveExpert) or 100, 100, 120, '%.0f')
-        if ax ~= G.aboveExpert then setG('aboveExpert', ax) end
+        setGnum('aboveExpert', ax)
         if ui.itemHovered() then ui.setTooltip(TIP.aboveExpert) end
     end
     toggle('Rescue crashed cars', 'rescueCrashed', TIP.rescueCrashed)
@@ -1002,7 +1008,7 @@ function script.windowMain()
     end
     do
         local ax = ui.slider('Above-expert AI##ax', tonumber(G.aboveExpert) or 100, 100, 120, '%.0f')
-        if ax ~= G.aboveExpert then setG('aboveExpert', ax) end
+        setGnum('aboveExpert', ax)
         if ui.itemHovered() then ui.setTooltip(TIP.aboveExpert) end
     end
     toggle('Rescue crashed cars', 'rescueCrashed', TIP.rescueCrashed)
@@ -1029,15 +1035,15 @@ function script.windowMain()
     ui.newLine()
     ui.text('Tuning')
     local iv = ui.slider('Variability intensity##iv', G.intensity, 0.0, 1.5, '%.2f')
-    if iv ~= G.intensity then setG('intensity', iv) end
+    setGnum('intensity', iv)
     if ui.itemHovered() then ui.setTooltip('Per-driver spread: pace/consistency differences AND how much drivers vary in aggression, so the field isn\'t uniform'
         .. (Human.MV_INTENSITY and ', AND how often and how large their visible mistakes are' or '')
         .. '. 0 = robotic/identical, 0.5 = subtle (default), 1.5 = dramatic.') end
     local rc = ui.slider('Racecraft intensity##rc', G.rcIntensity, 0.0, 1.5, '%.2f')
-    if rc ~= G.rcIntensity then setG('rcIntensity', rc) end
+    setGnum('rcIntensity', rc)
     if ui.itemHovered() then ui.setTooltip('How hard the field attacks/defends. 0 = passive, 0.7 = default, 1.5 = elbows out.') end
     local bg = ui.slider('Base AI grip##bg', G.baseGrip, 0.85, 1.50, '%.2f')
-    if bg ~= G.baseGrip then setG('baseGrip', bg) end
+    setGnum('baseGrip', bg)
     if ui.itemHovered() then ui.setTooltip('Grip the AI has for its own racing line. 1.20 = stock AC AI (default; line speeds are calibrated for this). Below that = more human/on-the-edge but they wash wide if too low. Above 1.20 = extra stick + speed (keeps them planted / competitive at lower difficulty). Pace also scales with the race difficulty % (cars without a driver; a driver sets its own pace).') end
 
     ui.newLine()
