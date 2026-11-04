@@ -183,6 +183,8 @@ local function globalsDirty() for k in pairs(DEFAULTS) do if G[k] ~= S[k] then r
 -- harness hook, and the live snapshot the diag ev:settings read-back reports (Presets.KEYS = 15 preset keys)
 local presetUI = { name = '', sel = nil }
 local presetLoaded = false
+local presetSaved = false
+local presetDeleted = false
 local function gsnapshot() local t = {}; for _, k in ipairs(Presets.KEYS) do t[k] = G[k] end; return t end
 
 -- detect other AI-control mods that also drive physics.setExtraAIGrip
@@ -222,6 +224,8 @@ local function sessionReset(restart)
     frameMs, frameN, luaErrors, firstErrAt = 0, 0, 0, nil; errSeen = { n = 0 }
     harnessStarted, harnessStartT, autopilotArmed, harnessT, harnessEndT = false, 0, false, 0, 0
     presetLoaded = false                      -- (presets) re-apply a harness PRESET_LOAD once per session
+    presetSaved = false                       -- (presets) re-save a harness PRESET_SAVE once per session
+    presetDeleted = false                     -- (presets) re-delete a harness PRESET_DELETE once per session
     pcall(Classes.reset)
     pcall(TyreHint.reset)                     -- (audit A3) per-car hint state is keyed by index: clear it per session
     pcall(Human.reset)            -- per-track distances
@@ -303,6 +307,17 @@ function script.update(dt)
             presetLoaded = true
             local p = Presets.load(tostring(Racecraft.PRESET_LOAD), DEFAULTS)
             if p then for k, v in pairs(p) do G[k] = v end end
+        end
+        -- (presets test hooks, harness-only) save the live globals as a named preset, or delete one, once per
+        -- session, so a later AC session can prove the ac.storage round-trip and the test cleans up after itself.
+        -- Racecraft.PRESET_SAVE / PRESET_DELETE are nil in normal play, so both are inert outside the harness.
+        if Racecraft.PRESET_SAVE and not presetSaved then
+            presetSaved = true
+            Presets.save(tostring(Racecraft.PRESET_SAVE), G)
+        end
+        if Racecraft.PRESET_DELETE and not presetDeleted then
+            presetDeleted = true
+            Presets.delete(tostring(Racecraft.PRESET_DELETE))
         end
         -- AC loads to a pre-session screen and waits for the Drive button; nothing (not even the AI grid)
         -- moves until it's pressed. Press it a few seconds after load, and keep trying until it takes.
