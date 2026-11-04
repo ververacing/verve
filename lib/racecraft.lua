@@ -489,6 +489,13 @@ R.RE_PULLOUT = false          -- lap 2+: the rear-end guard is trimmed to CV.RS_
 R.PASS_COMMIT_LAP = 0         -- >0: PASS_COMMIT's commit (paceEdge) on MEASURED pace, any car: my best lap beats the car ahead's last lap
                               -- (else its best) by this fraction (0.02 = 2 %). Lap 1 past OPENLAP_TAIL on
 R.CAUTION_DEFEND = -0.25      -- defend relief from lap 2 (laps 0-1 keep K.CAUTION_DEFEND); x intensity => -0.175 applied (the rubber band)
+R.DEFEND_V2 = false           -- (2026-11-03, phantom-defend fix) replace the defend trigger's "not slower by FASTER_MARGIN"
+                              -- speed term with a GENUINE-THREAT test: defend only if the car behind is CLOSING (gapB shrank
+                              -- over DEFEND_CLOSE_WIN) or genuinely FASTER (> spd + FASTER_MARGIN), same lap, not pitting, not
+                              -- recovering. Default off = byte-for-byte the shipped 0.16.1 trigger. Changes only WHICH frames
+                              -- enter the defend state; the committed-state machine, hold and relief are untouched.
+R.DEFEND_CLOSE_WIN = 0.5      -- s, window the DEFEND_V2 closing test measures gapB reduction over
+R.DEFEND_CLOSE_MIN = 0.4      -- m, min gapB reduction over that window to count as "closing" (m()-scaled at the use site)
 R.PACK_STRETCH = 0.14         -- pack-leader stretch from lap 2 (laps 0-1 keep K.PACK_STRETCH)
 R.ISO_PACE_ALL = false        -- ISO_PACE's exemption from the lone ease-off for EVERY car with a car within CV.ISO_REACH_M ahead (not only tier 2)
 R.STEER_FRAC = true           -- DEFAULT 0.15. pounce and TOW_ATTACK read the wheel angle as a fraction of lock (R.steerIn) instead of raw degrees
@@ -713,6 +720,7 @@ local gridLat = {}          -- each car's captured starting-lane lateral, for th
 local holdSign, holdUntil = {}, {}
 local pounceT = {}
 local commitState, commitUntil = {}, {}
+local defGbT, defGbV, defGbI = {}, {}, {}   -- (R.DEFEND_V2) per-car lagged gapB sample + the behind car it was taken against; V2-on only
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
 local function sgn(x) if x > 0.1 then return 1 elseif x < -0.1 then return -1 else return 0 end end
 local function hash01(n)
@@ -1529,8 +1537,27 @@ local evalBody = function()
             R.fmOnlyN = R.fmOnlyN + 1
         end
         local behindLat = behindIdx >= 0 and latOf(ac.getCar(behindIdx).position) or 0
-        local rawDefend = (gapB < defendGap and behindSpd > spd - K.FASTER_MARGIN
-                           and math.abs(behindLat) < K.OFFLINE_MAX)   -- ignore a car miles off-line
+        local rawDefend
+        if R.DEFEND_V2 then
+            -- (R.DEFEND_V2) genuine-threat gate: the car behind must be CLOSING or genuinely FASTER, same lap, not
+            -- pitting, not recovering. Replaces the shipped "not slower by FASTER_MARGIN" term that fires for an
+            -- equal-speed follower (phantom defend; pc2/defend_instrument_result_20261103.md: ~48% of defend-frames).
+            local nc = os.clock()
+            local pv = (defGbI[i] == behindIdx) and defGbV[i] or nil   -- trust the sample only if the SAME car is still behind
+            local closingB = pv and (pv - gapB) >= m(R.DEFEND_CLOSE_MIN) or false   -- a new car slotting in closer is NOT "closing"
+            if not defGbT[i] or defGbI[i] ~= behindIdx or (nc - defGbT[i]) >= R.DEFEND_CLOSE_WIN then
+                defGbT[i] = nc; defGbV[i] = gapB; defGbI[i] = behindIdx
+            end
+            local genuine = behindIdx >= 0
+                and (closingB or behindSpd > spd + K.FASTER_MARGIN)
+                and Recovery.lapsOf(behindIdx) == myLap
+                and not ac.getCar(behindIdx).isInPitlane
+                and not (Recovery.stateOf(behindIdx) or R.NOSTATE).rec
+            rawDefend = (gapB < defendGap and math.abs(behindLat) < K.OFFLINE_MAX and genuine)
+        else
+            rawDefend = (gapB < defendGap and behindSpd > spd - K.FASTER_MARGIN
+                         and math.abs(behindLat) < K.OFFLINE_MAX)   -- ignore a car miles off-line (shipped 0.16.1)
+        end
 
         -- resolve the COMMITTED state (see COMMIT_* notes): a genuine read (re)commits and refreshes
         -- the hold; otherwise coast the last decision until a wider release threshold clears it.
