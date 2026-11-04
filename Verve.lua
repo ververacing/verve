@@ -135,6 +135,7 @@ local DEFAULTS = {
     classV2 = false,     -- harness switch (lib/classes.lua M.DETECT_V2): the v2 car-class detector (2026-09-30 inventory: 97 % vs 53 %)
     aboveExpert = 100,   -- (0.16.x, lib/tyrehint.lua R.HINT_ABOVE) the "past 100" control: 100 = off; up to 120 raises the GT clean-air hint
     rescueCrashed = true, -- (0.16.1, community ask; lib/recovery.lua R.NO_REPOSITION) off: Verve never moves, repairs or protects a crashed car
+    smarterDives = false, -- (0.16.2, lgate_follow 2026-11-03; lib/strategy.lua S.LUNGE_MAX_M) on: AI only dives from <=12 m (fewer hopeless lunges, tighter apex, a little more contact). off (default) = 0.16.1
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
 
@@ -153,6 +154,7 @@ local S = ac.storage({
     classV2 = false,
     aboveExpert = 100,
     rescueCrashed = true,
+    smarterDives = false,
     autosave = true, schema = 1,
 })
 -- settings migration: 0.12 made crash repair + trouble spots core (they were opt-in experiments; a day-long
@@ -519,6 +521,8 @@ function script.update(dt)
     Racecraft.ENABLED     = G.racecraft
     Racecraft.START_X     = ({ calm = 1.0, racing = 0.5, stock = 0.0 })[G.raceStart] or 1.0
     Strategy.ENABLED      = G.strategy ~= false
+    Strategy.LUNGE_MAX_M  = G.smarterDives and 12 or nil   -- (smarterDives, lgate_follow 2026-11-03) on: dive gate at 12 m centre-to-centre; off (default) = nil = 0.16.1 (no cap)
+    Strategy.LUNGE_OVL    = G.smarterDives and -9 or 0.5   -- gate overlap floor when on; 0.5 default when off (unused while LUNGE_MAX_M is nil)
     Racecraft.INTENSITY   = G.rcIntensity
     Racecraft.VARIABILITY = G.intensity     -- spreads per-driver aggression across the field
     Racecraft.HINT_ABOVE  = tonumber(G.aboveExpert) or 100   -- (lib/tyrehint.lua) the Above-expert slider; 100 = off
@@ -729,6 +733,7 @@ local TIP = {
     aboveExpert = 'For when difficulty 100 is not hard enough. Above 100, GT cars at full difficulty get faster still, up to 120. 100 = off (the normal game). Other kinds of car are unchanged.',
     rescueCrashed = 'On: a stuck or wrecked car is repaired and put back on the track (the default). Off: crashed cars are left to the game: a car that can\'t continue retires, as in stock AC.',
     strategy = 'Planned manoeuvres on top of the reactive racecraft, per class (a GT driver out-brakes, a formula driver sets it up on the straight, a stock car slingshots). On at any difficulty whenever this is ticked; each car\'s own pace decides how much of the playbook it uses (a Rookie never switchbacks, a Veteran does).',
+    smarterDives = 'Smarter dives: the AI only dives up the inside from close behind, about two and a half car lengths, so fewer hopeless lunges and tighter lines at the apex. In our tests a little more contact overall. Off = today\'s behaviour.',
 }
 
 local function comboFor(tag, previewText, currentKey, opts, onPick)
@@ -951,6 +956,7 @@ function script.windowMain()
     toggle('Rescue crashed cars', 'rescueCrashed', TIP.rescueCrashed)
     toggle('Repair damage on track', 'repairOnTrack', 'When a crashed car is rescued (above). On: its body is repaired (the default). Off: it keeps its damage and pits for repairs like stock AC.')
     toggle('Tactics: set-up passes, late-brake lunges, switchbacks', 'strategy', TIP.strategy)
+    toggle('Smarter dives', 'smarterDives', TIP.smarterDives)
     -- (0.16, decision 0032) The text now says what the code actually does: races only (which the session gate
     -- enforces), including one left early (T.abort sends it at the next launch), and the install number, which
     -- the owner chose to keep and describe rather than remove.
