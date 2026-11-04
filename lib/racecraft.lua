@@ -489,7 +489,7 @@ R.RE_PULLOUT = false          -- lap 2+: the rear-end guard is trimmed to CV.RS_
 R.PASS_COMMIT_LAP = 0         -- >0: PASS_COMMIT's commit (paceEdge) on MEASURED pace, any car: my best lap beats the car ahead's last lap
                               -- (else its best) by this fraction (0.02 = 2 %). Lap 1 past OPENLAP_TAIL on
 R.CAUTION_DEFEND = -0.25      -- defend relief from lap 2 (laps 0-1 keep K.CAUTION_DEFEND); x intensity => -0.175 applied (the rubber band)
-R.DEFEND_V2 = false           -- (2026-11-03, phantom-defend fix) replace the defend trigger's "not slower by FASTER_MARGIN"
+R.DEFEND_V2 = true            -- (2026-11-03 phantom-defend fix; DEFAULT ON for 0.16.2, owner 2026-11-04) replace the defend trigger's "not slower by FASTER_MARGIN"
                               -- speed term with a GENUINE-THREAT test: defend only if the car behind is CLOSING (gapB shrank
                               -- over DEFEND_CLOSE_WIN) or genuinely FASTER (> spd + FASTER_MARGIN), same lap, not pitting, not
                               -- recovering. Default off = byte-for-byte the shipped 0.16.1 trigger. Changes only WHICH frames
