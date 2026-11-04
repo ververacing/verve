@@ -767,7 +767,7 @@ end
 local TIP = {
     humanErrors = 'One visible mistake per driver every few laps: a late brake and lock-up, a missed apex, or a snap and lift. The rate follows pace, so a rookie errs every 2-3 laps, a midfielder every 4-5, a veteran every 9-15, and the quickest driver in a class less often still. Offs are rare and spins rarer. Formula, Prototype and Hypercar get half those off and spin odds, and on NASCAR and drift cars a mistake never becomes an off or a spin. Race sessions only, never the opening lap, never your own car.',
     raceStart = 'How the AI launches and takes the first lap. Calm: staggered release and extra spacing into the first corners (the fewest first-lap pile-ups). Racing: half of that - backmarkers go for it, expect the occasional turn-1 tangle, as in real life. Stock: none of it, AC\'s own start.',
-    aboveExpert = 'For when difficulty 100 is not hard enough. Above 100, GT cars at full difficulty get faster still, up to 120. 100 = off (the normal game). Other kinds of car are unchanged.',
+    aboveExpert = 'For when difficulty 100 is not hard enough. Above 100, GT3 cars at full difficulty get faster still, up to 120. 100 = off (the normal game). Other kinds of car are unchanged.',
     rescueCrashed = 'On: a stuck or wrecked car is repaired and put back on the track (the default). Off: crashed cars are left to the game: a car that can\'t continue retires, as in stock AC.',
     strategy = 'Planned manoeuvres on top of the reactive racecraft, per class (a GT driver out-brakes, a formula driver sets it up on the straight, a stock car slingshots). On at any difficulty whenever this is ticked; each car\'s own pace decides how much of the playbook it uses (a Rookie never switchbacks, a Veteran does).',
     smarterDives = 'Smarter dives: the AI only dives up the inside from close behind, about two and a half car lengths, so fewer hopeless lunges and tighter lines at the apex. In our tests a little more contact overall. Off = today\'s behaviour.',
@@ -992,8 +992,8 @@ function script.windowMain()
     end
 
     ui.text('What Verve does (always on)')
-    ui.textWrapped('Human pace variability  -  class-aware tyre, wet and dirty-air physics  -  racecraft (overtaking, defending, blue flags, yellow flags)  -  self-recovery (a stuck car drives itself out; with Rescue crashed cars on, it is also repaired and set back on the racing line, and genuinely wrecked cars retire)  -  trouble-spot learning per track  -  at high difficulty, GT cars push harder on a clear road.')
-    if ui.itemHovered() then ui.setTooltip('These are Verve. They can\'t be half-enabled: turn Verve off to get stock AC.\nGT cars: from difficulty 90 up, a GT car with clear road ahead trusts its tyres more and is quicker. It eases off as it closes on another car, so it does not run into it. Other kinds of car are unchanged.') end
+    ui.textWrapped('Human pace variability  -  class-aware tyre, wet and dirty-air physics  -  racecraft (overtaking, defending, blue flags, yellow flags)  -  self-recovery (a stuck car drives itself out; with Rescue crashed cars on, it is also repaired and set back on the racing line, and genuinely wrecked cars retire)  -  trouble-spot learning per track  -  at high difficulty, GT3 cars push harder on a clear road.')
+    if ui.itemHovered() then ui.setTooltip('These are Verve. They can\'t be half-enabled: turn Verve off to get stock AC.\nGT3 cars: from difficulty 90 up, a GT3 car with clear road ahead trusts its tyres more and is quicker. It eases off as it closes on another car, so it does not run into it. Other kinds of car are unchanged.') end
 
     ui.newLine()
     ui.text('Options')
