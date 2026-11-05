@@ -197,11 +197,14 @@ class Report(object):
     def refuse(self, name, detail):
         self.add("REFUSED", name, detail)
 
+    def exempt(self, name, detail):
+        self.add("EXEMPT", name, detail)
+
     def show(self):
         print()
         for v, n, d in self.rows:
             print("  %-8s %-20s %s" % (v, n, d))
-        bad = [r for r in self.rows if r[0] != "PASS"]
+        bad = [r for r in self.rows if r[0] not in ("PASS", "EXEMPT")]
         print()
         if bad:
             print("  NOT RELEASABLE - %d of %d checks did not pass:" % (len(bad), len(self.rows)))
@@ -568,6 +571,9 @@ def new_counts(v):
     return v == "true" or (CHECK_NEW_MODE and len(v) >= 2 and v[0] in "'\"" and v[-1] == v[0])
 
 
+# A key the B5 scan counts that is NOT a behaviour default. Named one by one, printed as EXEMPT and never as PASS, so an
+# exemption stays visible on every run. A new entry needs the director's review.
+EXEMPT_DEFAULTS = {"P.DEFAULT": "preset name constant, not a behaviour default"}
 CHECK_DECLARED = True   # (B5) every counted default needs a docs/DECLARED_DEFAULTS.md line; selftest seeds turn this off
 WHOLE_KEY = True        # (B5) evidence matches the whole key; selftest seeds turn this off to prove it bites
 
@@ -609,6 +615,9 @@ def check_evidence_on(rep, rows, changed, base="base"):
         declared = None
     for sw, (old, new) in sorted(changed.items()):
         bare = sw.split(".", 1)[1]
+        if sw in EXEMPT_DEFAULTS:
+            rep.exempt("default %s" % bare, "%s -> %s | EXEMPT %s: %s" % ("(new switch)" if old is None else old, new, sw, EXEMPT_DEFAULTS[sw]))
+            continue
         if declared is None:
             rep.refuse("default %s" % bare, "could not read docs/DECLARED_DEFAULTS.md")
             continue
@@ -765,6 +774,15 @@ def rule_checks():
         globals()["DOCS"] = saved_docs
     if not any(v == "FAIL" and "UNDECLARED" in n for v, n, d in r.rows):
         f.append("an undeclared default change was not failed: %s" % r.rows)
+    # EXEMPT: a listed key prints EXEMPT and is not counted bad; an unlisted new key still FAILs.
+    r = Report()
+    check_evidence_on(r, [], {"P.DEFAULT": (None, "'Default'"), "R.UNLISTED_NEW": (None, "true")})
+    if not any(v == "EXEMPT" and n == "default DEFAULT" for v, n, d in r.rows):
+        f.append("an exempt key did not print EXEMPT: %s" % r.rows)
+    if not any(v == "FAIL" and n == "default UNLISTED_NEW" for v, n, d in r.rows):
+        f.append("an unlisted new key was let through by the exemption: %s" % r.rows)
+    if [x for x in r.rows if x[1] == "default DEFAULT" and x[0] != "EXEMPT"]:
+        f.append("an exempt key was also given a verdict: %s" % r.rows)
 
     # PACE: absent, empty, zero or negative pace must REFUSE, never read as "0.0 BETTER". nums() coerces a
     # missing pace to 0.0 and pace_best_s is higher-worse, so a 0.0 would print mean < lo = BETTER - which is
