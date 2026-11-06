@@ -1,3 +1,23 @@
+0.16.2
+- The AI no longer defends against cars that aren't attacking. Before, a car could keep covering its line against a car
+  just sitting behind it at the same speed, which caused needless blocking and contact. Now it defends only when the car
+  behind is closing or is genuinely faster. On for everyone.
+- What that and the other changes here add up to, at default settings and difficulty 100, compared with 0.16.1 over 6
+  races a side (18 GT3 cars for 12 laps at Monza and Spa, 20 Formula cars for 5 laps at Singapore): contact down about 41%
+  at Monza, 52% at Spa and 71% at Singapore, and no cars retired, against 6 on 0.16.1. Typical lap times are level or
+  better. The costs: the fastest GT3 laps are about 0.4 s slower at Monza and 0.9 s slower at Spa, and a separate test of
+  the defending fix at Spa saw about 10% fewer completed overtakes.
+- New "Smarter dives" setting, off by default, in the main window. On: the AI only dives up the inside from close behind,
+  about two and a half car lengths, so fewer hopeless lunges and tighter lines at the apex. In our tests it brings a little
+  more contact overall, which is why it is your choice.
+- Named presets: save your settings under a name, then load or delete them from the Verve AI window. A built-in Default
+  is always there. Presets don't include per-car driver or class overrides.
+- Career: the GT3 clear-road grip now follows the level of the current career event, so an early event low on the career
+  ramp no longer gets the full effect. In a career, Above-expert AI applies to the whole field.
+- Settings: with autosave on, an open window kept re-saving slider values because of tiny rounding differences, even
+  when you hadn't touched them. A slider now saves only when you move it.
+- Tooltips now say GT3 cars, not GT cars, for the clear-road grip, which only applies to cars tagged GT3.
+
 0.16.1
 - GT3 cars (cars tagged GT3 in their data) are quicker at high difficulty. Above difficulty 90, a GT3 car with clear road
   ahead trusts its tyres more, and it eases back to normal as it closes on another car. In our tests at difficulty 100

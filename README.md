@@ -100,6 +100,10 @@ make sure you copied the whole `Verve` folder, `lib` included.
   difficulty get faster still. 100 = off (the normal game). Other kinds of car are unchanged.
 - **Rescue crashed cars** is on by default: a stuck or wrecked car is repaired and put back on the track. Off
   leaves crashed cars to the game, and a car that can't continue retires, as in stock AC.
+- **Smarter dives** is off by default. On, the AI only dives up the inside from close behind, about two and a half car
+  lengths: fewer hopeless lunges and tighter lines at the apex, with a little more contact overall in our tests.
+- **Presets** in the Verve AI window save your settings under a name, to load or delete later. A built-in Default is always
+  there. Presets don't include per‑car driver or class overrides.
 - Settings and per‑car overrides are stored via CSP app storage, so **updates never wipe your
   tuning**.
 
