@@ -1,5 +1,5 @@
 {
-  "version": "0.16.2",
+  "version": "0.16.3",
   "url": "https://github.com/ververacing/verve/releases/latest",
   "summary": "When Verve is switched off or hands the AI back, the AI gets the game's normal grip again, and Base AI grip can't go below it."
 }
