@@ -1,5 +1,5 @@
 {
   "version": "0.16.2",
   "url": "https://github.com/ververacing/verve/releases/latest",
-  "summary": "The AI stops defending against cars that aren't attacking, plus named setting presets and an optional Smarter dives setting."
+  "summary": "When Verve is switched off or hands the AI back, the AI gets the game's normal grip again, and Base AI grip can't go below it."
 }
