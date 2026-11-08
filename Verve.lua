@@ -173,6 +173,17 @@ local drsCd = {}
 local G = {}
 for k in pairs(DEFAULTS) do G[k] = S[k] end
 for _, k in ipairs(CORE) do G[k] = true end   -- core is always on (a harness override can still flip it for a run)
+-- (0.16.3) Base AI grip never goes below stock AI grip (Racecraft.STOCK_AI_GRIP, 1.20). Below it the AI overdrives and
+-- crashes (our tests, Nov 2026: at grip 1.0 the AI ran off and got stuck far more often than with Verve off).
+-- Clamped in G only, every frame, so a saved value, a preset, a harness --settings or a scripted change all land at
+-- the floor; the store is not rewritten.
+-- A test that wants lower grip says so explicitly: Harness.gripMin (harness-only; absent in the shipped build).
+local function gripFloor()
+    local m = (Harness and tonumber(Harness.gripMin)) or Racecraft.STOCK_AI_GRIP or 1.20
+    local v = tonumber(G.baseGrip)
+    if v == nil or v < m then G.baseGrip = m end
+end
+gripFloor()
 
 -- (fix 2026-11-04) never persist to the owner's store under the harness: a windowed harness run renders the
 -- settings sliders, which fire setG, so without this a --settings / preset test would overwrite the owner's S.
@@ -507,6 +518,7 @@ function script.update(dt)
     -- (owner item 33) CSP stand-down, recomputed each frame so a harness-only override (Harness.cspMin) can raise the
     -- minimum for the test. nil build never stands down. Routed through the disabled branch below: no car writes, the
     -- cars are handed back once, and diag/feed/telemetry keep observing - exactly "do nothing, don't run parts failing".
+    gripFloor()   -- (0.16.3) after the harness hooks above (settings, presets, scripted changes), before any grip write
     local cspEffMin = (Harness and type(Harness.cspMin) == 'number' and Harness.cspMin) or CSP_MIN
     cspStoodDown = type(cspBuildCode) == 'number' and cspBuildCode < cspEffMin
     if not G.enabled or cspStoodDown then
@@ -1042,9 +1054,9 @@ function script.windowMain()
     local rc = ui.slider('Racecraft intensity##rc', G.rcIntensity, 0.0, 1.5, '%.2f')
     setGnum('rcIntensity', rc)
     if ui.itemHovered() then ui.setTooltip('How hard the field attacks/defends. 0 = passive, 0.7 = default, 1.5 = elbows out.') end
-    local bg = ui.slider('Base AI grip##bg', G.baseGrip, 0.85, 1.50, '%.2f')
+    local bg = ui.slider('Base AI grip##bg', G.baseGrip, Racecraft.STOCK_AI_GRIP or 1.20, 1.50, '%.2f')
     setGnum('baseGrip', bg)
-    if ui.itemHovered() then ui.setTooltip('Grip the AI has for its own racing line. 1.20 = stock AC AI (default; line speeds are calibrated for this). Below that = more human/on-the-edge but they wash wide if too low. Above 1.20 = extra stick + speed (keeps them planted / competitive at lower difficulty). Pace also scales with the race difficulty % (cars without a driver; a driver sets its own pace).') end
+    if ui.itemHovered() then ui.setTooltip('Grip the AI has for its own racing line. 1.20 is the stock AC AI grip, the default and the minimum: with less grip than that the AI drives too fast for its tyres and crashes. Above 1.20 = extra stick and speed (keeps them planted and competitive at lower difficulty). Pace also scales with the race difficulty % (cars without a driver; a driver sets its own pace).') end
 
     ui.newLine()
     ui.separator()

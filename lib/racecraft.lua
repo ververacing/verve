@@ -968,7 +968,8 @@ end
 -- A car Verve parked stays parked. stockLevel(i): the launcher's level for car i (0..1.2) or nil.
 -- (0.16.3) the grip a hand-back restores. CSP's own default for extra AI grip is 1.2 (lua-sdk ac_apps/lib.lua,
 -- physics.setExtraAIGrip: "Changes extra AI grip (120% by default)"; Verve's baseGrip tooltip says the same). Handing back 1.0
--- left the field ~17% BELOW stock for the rest of the session (Laguna arm E at 1.0: 84 repositions v 0 with Verve off, 7 Nov).
+-- left the field ~17% BELOW stock for the rest of the session (our tests, Nov 2026: at grip 1.0 the AI ran off and got stuck
+-- far more often than with Verve off).
 R.STOCK_AI_GRIP = 1.20
 R.offState = { on = false, grip = false }
 function R.offSwitch(on, gripOn, stockLevel)
