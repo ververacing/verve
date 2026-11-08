@@ -966,6 +966,10 @@ end
 -- hint, a spline offset, the aggression, the grip, the caution, the AI level - so turning Verve off in a race left cars capped
 -- (audit 2026-09-30). Switching back on needs nothing more: every value is rewritten each frame (the level: Drivers.handBack).
 -- A car Verve parked stays parked. stockLevel(i): the launcher's level for car i (0..1.2) or nil.
+-- (0.16.3) the grip a hand-back restores. CSP's own default for extra AI grip is 1.2 (lua-sdk ac_apps/lib.lua,
+-- physics.setExtraAIGrip: "Changes extra AI grip (120% by default)"; Verve's baseGrip tooltip says the same). Handing back 1.0
+-- left the field ~17% BELOW stock for the rest of the session (Laguna arm E at 1.0: 84 repositions v 0 with Verve off, 7 Nov).
+R.STOCK_AI_GRIP = 1.20
 R.offState = { on = false, grip = false }
 function R.offSwitch(on, gripOn, stockLevel)
     local s = R.offState
@@ -976,7 +980,7 @@ function R.offSwitch(on, gripOn, stockLevel)
     for i = 0, sim.carsCount - 1 do
         local car = ac.getCar(i)
         if car and car.isAIControlled and not Recovery.isParked(i) and not car.isRaceFinished then   -- (0.16.1) a finished car was handed back at the flag
-            pcall(physics.setExtraAIGrip, i, 1.0)
+            pcall(physics.setExtraAIGrip, i, R.STOCK_AI_GRIP)
             if dropAll then
                 pcall(physics.setAIThrottleLimit, i, 1.0); pcall(physics.setAITopSpeed, i, 1e9)   -- (no stop-counter write: Verve holds only parked cars, and AC's own post-incident wait is AC's)
                 if cv2.base[i] then pcall(physics.setAIBrakeHint, i, cv2.base[i]) end
@@ -999,7 +1003,7 @@ end
 R.topCap = {}; R.finished = {}   -- (R.finished: the once-per-car latch Verve.lua's car loop reads, set by the hand-back below)
 function R.finishHandBack(i, gripOn, behaviourOn, stockLevel)
     R.finished[i] = true
-    if gripOn then pcall(physics.setExtraAIGrip, i, 1.0) end
+    if gripOn then pcall(physics.setExtraAIGrip, i, R.STOCK_AI_GRIP) end
     if behaviourOn then pcall(physics.setAICaution, i, 1.0) end
     if cv2.thr[i] or cv2.mvThr[i] then pcall(physics.setAIThrottleLimit, i, 1.0) end
     if (R.topCap[i] or 1e9) < 1e9 then pcall(physics.setAITopSpeed, i, 1e9) end
