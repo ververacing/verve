@@ -92,8 +92,8 @@ make sure you copied the whole `Verve` folder, `lib` included.
   **Only switch "Control AI grip" off if another mod is controlling AI grip.** In our tests, switching
   it off with no other grip mod made a Formula field crash more.
 - Pace still scales with the **race difficulty %** for cars without a driver (a car with a driver runs at
-  that driver's pace). **Base AI grip** 1.20 = stock AC (default);
-  lower for a more human, on‑the‑edge feel; above 1.20 for extra stick.
+  that driver's pace). **Base AI grip** 1.20 = stock AC (the default and the minimum: with less grip
+  the AI drives too fast for its tyres and crashes); above 1.20 for extra stick.
 - The **aggression slider** in Quick Race is respected — Verve uses it as the racecraft baseline for cars
   without a driver (a car with a driver uses that driver's aggression).
 - **Above-expert AI** (100 to 120) is for when difficulty 100 is not hard enough. Above 100, GT3 cars at full

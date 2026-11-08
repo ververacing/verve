@@ -1,3 +1,11 @@
+0.16.3
+- When you switch Verve off mid-session or untick Control AI grip, and on the cooldown lap after the flag, the AI now goes
+  back to the game's normal grip. Before, it was left with less grip than stock AC gives it, which made many cars run off
+  and get stuck. In our tests (18 GT3 cars at Laguna Seca, Verve switched off after 3 laps, 3 races a side), about 9 cars
+  a race retired after the switch on 0.16.2, against under 2 with this fix.
+- Base AI grip can no longer be set below the game's normal 1.20. Below that, the AI drove too fast for the grip it had
+  and crashed. If you saved a lower value or a preset with one, it now runs at 1.20.
+
 0.16.2
 - The AI no longer defends against cars that aren't attacking. Before, a car could keep covering its line against a car
   just sitting behind it at the same speed, which caused needless blocking and contact. Now it defends only when the car
