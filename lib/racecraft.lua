@@ -1549,7 +1549,7 @@ local evalBody = function()
             -- equal-speed follower (phantom defend; pc2/defend_instrument_result_20261103.md: ~48% of defend-frames).
             local nc = os.clock()
             local pv = (defGbI[i] == behindIdx) and defGbV[i] or nil   -- trust the sample only if the SAME car is still behind
-            local closingB = pv and (pv - gapB) >= m(R.DEFEND_CLOSE_MIN) or false   -- a new car slotting in closer is NOT "closing"
+            local closingB = pv and (pv - gapB) >= (R.DEFEND_CLOSE_MIN / trackLen) or false   -- a new car slotting in closer is NOT "closing"
             if not defGbT[i] or defGbI[i] ~= behindIdx or (nc - defGbT[i]) >= R.DEFEND_CLOSE_WIN then
                 defGbT[i] = nc; defGbV[i] = gapB; defGbI[i] = behindIdx
             end
