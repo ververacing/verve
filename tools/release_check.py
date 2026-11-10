@@ -395,6 +395,75 @@ def check_suite(rep, rows):
     return fresh_prefix, suite
 
 
+# ERROR GATE (10 Nov 2026, fix164). v0.16.2 and v0.16.3 shipped with racecraft.lua:1552 calling scaleToTrack's
+# LOCAL m() out of scope: a nil-global call on most car-frames with a follower, swallowed by R.evaluate's pcall, so
+# the rest of evalBody (offset, aggression, R.last) silently did not run. Every gating row ended with rcErr in the
+# millions and every CSP log carried the error, and this gate read neither. Now every gating row of the freshest
+# suite must end its race with rcErr == 0 (diag.lua writes R.errN as "rcErr" on every grid row), and its CSP log
+# must hold no "Verve error" line (Verve.lua's noteErr logs each distinct swallowed error once, every module).
+# A row whose diag or CSP log cannot be found, or whose diag has no rcErr field, REFUSES: not looked is not clean.
+CHECK_ERRORS = True
+VERVE_ERR = "Verve error"
+
+
+def error_verdict(last_rc, csp_lines):
+    """(verdict, detail) for one row. last_rc: the final rcErr int, or None when unread. csp_lines: list or None."""
+    if not CHECK_ERRORS:
+        return "PASS", "error gate off"
+    if last_rc is None or csp_lines is None:
+        return "REFUSED", "rcErr %s, csp log %s" % ("unread" if last_rc is None else last_rc, "unread" if csp_lines is None else "read")
+    errs = [x for x in csp_lines if VERVE_ERR in x]
+    if last_rc != 0 or errs:
+        return "FAIL", "rcErr %d, %d '%s' line(s)%s" % (last_rc, len(errs), VERVE_ERR, (": " + errs[0].strip()[-120:]) if errs else "")
+    return "PASS", "rcErr 0, no '%s'" % VERVE_ERR
+
+
+def last_rcerr(diag_name):
+    """The last rcErr in a diag file (the race-end value), read from the file's tail. None if absent."""
+    for d in (VERVE, os.path.join(HERE, "harness_results", "archive")):
+        p = os.path.join(d, diag_name or "")
+        if diag_name and os.path.isfile(p):
+            with open(p, "rb") as fh:
+                fh.seek(0, 2); n = fh.tell(); fh.seek(max(0, n - 262144))
+                hits = re.findall(rb'"rcErr":(\d+)', fh.read())
+            return int(hits[-1]) if hits else None
+    return None
+
+
+def csp_log_lines(label, stamp):
+    """The CSP log the harness saved for this row (csp_logs/<YYYYMMDD_HHMM>_<label>.log), or None."""
+    d = os.path.join(HERE, "harness_results", "csp_logs")
+    try:
+        cand = sorted(f for f in os.listdir(d) if f.endswith("_%s.log" % label))
+    except OSError:
+        return None
+    if not cand:
+        return None
+    pick = [f for f in cand if stamp and f[:13] == stamp[:13]] or cand[-1:]   # same YYYYMMDD_HHMM as the diag
+    with open(os.path.join(d, pick[-1]), encoding="utf-8", errors="replace") as fh:
+        return fh.readlines()
+
+
+def check_errors(rep, suite, fresh_prefix):
+    """Every gating row of the freshest suite: race-end rcErr == 0 and no 'Verve error' in its CSP log."""
+    if not suite or not fresh_prefix:
+        rep.refuse("errors", "no suite to check")
+        return
+    rows = [r for r in suite if SUITE_RE.match(r["label"]).group(1) == fresh_prefix
+            and SUITE_RE.match(r["label"]).group(2) in NEEDED_CELLS]
+    bad = {"FAIL": [], "REFUSED": []}
+    for r in rows:
+        v, d = error_verdict(last_rcerr(r.get("file")), csp_log_lines(r["label"], stamp_of(r)))
+        if v in bad:
+            bad[v].append("%s (%s)" % (r["label"], d))
+    if bad["FAIL"]:
+        rep.fail("errors", "%d of %d gating rows: %s" % (len(bad["FAIL"]), len(rows), "; ".join(bad["FAIL"][:4])))
+    if bad["REFUSED"]:
+        rep.refuse("errors unread", "%d of %d gating rows: %s" % (len(bad["REFUSED"]), len(rows), "; ".join(bad["REFUSED"][:4])))
+    if not bad["FAIL"] and not bad["REFUSED"]:
+        rep.ok("errors", "%d gating rows of %s: rcErr 0 at race end, no '%s' in any CSP log" % (len(rows), fresh_prefix, VERVE_ERR))
+
+
 def check_not_worse(rep, suite, fresh_prefix, all_rows=()):
     """3: the freshest suite against the one before it, cell by cell. The bar CLAUDE.md actually states."""
     if not suite or not fresh_prefix:
@@ -675,6 +744,13 @@ def rule_checks():
     the test re-encoded the bug it was meant to catch. A seed must drive the real checker, not a paraphrase.
     """
     f = []
+    # (fix164) the error gate: a non-zero rcErr, a 'Verve error' line, or an unread row must never PASS
+    shipped = "  7280  M  [Lua: app] Verve error (racecraft.evaluate: racecraft.lua:1552: attempt to call global 'm' (a nil value))\n"
+    for args, want in (((3008842, [shipped]), "FAIL"), ((0, [shipped]), "FAIL"), ((5, []), "FAIL"),
+                       ((None, []), "REFUSED"), ((0, None), "REFUSED"), ((0, ["Verve career: ok\n"]), "PASS")):
+        got = error_verdict(*args)[0]
+        if got != want:
+            f.append("error gate: rcErr %s / csp %s gave %s, want %s" % (args[0], "none" if args[1] is None else len(args[1]), got, want))
     full = dict(NEEDED_CELLS)
     if short_cells(full):
         f.append("a complete suite was reported short: %s" % short_cells(full))
@@ -865,6 +941,7 @@ def selftest():
 
     print("\n=== seeded rule defects (untrusted until each FAILS rule_checks) ===")
     global MIN_GATING_ARM, INTERLEAVE_MAX_STREAK, DEFAULT_HEAD, CHECK_NEW_ON, SUITE_RE, CHECK_NEW_MODE, WHOLE_KEY, KEY_RE, CHECK_DECLARED
+    global CHECK_ERRORS, VERVE_ERR
     allok = True
     seeds = [
         ("a gating cell dropped from the requirement", "pop_sgf"),
@@ -881,6 +958,8 @@ def selftest():
         ("(B5) evidence matched by substring again", "substr"),
         ("(B5) only R.* keys parsed again", "ronly"),
         ("(B5) DECLARED_DEFAULTS not enforced", "nodecl"),
+        ("(fix164) error gate switched off", "noerr"),
+        ("(fix164) CSP 'Verve error' marker changed", "errmark"),
     ]
     for name, kind in seeds:
         saved_needed, saved_chars = dict(NEEDED_CELLS), dict(CHARACTER_CELLS)
@@ -914,11 +993,16 @@ def selftest():
             WHOLE_KEY = False
         elif kind == "nodecl":
             CHECK_DECLARED = False
+        elif kind == "noerr":
+            CHECK_ERRORS = False
+        elif kind == "errmark":
+            VERVE_ERR = "Verve fault"
         elif kind == "ronly":
             KEY_RE = re.compile(r"^([+-])(R\.[A-Z0-9_]+)\s*=\s*([^\s;]+)")
         else:
             CHECK_NEW_ON = False
         got = rule_checks()
+        CHECK_ERRORS, VERVE_ERR = True, "Verve error"
         CHECK_NEW_MODE, WHOLE_KEY, KEY_RE, CHECK_DECLARED = saved_b5
         NEEDED_CELLS.clear(); NEEDED_CELLS.update(saved_needed)
         CHARACTER_CELLS.clear(); CHARACTER_CELLS.update(saved_chars)
@@ -957,6 +1041,7 @@ def main():
         return rep.show()
     fresh_prefix, suite = check_suite(rep, rows) or (None, None)
     check_not_worse(rep, suite, fresh_prefix, all_rows=rows)
+    check_errors(rep, suite, fresh_prefix)
     check_evidence(rep, rows, base, head)
     check_gate(rep, base, head)
     check_docs(rep)
