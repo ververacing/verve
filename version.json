@@ -1,5 +1,5 @@
 {
-  "version": "0.16.3",
+  "version": "0.16.4",
   "url": "https://github.com/ververacing/verve/releases/latest",
   "summary": "Fixes a bug from 0.16.2 that switched off much of Verve's racing whenever a car had another right behind it."
 }
