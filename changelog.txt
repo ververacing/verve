@@ -1,3 +1,17 @@
+0.16.4
+- Fixed a bug from 0.16.2 that switched off much of Verve's racing whenever a car had another car right behind it. In
+  that situation the AI stopped choosing when to attack and defend, stopped picking its racing line, stopped moving
+  aside for faster cars lapping it, and stopped easing off when damaged. That is what made races on 0.16.2 and 0.16.3
+  calmer than they should have been.
+- Verve races fully again. In our tests at default settings (6 races a side), the AI averaged about 67 contacts a race
+  at Monza (18 GT3 cars, 12 laps), against 70 on 0.16.1; 107 at Spa (18 GT3 cars, 12 laps), against 119; and 31 at
+  Singapore (20 Formula cars, 5 laps), against 38. On 0.16.3 it was about 51 at Monza, 63 at Spa and 11 at Singapore,
+  because of the bug. Lap times are unchanged from 0.16.3.
+- The defending change from 0.16.2 now really works: the AI defends against cars that aren't attacking about half as
+  often (about 47% of its defending before, 20 to 24% now).
+- A correction to the 0.16.2 notes: most of the contact reduction we reported there came from the bug above, not from
+  the changes those notes described.
+
 0.16.3
 - When you switch Verve off mid-session or untick Control AI grip, and on the cooldown lap after the flag, the AI now goes
   back to the game's normal grip. Before, it was left with less grip than stock AC gives it, which made many cars run off

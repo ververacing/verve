@@ -1,5 +1,5 @@
 {
   "version": "0.16.3",
   "url": "https://github.com/ververacing/verve/releases/latest",
-  "summary": "When Verve is switched off or hands the AI back, the AI gets the game's normal grip again, and Base AI grip can't go below it."
+  "summary": "Fixes a bug from 0.16.2 that switched off much of Verve's racing whenever a car had another right behind it."
 }
