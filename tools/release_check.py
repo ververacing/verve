@@ -143,6 +143,37 @@ def base_deviation_note(prefix):
     ver, ref, why = BASE_DEVIATION[prefix]
     return "named deviation (base): suite %s base = %s (%s), not origin/main's build; %s" % (prefix, ver, ref, why)
 
+# NAMED EXCEPTION, ONE CELL ONE METRIC ONE SUITE (11 Nov 2026, v0.16.4; verve-47 ruling 1). rc022 mon pace_s came back
+# "?" (head 109.572 v base 108.227-109.543, within one spread). Evidenced by hand in the release decision record
+# (verve_desk/pc2/rc022_suite_result_20261111.md): p50 level 112.719 v 112.690; best level against shipped 0.16.3
+# (fix164 B 109.001 v C 108.922); +0.38 s against 0.16.1 pooled over fix164 + rc022 (n=12 v 9), already disclosed in
+# the 0.16.2 notes; rc022's +0.77 is one row (rc022b_mon_1 111.080). It covers ONLY a "?" on exactly the listed
+# metrics, for exactly that suite and cell: a WORSE, an absent-pace refusal, a "?" on any other metric, or the same
+# metric in another cell or suite still blocks. The line prints EXEMPT with the reason, never PASS. rule_checks proves
+# each of those limits, and the selftest seeds a defect against each one.
+NAMED_EXCEPTIONS = {("rc022b", "mon"): ({"pace_s"}, "verve-47 ruling 1, 11 Nov 2026: mon best pace '?' evidenced by hand "
+                                                    "(p50 level; level v 0.16.3; +0.38 s v 0.16.1 pooled, disclosed in "
+                                                    "0.16.2 notes); record pc2/rc022_suite_result_20261111.md")}
+EXC_WORSE_BLOCKS = True   # a WORSE is never exempt (selftest seeds False)
+EXC_SUBSET = True         # every unresolved metric must be covered, not just one (selftest seeds False)
+EXC_SCOPED = True         # the exception binds to its own (suite, cell) only (selftest seeds False)
+
+
+def named_exception(prefix, cell, metrics):
+    """The reason when a named exception covers `metrics` for this (suite prefix, cell), else None."""
+    if not metrics:
+        return None
+    if EXC_SCOPED:
+        entry = NAMED_EXCEPTIONS.get((prefix, cell))
+    else:
+        entry = next(iter(NAMED_EXCEPTIONS.values()), None)
+    if not entry:
+        return None
+    covered, why = entry
+    ok = set(metrics) <= covered if EXC_SUBSET else bool(set(metrics) & covered)
+    return why if ok else None
+
+
 # Rare events (heavy hits, DNFs) against a ZERO-SPREAD baseline cannot be resolved at n=3 - one event is
 # indistinguishable from noise, and demanding otherwise means the gate can never pass on those metrics however good
 # the code is. So a zero-spread baseline is only QUESTIONED once the new arm has produced this many events in total.
@@ -610,12 +641,17 @@ def check_not_worse(rep, suite, fresh_prefix, all_rows=()):
                                                       PACE_NOTE)
         if not notes:
             rep.refuse(name, detail)
+        elif bad and not EXC_WORSE_BLOCKS and named_exception(fresh_prefix, cell, bad):
+            rep.exempt(name, detail + " | EXEMPT, named exception: %s" % named_exception(fresh_prefix, cell, bad))
         elif bad:
             rep.fail(name, detail)
         elif refused:
             rep.refuse(name, detail + " | pace REFUSED: a cell's pace is absent/zero/negative; write it with "
                                       "tools/pace.py --cell <c> --write (or rerun the cell) - a non-positive pace "
                                       "must never read as '0.0 BETTER'")
+        elif unresolved and named_exception(fresh_prefix, cell, unresolved):
+            rep.exempt(name, detail + " | ? on %s | EXEMPT, named exception: %s" % (
+                ", ".join(unresolved), named_exception(fresh_prefix, cell, unresolved)))
         elif unresolved:
             rep.refuse(name, detail + " | ? = outside the baseline range but within one spread of it; deepen the "
                                       "baseline arm before calling it either way")
@@ -898,6 +934,41 @@ def rule_checks():
     if "REFUSED" in pace_verdicts("109.0"):
         f.append("a VALID pace (109.0, faster than baseline) was wrongly refused: %s" % pace_verdicts("109.0"))
 
+    # (v0.16.4) NAMED EXCEPTIONS. The live table must be exactly the one ruled exception. Then, on the real checker,
+    # an exception for (rc94b, sgf, {pace_s}) must exempt a pace "?" and NOTHING else: (i) a pace WORSE still FAILs,
+    # (ii) a "?" on an uncovered metric in the same cell (inc) still REFUSES, (iii) the same pace "?" in a cell or
+    # suite the exception does not name still REFUSES. Base pace 110.5 x6 gives the 0.30 s floor band: 110.6 is "?",
+    # 111.0 is WORSE. Base incidents 20 x6: a head 21 is "?".
+    if sorted(NAMED_EXCEPTIONS) != [("rc022b", "mon")] or NAMED_EXCEPTIONS[("rc022b", "mon")][0] != {"pace_s"} \
+            or "rc022_suite_result_20261111.md" not in NAMED_EXCEPTIONS[("rc022b", "mon")][1]:
+        f.append("NAMED_EXCEPTIONS is not exactly rc022b/mon/{pace_s} with its record: %r" % NAMED_EXCEPTIONS)
+    saved_exc = dict(NAMED_EXCEPTIONS)
+    try:
+        NAMED_EXCEPTIONS.clear()
+        NAMED_EXCEPTIONS[("rc94b", "sgf")] = ({"pace_s"}, "seeded test exception")
+        q = {"pace_best_s": "110.6"}
+        got = verdicts_of(arms("rc94a", "rc94b", pace, q), "rc94b")
+        if got != ["EXEMPT"]:
+            f.append("a covered pace '?' was not EXEMPT under its named exception: %s" % got)
+        got = verdicts_of(arms("rc94a", "rc94b", pace, {"pace_best_s": "111.0"}), "rc94b")
+        if got != ["FAIL"]:
+            f.append("(i) a pace WORSE was not FAILED under a pace exception: %s" % got)
+        got = verdicts_of(arms("rc94a", "rc94b", pace, dict(q, incidents="21")), "rc94b")
+        if got != ["REFUSED"]:
+            f.append("(ii) a '?' on an uncovered metric (inc) was not REFUSED under a pace exception: %s" % got)
+        NAMED_EXCEPTIONS.clear()
+        NAMED_EXCEPTIONS[("rc94b", "mon")] = ({"pace_s"}, "seeded test exception, other cell")
+        got = verdicts_of(arms("rc94a", "rc94b", pace, q), "rc94b")
+        if got != ["REFUSED"]:
+            f.append("(iii) an exception for another CELL exempted this one: %s" % got)
+        NAMED_EXCEPTIONS.clear()
+        NAMED_EXCEPTIONS[("rc93b", "sgf")] = ({"pace_s"}, "seeded test exception, other suite")
+        got = verdicts_of(arms("rc94a", "rc94b", pace, q), "rc94b")
+        if got != ["REFUSED"]:
+            f.append("(iii) an exception for another SUITE exempted this one: %s" % got)
+    finally:
+        NAMED_EXCEPTIONS.clear(); NAMED_EXCEPTIONS.update(saved_exc)
+
     # An ABSENT (empty) contact_events must REFUSE too; a genuine 0 must still be judged, not refused.
     def contact_verdicts(fresh_contact):
         return verdicts_of(arms("rc97a", "rc97b", pace, dict(pace, contact_events=fresh_contact)), "rc97b")
@@ -966,7 +1037,7 @@ def selftest():
 
     print("\n=== seeded rule defects (untrusted until each FAILS rule_checks) ===")
     global MIN_GATING_ARM, INTERLEAVE_MAX_STREAK, DEFAULT_HEAD, CHECK_NEW_ON, SUITE_RE, CHECK_NEW_MODE, WHOLE_KEY, KEY_RE, CHECK_DECLARED
-    global CHECK_ERRORS, VERVE_ERR
+    global CHECK_ERRORS, VERVE_ERR, EXC_WORSE_BLOCKS, EXC_SUBSET, EXC_SCOPED
     allok = True
     seeds = [
         ("a gating cell dropped from the requirement", "pop_sgf"),
@@ -985,6 +1056,9 @@ def selftest():
         ("(B5) DECLARED_DEFAULTS not enforced", "nodecl"),
         ("(fix164) error gate switched off", "noerr"),
         ("(fix164) CSP 'Verve error' marker changed", "errmark"),
+        ("(0.16.4) named exception exempts a WORSE", "exc_worse"),
+        ("(0.16.4) exception covers an uncovered metric", "exc_subset"),
+        ("(0.16.4) exception leaks to other cell/suite", "exc_scope"),
     ]
     for name, kind in seeds:
         saved_needed, saved_chars = dict(NEEDED_CELLS), dict(CHARACTER_CELLS)
@@ -1022,12 +1096,19 @@ def selftest():
             CHECK_ERRORS = False
         elif kind == "errmark":
             VERVE_ERR = "Verve fault"
+        elif kind == "exc_worse":
+            EXC_WORSE_BLOCKS = False
+        elif kind == "exc_subset":
+            EXC_SUBSET = False
+        elif kind == "exc_scope":
+            EXC_SCOPED = False
         elif kind == "ronly":
             KEY_RE = re.compile(r"^([+-])(R\.[A-Z0-9_]+)\s*=\s*([^\s;]+)")
         else:
             CHECK_NEW_ON = False
         got = rule_checks()
         CHECK_ERRORS, VERVE_ERR = True, "Verve error"
+        EXC_WORSE_BLOCKS, EXC_SUBSET, EXC_SCOPED = True, True, True
         CHECK_NEW_MODE, WHOLE_KEY, KEY_RE, CHECK_DECLARED = saved_b5
         NEEDED_CELLS.clear(); NEEDED_CELLS.update(saved_needed)
         CHARACTER_CELLS.clear(); CHARACTER_CELLS.update(saved_chars)
