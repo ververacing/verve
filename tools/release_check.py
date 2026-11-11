@@ -124,6 +124,25 @@ def use_machine(name):
     GATING_CELLS[new] = GATING_CELLS.pop(old)
     return "named deviation (%s): gating cell %s replaces %s" % (name, new, old)
 
+# NAMED DEVIATION, BASE BUILD (11 Nov 2026, v0.16.4; verve-47 ruling, owner ship decision). v0.16.2 and v0.16.3 shipped
+# racecraft.lua:1552 calling scaleToTrack's local m() out of scope, which switched most of racecraft off on every
+# car with a follower (the fix164 cell: shipped 0.16.3 had mon 51 / spa 63 contacts per race against 71.5 / 109 fixed,
+# ranges separate). A not-worse gate against those builds would gate on the bug: a working build fails by design.
+# So the v0.16.4 suite's BASE arm runs v0.16.1 (359b23e), the last release with racecraft running, instead of the
+# 0.16.3 build origin/main holds. The rows cannot prove which build a base arm ran (verve_commit reads <HEAD>-dirty
+# on a swapped runtime), so the queue sidecar (label, build, ref) is the evidence and must be kept with the suite.
+# Printed on every run, and repeated on every not-worse line whose base is the named prefix.
+BASE_DEVIATION = {"rc022a": ("v0.16.1", "359b23e", "0.16.2/0.16.3 shipped a racecraft-disabling bug (racecraft.lua:1552); "
+                                                  "comparing against them would gate on the bug")}
+
+
+def base_deviation_note(prefix):
+    """The printed named-deviation line for a suite base prefix, or None when the base is an ordinary one."""
+    if prefix not in BASE_DEVIATION:
+        return None
+    ver, ref, why = BASE_DEVIATION[prefix]
+    return "named deviation (base): suite %s base = %s (%s), not origin/main's build; %s" % (prefix, ver, ref, why)
+
 # Rare events (heavy hits, DNFs) against a ZERO-SPREAD baseline cannot be resolved at n=3 - one event is
 # indistinguishable from noise, and demanding otherwise means the gate can never pass on those metrics however good
 # the code is. So a zero-spread baseline is only QUESTIONED once the new arm has produced this many events in total.
@@ -494,6 +513,8 @@ def check_not_worse(rep, suite, fresh_prefix, all_rows=()):
             a = [r for r in all_rows if (r.get("label") or "").startswith(pref)]
             base_label = "%s (aliased baseline)" % pref
         name = "not worse %s" % (cell if arm == "-" else "%s/%s" % (cell, arm))
+        if base_prefix in BASE_DEVIATION:
+            base_label = "%s [= %s %s, named deviation]" % (base_label, BASE_DEVIATION[base_prefix][0], BASE_DEVIATION[base_prefix][1])
         if len(a) < 2 or len(b) < 2:
             rep.refuse(name, "%s n=%d vs %s n=%d - a single run has no range, so this cell can neither show a "
                              "regression nor rule one out" % (base_label, len(a), fresh_prefix, len(b)))
@@ -744,6 +765,10 @@ def rule_checks():
     the test re-encoded the bug it was meant to catch. A seed must drive the real checker, not a paraphrase.
     """
     f = []
+    # (v0.16.4) the base-build deviation must name its version, ref and reason, and an ordinary prefix must not get one
+    nt = base_deviation_note("rc022a") or ""
+    if not all(x in nt for x in ("v0.16.1", "359b23e", "racecraft.lua:1552")) or base_deviation_note("rc021a") is not None:
+        f.append("base deviation note wrong: %r / rc021a %r" % (nt, base_deviation_note("rc021a")))
     # (fix164) the error gate: a non-zero rcErr, a 'Verve error' line, or an unread row must never PASS
     shipped = "  7280  M  [Lua: app] Verve error (racecraft.evaluate: racecraft.lua:1552: attempt to call global 'm' (a nil value))\n"
     for args, want in (((3008842, [shipped]), "FAIL"), ((0, [shipped]), "FAIL"), ((5, []), "FAIL"),
@@ -1034,6 +1059,8 @@ def main():
                 return 2
             print("release_check: " + use_machine(sys.argv[i + 1]))
     print("release_check: %s against %s" % (head, base))
+    for pfx in sorted(BASE_DEVIATION):
+        print("release_check: " + base_deviation_note(pfx))
     rows = read_results()
     rep = Report()
     if rows is None:
