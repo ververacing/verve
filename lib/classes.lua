@@ -461,24 +461,30 @@ end
 -- tag (whole tag, lowercased and trimmed; not a substring, since '#gte-gt3' is also on every GT2/GTE car), or a user
 -- class override (the user's own call). GT4 / GT2 / Super Trofeo / road cars stay x1.0 until their own race cell.
 -- One pcall'd tag read per car per session, cached. Classes.keyOf is unchanged.
-local gt3Cache = {}
+-- (0.16.5) TOURING: an EXACT 'touring' tag AND the touring class key also qualifies - the cars the tr2 cell raced (Kunos '90s
+-- touring: M3 E30 DTM / Gr.A, 155 V6, 190 Evo II). '#Vintage Touring' (no bare tag) and cup cars stay x1.0. A GT3-tagged car is unchanged.
+local gt3Cache, tourCache = {}, {}
 function M.hintEligible(i)
     local id = carIdOf(i)
     if id and Overrides.classOverride(id) then return true end
     local e = gt3Cache[i]
     if e == nil then
         e = false
+        local tr = false
         pcall(function()
             local t = ac.getCarTags(i)
             if t then for _, v in ipairs(t) do
-                if tostring(v):lower():match('^%s*(.-)%s*$') == 'gt3' then e = true end
+                local s = tostring(v):lower():match('^%s*(.-)%s*$')
+                if s == 'gt3' then e = true elseif s == 'touring' then tr = true end
             end end
         end)
         gt3Cache[i] = e
+        tourCache[i] = tr
     end
-    return e
+    if e then return true end
+    return tourCache[i] == true and M.keyOf(i) == 'touring'
 end
 
-function M.reset() autoCache = {}; autoWhy = {}; idCache = {}; gt3Cache = {} end
+function M.reset() autoCache = {}; autoWhy = {}; idCache = {}; gt3Cache = {}; tourCache = {} end
 
 return M

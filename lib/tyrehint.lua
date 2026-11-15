@@ -37,7 +37,8 @@ R.COLD_LAPS = 2      -- the cut applies only on a session's first COLD_LAPS laps
                      -- Against the data optimum all race it never ended where tyres never reach it - GT3 at Monza runs 72-80 C
                      -- v 85-95 C, so the AI lost ~4 % grip all race (suite rc16a 2026-10-10: top-3 +3.0 s/lap)
 R.HINT_SHIP = true   -- DEFAULT 0.16.x (decisions 47/48): the clean-air hint above. false = today's writes exactly
-R.HINT_CLASS = { gt = 1.2 }       -- mult at meter 100, per class key; a class not listed stays 1.0 (formula FAILED 2026-10-31)
+R.HINT_CLASS = { gt = 1.2, touring = 1.2 }   -- mult at meter 100, per class key; a class not listed stays 1.0 (formula FAILED 2026-10-31)
+                                   -- (0.16.5) touring = the tr2 cell (TYRE_HINT_FORCE 1.2 at level 100); no HINT_CLASS_TOP entry, so it stays 1.2 above 100
 R.HINT_CLASS_TOP = { gt = 1.3 }   -- mult at hint level 120 (the top of the Above-expert range)
 R.HINT_RAMP_LO = 90  -- meter at or below this: 1.0 ("95 means 95": the hint must not make a low level secretly fast)
 R.HINT_ABOVE = 100   -- the Above-expert slider (Verve.lua sets it from G.aboveExpert every frame); 100 = off
@@ -71,7 +72,7 @@ end
 local function multFor(i)
     local force = tonumber(R.TYRE_HINT_FORCE)
     if force then return force end
-    if not Classes.hintEligible(i) then return 1.0 end   -- (audit R2) an exact 'gt3' tag or a user class override; else untested
+    if not Classes.hintEligible(i) then return 1.0 end   -- (audit R2) an exact 'gt3' tag, an exact 'touring' tag on a touring-class car (0.16.5), or a user class override
     local key = Classes.keyOf(i)
     local top = R.HINT_CLASS[key]
     if not top then return 1.0 end
