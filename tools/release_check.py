@@ -153,7 +153,9 @@ def base_deviation_note(prefix):
 # each of those limits, and the selftest seeds a defect against each one.
 NAMED_EXCEPTIONS = {("rc022b", "mon"): ({"pace_s"}, "verve-47 ruling 1, 11 Nov 2026: mon best pace '?' evidenced by hand "
                                                     "(p50 level; level v 0.16.3; +0.38 s v 0.16.1 pooled, disclosed in "
-                                                    "0.16.2 notes); record pc2/rc022_suite_result_20261111.md")}
+                                                    "0.16.2 notes); record pc2/rc022_suite_result_20261111.md"),
+                    # (v0.16.5) NAMED EXCEPTION, ONE CELL ONE METRIC ONE SUITE: verve-47 ruling 16 Nov 2026.
+                    ("rc0165b", "spa12"): ({"pace_s"}, "rc0165 spa12 pace_s: head 138.6 v base 137.6-138.2 ('?', within one spread). GT3 code is unchanged between base and head: the diff is the touring hint eligibility (classes.lua) and HINT_CLASS touring (tyrehint.lua), and a GT3-tagged car returns before either. contact, inc and heavy80 are inside the base range; errors gate PASS. verve-47 ruling 16 Nov 2026 after the owner's release go; record pc2/release_record_0165_20261116.md")}
 EXC_WORSE_BLOCKS = True   # a WORSE is never exempt (selftest seeds False)
 EXC_SUBSET = True         # every unresolved metric must be covered, not just one (selftest seeds False)
 EXC_SCOPED = True         # the exception binds to its own (suite, cell) only (selftest seeds False)
@@ -329,7 +331,65 @@ def mixed_commits(rows):
     return sorted({(r.get("verve_commit") or "").strip() for r in rows} - {""})
 
 
+FRESH_OVERRIDE = None   # (v2) --fresh <prefix>: the suite under test, instead of "prefix of the newest row"
+PRIOR_OVERRIDE = None   # (v2) --prior <prefix>: its baseline, instead of "the next-newest prefix"
+PAIR_SIDECAR = {}       # (v2) label -> set of (build, ref) from the runner sidecar(s) given with --sidecar
+HEAD_COMMIT = None      # (v2) full hash of the checked-out tree: the commit the fresh side must have run
+
+
+def load_sidecars(paths):
+    """(v2) runner sidecar csv(s) -> {label: {(build, ref), ...}}. The runner records the RUNTIME it swapped in
+    (build base/head, full ref); results.csv's verve_commit records git HEAD instead, so it cannot tell the sides apart."""
+    import csv, io   # (v2 fix 15 Nov) release_check imports neither; the first live run died on NameError
+    out = {}
+    for p in paths:
+        with io.open(p, encoding="utf-8", errors="replace") as fh:
+            for r in csv.DictReader(fh):
+                if r.get("label") and r.get("build") and r.get("ref"):
+                    out.setdefault(r["label"], set()).add((r["build"].strip(), r["ref"].strip()))
+    return out
+
+
+def resolve_pair(suite, fresh, prior, sidecar, head_commit):
+    """(v2) -> (fresh, prior, None) or (None, None, reason). Explicit prefixes, checked against the sidecar:
+    every fresh-side suite label must have run build 'head' at head_commit; every prior-side label build 'base'
+    at another ref. An inverted pair (base passed as --fresh), or a label with no sidecar record, is refused."""
+    have = {SUITE_RE.match(r["label"]).group(1) for r in suite}
+    for name, p in (("--fresh", fresh), ("--prior", prior)):
+        if p not in have:
+            return None, None, "%s %s has no suite rows" % (name, p)
+    if fresh == prior:
+        return None, None, "--fresh and --prior are the same prefix %s" % fresh
+    for p, want in ((fresh, "head"), (prior, "base")):
+        for r in suite:
+            if SUITE_RE.match(r["label"]).group(1) != p:
+                continue
+            got = sidecar.get(r["label"])
+            if not got:
+                return None, None, "%s has no runner sidecar record - cannot tell which runtime it ran" % r["label"]
+            builds = {b for b, _ in got}
+            refs = {f for _, f in got}
+            if builds != {want} or len(refs) != 1:
+                other = "base" if want == "head" else "head"
+                return None, None, "%s ran build %s (ref %s) but the %s side must be all '%s'%s" % (
+                    r["label"], "/".join(sorted(builds)), "/".join(x[:7] for x in sorted(refs)),
+                    "fresh" if want == "head" else "prior", want,
+                    " - inverted pair?" if builds == {other} else "")
+            ref = next(iter(refs))
+            if want == "head" and head_commit and ref != head_commit:
+                return None, None, "%s ran %s, not the checked-out %s" % (r["label"], ref[:7], head_commit[:7])
+            if want == "base" and head_commit and ref == head_commit:
+                return None, None, "%s (prior side) ran the checked-out commit %s" % (r["label"], ref[:7])
+    return fresh, prior, None
+
+
 def prior_prefix(suite, fresh_prefix):
+    if PRIOR_OVERRIDE:   # (v2) explicit; resolve_pair in check_suite has already validated it
+        return PRIOR_OVERRIDE
+    return _prior_prefix_by_time(suite, fresh_prefix)
+
+
+def _prior_prefix_by_time(suite, fresh_prefix):
     """(audit B2) the suite run BEFORE the freshest one: the other prefix whose newest row is latest in run time.
     A string sort put "rc017a" before "rc16c" ('0' < '1'), so a mixed-padding history picked an old suite."""
     newest = {}
@@ -433,6 +493,14 @@ def check_suite(rep, rows):
         s = stamp_of(r)
         if s > best:
             best, fresh_prefix = s, SUITE_RE.match(r["label"]).group(1)
+    if FRESH_OVERRIDE:   # (v2) explicit pair, refused outright if the runner sidecar does not back it
+        f, p, why = resolve_pair(suite, FRESH_OVERRIDE, PRIOR_OVERRIDE, PAIR_SIDECAR, HEAD_COMMIT)
+        if why:
+            rep.refuse("suite pair", why)
+            return None
+        rep.ok("suite pair", "explicit --fresh %s (head %s) vs --prior %s (base); every label backed by the runner sidecar"
+               % (f, (HEAD_COMMIT or "?")[:7], p))
+        fresh_prefix = f
     counts = per_cell(cells_of(suite, fresh_prefix))
     # the character cells are reported for visibility and never block
     chars = ", ".join("%s x%d" % (c, counts.get(c, 0)) for c in sorted(CHARACTER_CELLS))
@@ -939,9 +1007,13 @@ def rule_checks():
     # (ii) a "?" on an uncovered metric in the same cell (inc) still REFUSES, (iii) the same pace "?" in a cell or
     # suite the exception does not name still REFUSES. Base pace 110.5 x6 gives the 0.30 s floor band: 110.6 is "?",
     # 111.0 is WORSE. Base incidents 20 x6: a head 21 is "?".
-    if sorted(NAMED_EXCEPTIONS) != [("rc022b", "mon")] or NAMED_EXCEPTIONS[("rc022b", "mon")][0] != {"pace_s"} \
-            or "rc022_suite_result_20261111.md" not in NAMED_EXCEPTIONS[("rc022b", "mon")][1]:
-        f.append("NAMED_EXCEPTIONS is not exactly rc022b/mon/{pace_s} with its record: %r" % NAMED_EXCEPTIONS)
+    if sorted(NAMED_EXCEPTIONS) != [("rc0165b", "spa12"), ("rc022b", "mon")] \
+            or NAMED_EXCEPTIONS[("rc022b", "mon")][0] != {"pace_s"} \
+            or "rc022_suite_result_20261111.md" not in NAMED_EXCEPTIONS[("rc022b", "mon")][1] \
+            or NAMED_EXCEPTIONS[("rc0165b", "spa12")][0] != {"pace_s"} \
+            or "release_record_0165_20261116.md" not in NAMED_EXCEPTIONS[("rc0165b", "spa12")][1]:
+        f.append("NAMED_EXCEPTIONS is not exactly rc022b/mon/{pace_s} + rc0165b/spa12/{pace_s} with their records: %r"
+                 % NAMED_EXCEPTIONS)
     saved_exc = dict(NAMED_EXCEPTIONS)
     try:
         NAMED_EXCEPTIONS.clear()
@@ -1015,7 +1087,71 @@ def rule_checks():
     return f
 
 
+def pair_selftest():
+    """(v2) seeded: a suite shaped like rc0165 (a = base, b = head, t/e = extra head rows SUITE_RE also matches, and
+    a base re-run as the newest row). The time rule must pick the wrong pair; the explicit pair must pick b vs a; an
+    inverted pair, a missing sidecar label and a fresh side on another commit must each be refused."""
+    H, B = "f" * 40, "4" * 40
+
+    def row(lab, st):
+        return {"label": lab, "file": "race_%s_x.json" % st}
+    suite = ([row("rc99a_mon_%d" % n, "20261115_0%d0000" % n) for n in range(1, 7)] +
+             [row("rc99b_mon_%d" % n, "20261115_0%d3000" % n) for n in range(1, 7)] +
+             [row("rc99t_mon_1", "20261115_170000"), row("rc99e_mon_1", "20261115_180000"),
+              row("rc99a_mon_7", "20261115_190000")])
+    side = {r["label"]: {("base", B)} for r in suite if r["label"].startswith("rc99a")}
+    side.update({r["label"]: {("head", H)} for r in suite if not r["label"].startswith("rc99a")})
+    res = []
+
+    def t(name, cond):
+        print("  pair: %-58s %s" % (name, "ok" if cond else "FAILED"))
+        res.append(bool(cond))
+    fp = SUITE_RE.match(max(suite, key=stamp_of)["label"]).group(1)
+    t("time rule picks fresh=rc99a (the defect being fixed)", fp == "rc99a")
+    t("time rule picks prior=rc99e (the defect being fixed)", _prior_prefix_by_time(suite, fp) == "rc99e")
+    t("explicit pair rc99b vs rc99a accepted", resolve_pair(suite, "rc99b", "rc99a", side, H) == ("rc99b", "rc99a", None))
+    why = resolve_pair(suite, "rc99a", "rc99b", side, H)[2]
+    t("inverted pair (base as --fresh) refused", why and "inverted" in why)
+    s2 = {k: v for k, v in side.items() if k != "rc99b_mon_3"}
+    why = resolve_pair(suite, "rc99b", "rc99a", s2, H)[2]
+    t("fresh label with no sidecar record refused", why and "no runner sidecar" in why)
+    why = resolve_pair(suite, "rc99b", "rc99a", side, "9" * 40)[2]
+    t("fresh side not at the checked-out commit refused", why and "not the checked-out" in why)
+    why = resolve_pair(suite, "rc99b", "rc99b", side, H)[2]
+    t("same prefix both sides refused", why and "same prefix" in why)
+    why = resolve_pair(suite, "rc99b", "rc99z", side, H)[2]
+    t("unknown prior prefix refused", why and "no suite rows" in why)
+    s3 = dict(side)
+    s3["rc99a_mon_2"] = {("base", B), ("head", H)}
+    t("prior label recorded under two builds refused", resolve_pair(suite, "rc99b", "rc99a", s3, H)[2] is not None)
+    s4 = {k: ({("base", H)} if k.startswith("rc99a") else v) for k, v in side.items()}
+    why = resolve_pair(suite, "rc99b", "rc99a", s4, H)[2]
+    t("prior side on the checked-out commit refused", why and "prior side" in why)
+    # (v2 fix 15 Nov) the first live run died in load_sidecars (io/csv not imported) because no test called it:
+    # read a sidecar FILE written here in the runner's format, then the real rc0165 sidecar if it is on this desk.
+    import tempfile
+    fd, tmp = tempfile.mkstemp(suffix=".csv")
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+        fh.write("time,label,build,ref,proof,attempt,outcome\n"
+                 "2026-11-15 00:22:42,rc99a_mon_1,base,%s,git-diff-quiet-ok,1,started\n"
+                 "2026-11-15 00:46:55,rc99a_mon_1,base,%s,,1,done-exit-0\n"
+                 "2026-11-15 00:47:10,rc99b_mon_1,head,%s,,1,done-exit-0\n" % (B, B, H))
+    try:
+        got = load_sidecars([tmp])
+    finally:
+        os.remove(tmp)
+    t("load_sidecars reads a runner-format csv file", got == {"rc99a_mon_1": {("base", B)}, "rc99b_mon_1": {("head", H)}})
+    real = os.environ.get("RELEASE_CHECK_SIDECAR_TEST", "")   # optional: a real rc0165 sidecar, machine-local
+    if real and os.path.exists(real):
+        g = load_sidecars([real])
+        t("load_sidecars on the real rc0165 sidecar: a/b labels, one build each",
+          len([k for k in g if k.startswith(("rc0165a_", "rc0165b_"))]) == 36
+          and all(len(v) == 1 for k, v in g.items() if k.startswith(("rc0165a_", "rc0165b_"))))
+    return all(res)
+
+
 def selftest():
+    pair_ok = pair_selftest()
     """Check the gate's own rules, then break each rule and confirm the check complains.
 
     THIS TOOL HAD NO SELFTEST UNTIL NOW, and it is the one place where that mattered most: it decides whether a
@@ -1117,7 +1253,7 @@ def selftest():
         print("  %-46s %s" % (name[:46], "caught" if got else "NOT CAUGHT"))
         allok &= bool(got)
     print("\n  %s" % ("every seeded defect caught" if allok else "SELFTEST NOT TRUSTWORTHY"))
-    return 0 if (not fails and allok) else 1
+    return 0 if (not fails and allok and pair_ok) else 1
 
 
 # HEAD, not a branch name: the default used to be "dev016", which is not a local branch on PC #2 (its branch is
@@ -1126,6 +1262,7 @@ DEFAULT_HEAD = "HEAD"
 
 
 def main():
+    global FRESH_OVERRIDE, PRIOR_OVERRIDE, HEAD_COMMIT
     if "--selftest" in sys.argv:
         return selftest()
     base, head = "origin/main", DEFAULT_HEAD
@@ -1134,11 +1271,24 @@ def main():
             base = sys.argv[i + 1]
         if a == "--head" and i + 1 < len(sys.argv):
             head = sys.argv[i + 1]
+        if a == "--fresh" and i + 1 < len(sys.argv):
+            FRESH_OVERRIDE = sys.argv[i + 1]
+        if a == "--prior" and i + 1 < len(sys.argv):
+            PRIOR_OVERRIDE = sys.argv[i + 1]
+        if a == "--sidecar" and i + 1 < len(sys.argv):
+            PAIR_SIDECAR.update(load_sidecars(sys.argv[i + 1].split(",")))
         if a == "--machine" and i + 1 < len(sys.argv):
             if sys.argv[i + 1] not in MACHINE_CELLS:
                 print("release_check: unknown --machine %r (known: %s)" % (sys.argv[i + 1], ", ".join(MACHINE_CELLS)))
                 return 2
             print("release_check: " + use_machine(sys.argv[i + 1]))
+    if bool(FRESH_OVERRIDE) != bool(PRIOR_OVERRIDE) or (FRESH_OVERRIDE and not PAIR_SIDECAR):
+        print("release_check: --fresh and --prior go together, with --sidecar <runner csv[,csv]>")
+        return 2
+    if FRESH_OVERRIDE:
+        rc_, out_, _ = sh("git", "rev-parse", head)
+        HEAD_COMMIT = out_.strip() if rc_ == 0 else None
+        print("release_check: explicit suite pair --fresh %s --prior %s (v2)" % (FRESH_OVERRIDE, PRIOR_OVERRIDE))
     print("release_check: %s against %s" % (head, base))
     for pfx in sorted(BASE_DEVIATION):
         print("release_check: " + base_deviation_note(pfx))
