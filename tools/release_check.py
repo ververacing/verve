@@ -350,7 +350,17 @@ def load_sidecars(paths):
     return out
 
 
-def resolve_pair(suite, fresh, prior, sidecar, head_commit):
+RUNTIME_PATHS = ("lib", "Verve.lua", "manifest.ini")   # (v2.1) what the game loads; docs/tools commits do not change it
+
+
+def same_runtime(a, b):
+    """(v2.1) True only when git says the runtime files are identical between commits a and b. Any git error
+    (unknown commit, no repo) is False, so the check refuses rather than passes."""
+    rc_, _, _ = sh("git", "diff", "--quiet", a, b, "--", *RUNTIME_PATHS)
+    return rc_ == 0
+
+
+def resolve_pair(suite, fresh, prior, sidecar, head_commit, same_rt=None):
     """(v2) -> (fresh, prior, None) or (None, None, reason). Explicit prefixes, checked against the sidecar:
     every fresh-side suite label must have run build 'head' at head_commit; every prior-side label build 'base'
     at another ref. An inverted pair (base passed as --fresh), or a label with no sidecar record, is refused."""
@@ -376,8 +386,10 @@ def resolve_pair(suite, fresh, prior, sidecar, head_commit):
                     "fresh" if want == "head" else "prior", want,
                     " - inverted pair?" if builds == {other} else "")
             ref = next(iter(refs))
-            if want == "head" and head_commit and ref != head_commit:
-                return None, None, "%s ran %s, not the checked-out %s" % (r["label"], ref[:7], head_commit[:7])
+            # (v2.1) the fresh side must have run the checked-out RUNTIME: the same commit, or one whose lib/,
+            # Verve.lua and manifest.ini are identical (a docs or tools commit on top, e.g. the release text).
+            if want == "head" and head_commit and ref != head_commit and not (same_rt or same_runtime)(ref, head_commit):
+                return None, None, "%s ran %s, not the checked-out %s (runtime differs)" % (r["label"], ref[:7], head_commit[:7])
             if want == "base" and head_commit and ref == head_commit:
                 return None, None, "%s (prior side) ran the checked-out commit %s" % (r["label"], ref[:7])
     return fresh, prior, None
@@ -1117,6 +1129,10 @@ def pair_selftest():
     t("fresh label with no sidecar record refused", why and "no runner sidecar" in why)
     why = resolve_pair(suite, "rc99b", "rc99a", side, "9" * 40)[2]
     t("fresh side not at the checked-out commit refused", why and "not the checked-out" in why)
+    t("(v2.1) fresh side on another commit with the same runtime accepted",
+      resolve_pair(suite, "rc99b", "rc99a", side, "9" * 40, same_rt=lambda a, b: True) == ("rc99b", "rc99a", None))
+    why = resolve_pair(suite, "rc99b", "rc99a", side, "9" * 40, same_rt=lambda a, b: False)[2]
+    t("(v2.1) fresh side on another commit with a different runtime refused", why and "runtime differs" in why)
     why = resolve_pair(suite, "rc99b", "rc99b", side, H)[2]
     t("same prefix both sides refused", why and "same prefix" in why)
     why = resolve_pair(suite, "rc99b", "rc99z", side, H)[2]
