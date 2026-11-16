@@ -11,8 +11,16 @@ set -euo pipefail
 
 VER="${1:-}"
 if [[ ! "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Usage: ./release.sh X.Y.Z  (e.g. ./release.sh 0.6.7)"; exit 1
+    echo "Usage: ./release.sh X.Y.Z [release_check args]  (e.g. ./release.sh 0.6.7, or ./release.sh 0.16.6 --machine pc2 --fresh X --prior Y --sidecar \"a b.csv\")"; exit 1
 fi
+# (R5, review 16 Nov) release_check arguments come AFTER the version and are forwarded verbatim as "${@:2}", so a quoted path
+# with a space stays one argument. The old RELEASE_CHECK_ARGS variable was word-split unquoted (the 0.16.5 first-run refusal on
+# "Assetto Corsa"): it is refused rather than half-honoured.
+if [[ -n "${RELEASE_CHECK_ARGS:-}" ]]; then
+    echo "RELEASE_CHECK_ARGS is no longer read (it word-split paths with spaces). Pass the arguments after the version:"
+    echo "  ./release.sh $VER --machine pc2 --fresh X --prior Y --sidecar \"path with spaces.csv\""; exit 1
+fi
+RC_ARGS=("${@:2}")
 cd "$(dirname "$0")"
 TAG="v$VER"
 DIST="dist"
@@ -86,7 +94,7 @@ python -I tools/leak_check.py --tree HEAD \
 
 # 0e. the release gate itself: suite freshness, completeness and not-worse.
 echo "-- preflight: release_check"
-python -I tools/release_check.py ${RELEASE_CHECK_ARGS:-} || fail "release_check says NOT RELEASABLE. Read its output; a REFUSED line counts as a failure."
+python -I tools/release_check.py ${RC_ARGS[@]+"${RC_ARGS[@]}"} || fail "release_check says NOT RELEASABLE. Read its output; a REFUSED line counts as a failure."
 
 # 0f. the Lua must COMPILE and stay under LuaJIT's 120-upvalue ceiling. Over it, the app fails to
 #     load and every race 'sits at the lights' - a release that does that is unusable, and it is

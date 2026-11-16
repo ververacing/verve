@@ -354,16 +354,30 @@ RUNTIME_PATHS = ("lib", "Verve.lua", "manifest.ini")   # (v2.1) what the game lo
 
 
 def same_runtime(a, b):
-    """(v2.1) True only when git says the runtime files are identical between commits a and b. Any git error
-    (unknown commit, no repo) is False, so the check refuses rather than passes."""
+    """(v2.1; three-way since the 16 Nov review, R2) True = git says the runtime files are identical between commits a and b
+    (rc 0), False = they differ (rc 1), None = git could not compare them (any other rc: unknown commit, no repo). Callers
+    treat None as a refusal on BOTH sides: a fresh side we cannot prove equal is not head, and a baseline we cannot prove
+    different is not a baseline."""
     rc_, _, _ = sh("git", "diff", "--quiet", a, b, "--", *RUNTIME_PATHS)
-    return rc_ == 0
+    return True if rc_ == 0 else (False if rc_ == 1 else None)
+
+
+def _rt_cmp(fn, a, b):
+    """(R2) run a runtime comparison; an exception or a non-bool answer is an error (None)."""
+    try:
+        v = fn(a, b)
+    except Exception:
+        return None
+    return v if v is True or v is False else None
 
 
 def resolve_pair(suite, fresh, prior, sidecar, head_commit, same_rt=None):
     """(v2) -> (fresh, prior, None) or (None, None, reason). Explicit prefixes, checked against the sidecar:
     every fresh-side suite label must have run build 'head' at head_commit; every prior-side label build 'base'
-    at another ref. An inverted pair (base passed as --fresh), or a label with no sidecar record, is refused."""
+    at another ref. An inverted pair (base passed as --fresh), or a label with no sidecar record, is refused.
+    (R1, review 16 Nov) a falsy head_commit is refused: it used to skip both runtime checks, so a bad --head passed OPEN."""
+    if not head_commit:
+        return None, None, "no checked-out commit to compare against (bad --head?)"
     have = {SUITE_RE.match(r["label"]).group(1) for r in suite}
     for name, p in (("--fresh", fresh), ("--prior", prior)):
         if p not in have:
@@ -388,10 +402,22 @@ def resolve_pair(suite, fresh, prior, sidecar, head_commit, same_rt=None):
             ref = next(iter(refs))
             # (v2.1) the fresh side must have run the checked-out RUNTIME: the same commit, or one whose lib/,
             # Verve.lua and manifest.ini are identical (a docs or tools commit on top, e.g. the release text).
-            if want == "head" and head_commit and ref != head_commit and not (same_rt or same_runtime)(ref, head_commit):
-                return None, None, "%s ran %s, not the checked-out %s (runtime differs)" % (r["label"], ref[:7], head_commit[:7])
-            if want == "base" and head_commit and ref == head_commit:
+            if want == "head" and ref != head_commit:
+                v = _rt_cmp(same_rt or same_runtime, ref, head_commit)
+                if v is None:
+                    return None, None, "%s ran %s: cannot compare it with the checked-out runtime %s (git error)" % (r["label"], ref[:7], head_commit[:7])
+                if v is False:
+                    return None, None, "%s ran %s, not the checked-out %s (runtime differs)" % (r["label"], ref[:7], head_commit[:7])
+            if want == "base" and ref == head_commit:
                 return None, None, "%s (prior side) ran the checked-out commit %s" % (r["label"], ref[:7])
+            # (R2, review 16 Nov) another commit with the checked-out RUNTIME is the same code under a new name: a baseline
+            # on it would compare head with itself (e.g. a RESTORE_REF on a docs commit over head).
+            if want == "base":
+                v = _rt_cmp(same_rt or same_runtime, ref, head_commit)
+                if v is None:
+                    return None, None, "%s (prior side): cannot compare %s with the checked-out runtime (git error)" % (r["label"], ref[:7])
+                if v is True:
+                    return None, None, "%s (prior side) ran %s, whose runtime equals the checked-out %s" % (r["label"], ref[:7], head_commit[:7])
     return fresh, prior, None
 
 
@@ -1121,16 +1147,35 @@ def pair_selftest():
     fp = SUITE_RE.match(max(suite, key=stamp_of)["label"]).group(1)
     t("time rule picks fresh=rc99a (the defect being fixed)", fp == "rc99a")
     t("time rule picks prior=rc99e (the defect being fixed)", _prior_prefix_by_time(suite, fp) == "rc99e")
-    t("explicit pair rc99b vs rc99a accepted", resolve_pair(suite, "rc99b", "rc99a", side, H) == ("rc99b", "rc99a", None))
+    DIFF = lambda a, b: False   # (R2) seeded hashes are not real commits: real git now answers "error", so seeds state the runtime
+    t("explicit pair rc99b vs rc99a accepted", resolve_pair(suite, "rc99b", "rc99a", side, H, same_rt=DIFF) == ("rc99b", "rc99a", None))
     why = resolve_pair(suite, "rc99a", "rc99b", side, H)[2]
     t("inverted pair (base as --fresh) refused", why and "inverted" in why)
     s2 = {k: v for k, v in side.items() if k != "rc99b_mon_3"}
     why = resolve_pair(suite, "rc99b", "rc99a", s2, H)[2]
     t("fresh label with no sidecar record refused", why and "no runner sidecar" in why)
-    why = resolve_pair(suite, "rc99b", "rc99a", side, "9" * 40)[2]
+    why = resolve_pair(suite, "rc99b", "rc99a", side, "9" * 40, same_rt=DIFF)[2]
     t("fresh side not at the checked-out commit refused", why and "not the checked-out" in why)
     t("(v2.1) fresh side on another commit with the same runtime accepted",
-      resolve_pair(suite, "rc99b", "rc99a", side, "9" * 40, same_rt=lambda a, b: True) == ("rc99b", "rc99a", None))
+      resolve_pair(suite, "rc99b", "rc99a", side, "9" * 40, same_rt=lambda a, b: a == H) == ("rc99b", "rc99a", None))
+    why = resolve_pair(suite, "rc99b", "rc99a", side, "9" * 40, same_rt=lambda a, b: True)[2]
+    t("(R2) prior side on another commit with the head's runtime refused", why and "runtime equals" in why)
+    why = resolve_pair(suite, "rc99b", "rc99a", side, "9" * 40, same_rt=lambda a, b: True if a == H else None)[2]
+    t("(R2) prior side whose comparison is a git error (None) refused", why and "git error" in why and "prior side" in why)
+
+    def boom(a, b):
+        if a == H:
+            return True
+        raise RuntimeError("seeded git failure")
+    why = resolve_pair(suite, "rc99b", "rc99a", side, "9" * 40, same_rt=boom)[2]
+    t("(R2) prior side whose comparison raises refused", why and "git error" in why and "prior side" in why)
+    why = resolve_pair(suite, "rc99b", "rc99a", side, "9" * 40, same_rt=lambda a, b: None)[2]
+    t("(R2) fresh side whose comparison is a git error refused", why and "git error" in why and "prior side" not in why)
+    t("(R2) real same_runtime on unknown commits is None (error), not False", same_runtime("9" * 40, "8" * 40) is None)
+    why = resolve_pair(suite, "rc99b", "rc99a", side, None)[2]
+    t("(R1) no checked-out commit (head_commit None) refused", why and "no checked-out commit" in why)
+    why = resolve_pair(suite, "rc99b", "rc99a", side, "")[2]
+    t("(R1) empty head_commit refused", why and "no checked-out commit" in why)
     why = resolve_pair(suite, "rc99b", "rc99a", side, "9" * 40, same_rt=lambda a, b: False)[2]
     t("(v2.1) fresh side on another commit with a different runtime refused", why and "runtime differs" in why)
     why = resolve_pair(suite, "rc99b", "rc99b", side, H)[2]
@@ -1167,7 +1212,6 @@ def pair_selftest():
 
 
 def selftest():
-    pair_ok = pair_selftest()
     """Check the gate's own rules, then break each rule and confirm the check complains.
 
     THIS TOOL HAD NO SELFTEST UNTIL NOW, and it is the one place where that mattered most: it decides whether a
@@ -1181,6 +1225,7 @@ def selftest():
     `sgf` sits in until cspf5 provides an interleaved baseline; and that the label grammar still matches each
     cell token with spa12 winning over its own prefix spa.
     """
+    pair_ok = pair_selftest()   # (R3, review 16 Nov) below the docstring, so selftest.__doc__ is set
     fails = rule_checks()
     print("=== release_check selftest ===")
     for x in fails:
@@ -1302,8 +1347,11 @@ def main():
         print("release_check: --fresh and --prior go together, with --sidecar <runner csv[,csv]>")
         return 2
     if FRESH_OVERRIDE:
-        rc_, out_, _ = sh("git", "rev-parse", head)
-        HEAD_COMMIT = out_.strip() if rc_ == 0 else None
+        rc_, out_, _ = sh("git", "rev-parse", "--verify", head + "^{commit}")   # (R1) must name a commit, or stop
+        if rc_ != 0 or not out_.strip():
+            print("release_check: --head %r is not a commit (git rev-parse --verify failed)" % head)
+            return 2
+        HEAD_COMMIT = out_.strip()
         print("release_check: explicit suite pair --fresh %s --prior %s (v2)" % (FRESH_OVERRIDE, PRIOR_OVERRIDE))
     print("release_check: %s against %s" % (head, base))
     for pfx in sorted(BASE_DEVIATION):
