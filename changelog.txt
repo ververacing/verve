@@ -1,3 +1,29 @@
+0.16.5
+- AI touring cars now get the same tyre-grip hint GT3 cars already get: up to x1.2 at AI level 100, ramping in from
+  level 90. It stays at x1.2 above level 100 (Above-expert adds nothing for touring yet; those levels were not
+  tested). GT3 behaviour is unchanged.
+- Who gets it: cars with an exact `touring` tag whose class resolves to touring, plus any car you set to the touring
+  class yourself in the class override.
+- What we measured (Kunos 90s touring cars: BMW M3 E30 DTM, Alfa 155 V6, Mercedes 190 Evo II; 16 cars, 12 laps,
+  8 races per arm at Monza and Brands Hatch GP, AI level 100): best laps 3.5 s faster at Monza and 2.8 s faster at
+  Brands; median laps 4.2 s and 1.5 s faster. Contacts (car or track) on the opening two laps went down (Monza 156 to
+  132, Brands 149 to 124), and so did repairs (Monza 25 to 19, Brands 24 to 20).
+- Trade-off: fewer passes in the midfield. At Brands the field made 36% fewer passes (576 to 366). When a midfield car
+  closed to within 40 m behind a rookie, that spell ended in a pass 76% of the time without the hint and 50% with it.
+  Rookies gain the most from the hint.
+- Caveats: tested on the Kunos 90s touring cars only, at AI level 100. The 90 to 100 ramp is checked at level 95 but
+  not raced at length. Other touring-tagged mods (TCR, BTCC, DTM, STW and similar packs) also get the hint if they
+  carry a `touring` tag; they have not been tested. Kunos cars filed as touring without that tag (for example the Alfa
+  GTA, Escort Mk1, Abarth 595s and the Audi TT Cup) do not get it.
+- README: the Repair damage on track setting is now described.
+- Release-check notes:
+  - GT3 races came out level with 0.16.4 (the GT3 code is unchanged). At Spa the fastest-lap figure sat a few tenths
+    outside 0.16.4's range, within normal variation; it is recorded as a named exception.
+  - A check that the shipped touring code races exactly like the tested version did not pass its pre-set rule: one run
+    had faster typical laps, and a same-day comparison came out mixed (a bit faster at Monza, a bit slower at Brands
+    Hatch). Both apply the same grip hint, and the same rule also fails when the tested version is compared with itself
+    on another day, so we read it as race-to-race variation.
+
 0.16.4
 - Fixed a bug from 0.16.2 that switched off much of Verve's racing whenever a car had another car right behind it. In
   that situation the AI stopped choosing when to attack and defend, stopped picking its racing line, stopped moving
