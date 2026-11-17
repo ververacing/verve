@@ -39,7 +39,7 @@ racing, on **any** car and track. Toggle and tune everything in the in‑game pa
 - **Manual:** unzip so the folder lands at `assettocorsa/apps/lua/Verve` (the zip is structured
   `apps/lua/Verve/…` for this). Then enable the **Verve AI** app in CM's app settings.
 
-In game, open the **Verve AI** app from the app sidebar and enable it. You can review each car's
+In game, open the **Verve AI** app from the app sidebar (or the setup screen, before you press Drive) and enable it. You can review each car's
 detected class and set per‑car levels on the grid before the lights.
 The settings button on the Verve AI window opens a compact panel with the main switches; everything else is in
 the app window.
