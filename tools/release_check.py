@@ -160,6 +160,45 @@ EXC_WORSE_BLOCKS = True   # a WORSE is never exempt (selftest seeds False)
 EXC_SUBSET = True         # every unresolved metric must be covered, not just one (selftest seeds False)
 EXC_SCOPED = True         # the exception binds to its own (suite, cell) only (selftest seeds False)
 
+# NAMED RELEASE EXCEPTION, ONE RELEASE (17 Nov 2026, v0.16.6; OWNER DECISION via verve-47, "Exception + 1 race").
+# A display-only release: the runtime diff from shipped 0.16.5 is the manifest FLAGS line (SETUP on WINDOW_0), the
+# windowMain setup-screen branch (Reset my car shows a note while sim.isInMainMenu) and the R.forceRecover manual-press
+# guard. Racing code is unchanged. The owner checked it in game; ONE error-gate race on that exact runtime replaces the
+# 36-row suite for THIS release only. It is not a weaker gate for anything else, by construction:
+#   - it applies only when named on the command line (--release-exception v0.16.6), and only if changelog.txt's top
+#     block is that version;
+#   - the runtime TREE must be byte-identical to the pinned one (git object ids of Verve.lua, lib/ and manifest.ini at
+#     HEAD), so any later code change voids it; and the diff from 0.16.5 must be exactly the pinned per-file line counts;
+#   - the suite items print EXEMPT with the reason, never PASS; the error gate still runs, on the named row, which must
+#     have run (runner sidecar) a ref with this same runtime, with rcErr 0, no 'Verve error' and Verve's window loaded;
+#   - items 4-7 (defaults evidence, withdrawn claims, identity, docs) run exactly as without it.
+RELEASE_EXCEPTIONS = {"v0.16.6": dict(
+    base="6a3abb5b00156efd8da5d281b45974b20f8d85ea",
+    blobs={"Verve.lua": "9dc75a6dc7402d2785d9dcecd1ba80eeaa41d8f7", "lib": "5ca4964648a47aa0632af42da38b95248553e3f0",
+           "manifest.ini": "a2669d917a01e9263e43afcbd2477a6429bdbaef"},
+    numstat={"Verve.lua": (13, 5), "lib/recovery.lua": (1, 0), "manifest.ini": (1, 1)},
+    gate_row="rc0166b_mon_1",
+    reason="owner decision 17 Nov 2026: display-only release; racing code unchanged from 0.16.5; "
+           "checked by the owner in game + one error-gate race")}
+REL_EXC_PINNED = True     # every pin is checked (selftest seeds False)
+
+
+def release_exception_problem(key, top_version, blobs, numstat):
+    """None when RELEASE_EXCEPTIONS[key] covers exactly this tree, else why not. Pure: rule_checks drives it."""
+    e = RELEASE_EXCEPTIONS.get(key)
+    if not e:
+        return "no release exception named %r (known: %s)" % (key, ", ".join(sorted(RELEASE_EXCEPTIONS)) or "none")
+    if not REL_EXC_PINNED:
+        return None
+    if "v%s" % (top_version or "") != key:
+        return "changelog.txt's top block is %r, so this is not the %s release" % (top_version, key)
+    if blobs != e["blobs"]:
+        bad = sorted(k for k in set(blobs) | set(e["blobs"]) if blobs.get(k) != e["blobs"].get(k))
+        return "the runtime tree is not the pinned one (differs: %s)" % ", ".join(bad)
+    if numstat != e["numstat"]:
+        return "the diff from %s is %s, not the pinned %s" % (e["base"][:7], sorted(numstat.items()), sorted(e["numstat"].items()))
+    return None
+
 
 def named_exception(prefix, cell, metrics):
     """The reason when a named exception covers `metrics` for this (suite prefix, cell), else None."""
@@ -618,6 +657,52 @@ def check_errors(rep, suite, fresh_prefix):
         rep.refuse("errors unread", "%d of %d gating rows: %s" % (len(bad["REFUSED"]), len(rows), "; ".join(bad["REFUSED"][:4])))
     if not bad["FAIL"] and not bad["REFUSED"]:
         rep.ok("errors", "%d gating rows of %s: rcErr 0 at race end, no '%s' in any CSP log" % (len(rows), fresh_prefix, VERVE_ERR))
+
+
+def check_release_exception(rep, rows, key, head):
+    """With --release-exception: verify its pins, EXEMPT the suite items, and run the error gate on its one named row."""
+    e = RELEASE_EXCEPTIONS.get(key) or {}
+    top = None
+    try:
+        with open(os.path.join(VERVE, "changelog.txt"), encoding="utf-8", errors="replace") as fh:
+            top = fh.readline().strip()
+    except OSError:
+        pass
+    blobs = {}
+    for path in ("Verve.lua", "lib", "manifest.ini"):
+        rc_, out_, _ = sh("git", "rev-parse", "%s:%s" % (head, path))
+        blobs[path] = out_.strip() if rc_ == 0 else None
+    numstat = {}
+    rc_, out_, _ = sh("git", "diff", "--numstat", e.get("base", "origin/main"), head, "--", *(APP_PATHS + ["manifest.ini"]))
+    for ln in (out_.splitlines() if rc_ == 0 else []):
+        a, d, f = ln.split("\t")
+        numstat[f] = (int(a), int(d))
+    why = release_exception_problem(key, top, blobs, numstat)
+    if why:
+        rep.refuse("release exception", "%s does not apply: %s" % (key, why))
+        return
+    note = "named release exception %s: %s" % (key, e["reason"])
+    print("release_check: " + note)
+    for item in ("suite freshness", "suite completeness", "not worse"):
+        rep.exempt(item, "EXEMPT, " + note)
+    lab = e["gate_row"]
+    hit = [r for r in rows if r.get("label") == lab]
+    if not hit:
+        rep.refuse("errors", "the exception's error-gate row %s is not in results.csv" % lab)
+        return
+    r = max(hit, key=stamp_of)
+    ran = PAIR_SIDECAR.get(lab) or set()
+    if not ran or any(b != "head" or not same_runtime(f, head) for b, f in ran):
+        rep.refuse("errors", "%s has no runner sidecar record of build head on this runtime (got %s); pass --sidecar" % (lab, sorted(ran)))
+        return
+    csp = csp_log_lines(lab, stamp_of(r))
+    v, d = error_verdict(last_rcerr(r.get("file")), csp)
+    {"PASS": rep.ok, "FAIL": rep.fail}.get(v, rep.refuse)("errors", "%s (%s): %s" % (lab, "/".join(sorted(x[:7] for _, x in ran)), d))
+    win = [x.strip() for x in (csp or []) if "App is loaded" in x and "Verve'" in x and "windows: " in x]
+    if win and not win[0].rstrip().endswith("windows: 0"):
+        rep.ok("window registered", "%s: %s" % (lab, win[0][-110:]))
+    else:
+        rep.fail("window registered", "%s: no 'App is loaded ... Verve ... windows: N' line in its CSP log" % lab)
 
 
 def check_not_worse(rep, suite, fresh_prefix, all_rows=()):
@@ -1110,6 +1195,20 @@ def rule_checks():
     if not m or m.group(2) != "sgfnk":
         f.append("SUITE_RE does not read sgfnk as its own cell (got %r)" % (m and m.group(2)))
 
+    # (v0.16.6) the named release exception: exactly one, and it binds to its own version, tree and diff only
+    if sorted(RELEASE_EXCEPTIONS) != ["v0.16.6"]:
+        f.append("release exceptions are not exactly [v0.16.6]: %s" % sorted(RELEASE_EXCEPTIONS))
+    e6 = RELEASE_EXCEPTIONS.get("v0.16.6") or {}
+    pb, pn = dict(e6.get("blobs") or {}), dict(e6.get("numstat") or {})
+    if release_exception_problem("v0.16.6", "0.16.6", pb, pn) is not None:
+        f.append("the v0.16.6 release exception refuses its own pinned tree")
+    for what, args in (("another version", ("v0.16.6", "0.16.7", pb, pn)),
+                       ("an unnamed key", ("v0.16.7", "0.16.7", pb, pn)),
+                       ("a changed lib tree", ("v0.16.6", "0.16.6", dict(pb, lib="0" * 40), pn)),
+                       ("an extra changed file", ("v0.16.6", "0.16.6", pb, dict(pn, **{"lib/racecraft.lua": (1, 1)})))):
+        if release_exception_problem(*args) is None:
+            f.append("the v0.16.6 release exception accepted %s" % what)
+
     # The PC #2 deviation swaps sgf for sgfnk and nothing else; the default set keeps sgf.
     if "sgf" not in GATING_CELLS or "sgfnk" in GATING_CELLS:
         f.append("the default gating set is not {mon, spa12, sgf}: %s" % sorted(GATING_CELLS))
@@ -1234,7 +1333,7 @@ def selftest():
 
     print("\n=== seeded rule defects (untrusted until each FAILS rule_checks) ===")
     global MIN_GATING_ARM, INTERLEAVE_MAX_STREAK, DEFAULT_HEAD, CHECK_NEW_ON, SUITE_RE, CHECK_NEW_MODE, WHOLE_KEY, KEY_RE, CHECK_DECLARED
-    global CHECK_ERRORS, VERVE_ERR, EXC_WORSE_BLOCKS, EXC_SUBSET, EXC_SCOPED
+    global CHECK_ERRORS, VERVE_ERR, EXC_WORSE_BLOCKS, EXC_SUBSET, EXC_SCOPED, REL_EXC_PINNED
     allok = True
     seeds = [
         ("a gating cell dropped from the requirement", "pop_sgf"),
@@ -1256,6 +1355,7 @@ def selftest():
         ("(0.16.4) named exception exempts a WORSE", "exc_worse"),
         ("(0.16.4) exception covers an uncovered metric", "exc_subset"),
         ("(0.16.4) exception leaks to other cell/suite", "exc_scope"),
+        ("(0.16.6) release exception ignores its pins", "relexc"),
     ]
     for name, kind in seeds:
         saved_needed, saved_chars = dict(NEEDED_CELLS), dict(CHARACTER_CELLS)
@@ -1299,13 +1399,15 @@ def selftest():
             EXC_SUBSET = False
         elif kind == "exc_scope":
             EXC_SCOPED = False
+        elif kind == "relexc":
+            REL_EXC_PINNED = False
         elif kind == "ronly":
             KEY_RE = re.compile(r"^([+-])(R\.[A-Z0-9_]+)\s*=\s*([^\s;]+)")
         else:
             CHECK_NEW_ON = False
         got = rule_checks()
         CHECK_ERRORS, VERVE_ERR = True, "Verve error"
-        EXC_WORSE_BLOCKS, EXC_SUBSET, EXC_SCOPED = True, True, True
+        EXC_WORSE_BLOCKS, EXC_SUBSET, EXC_SCOPED, REL_EXC_PINNED = True, True, True, True
         CHECK_NEW_MODE, WHOLE_KEY, KEY_RE, CHECK_DECLARED = saved_b5
         NEEDED_CELLS.clear(); NEEDED_CELLS.update(saved_needed)
         CHARACTER_CELLS.clear(); CHARACTER_CELLS.update(saved_chars)
@@ -1327,6 +1429,7 @@ def main():
     if "--selftest" in sys.argv:
         return selftest()
     base, head = "origin/main", DEFAULT_HEAD
+    REL_EXC_KEY = None
     for i, a in enumerate(sys.argv):
         if a == "--base" and i + 1 < len(sys.argv):
             base = sys.argv[i + 1]
@@ -1336,6 +1439,8 @@ def main():
             FRESH_OVERRIDE = sys.argv[i + 1]
         if a == "--prior" and i + 1 < len(sys.argv):
             PRIOR_OVERRIDE = sys.argv[i + 1]
+        if a == "--release-exception" and i + 1 < len(sys.argv):
+            REL_EXC_KEY = sys.argv[i + 1]
         if a == "--sidecar" and i + 1 < len(sys.argv):
             PAIR_SIDECAR.update(load_sidecars(sys.argv[i + 1].split(",")))
         if a == "--machine" and i + 1 < len(sys.argv):
@@ -1361,9 +1466,12 @@ def main():
     if rows is None:
         rep.refuse("results.csv", "could not read %s" % RESULTS)
         return rep.show()
-    fresh_prefix, suite = check_suite(rep, rows) or (None, None)
-    check_not_worse(rep, suite, fresh_prefix, all_rows=rows)
-    check_errors(rep, suite, fresh_prefix)
+    if REL_EXC_KEY:   # (v0.16.6) a named release exception replaces items 1-3 for that one release, or refuses
+        check_release_exception(rep, rows, REL_EXC_KEY, head)
+    else:
+        fresh_prefix, suite = check_suite(rep, rows) or (None, None)
+        check_not_worse(rep, suite, fresh_prefix, all_rows=rows)
+        check_errors(rep, suite, fresh_prefix)
     check_evidence(rep, rows, base, head)
     check_gate(rep, base, head)
     check_docs(rep)
