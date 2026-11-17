@@ -941,12 +941,20 @@ function script.windowMain()
     if ui.checkbox('Enable Verve', G.enabled) then setG('enabled', not G.enabled) end
 
     -- manual escape hatch: unstick YOUR car (repair + drop back on the racing line facing forward)
-    if ui.button('Reset my car (unstick)') then
-        -- Always the player's own car (index 0 in single-player), NOT the focused camera car -- otherwise
-        -- watching another driver would reset THAT opponent.
-        pcall(function() Recovery.forceRecover(0) end)
+    -- (0.16.6) the window now shows on the setup screen too: there the session has not started and the car is in its box, so the
+    -- button is replaced by a note (forceRecover also refuses a manual press while sim.isInMainMenu).
+    local inSetupScreen = false
+    pcall(function() inSetupScreen = (ac.getSim().isInMainMenu == true) end)
+    if inSetupScreen then
+        ui.textColored('Reset my car: available once you are driving.', rgbm(0.5, 0.5, 0.5, 1))
+    else
+        if ui.button('Reset my car (unstick)') then
+            -- Always the player's own car (index 0 in single-player), NOT the focused camera car -- otherwise
+            -- watching another driver would reset THAT opponent.
+            pcall(function() Recovery.forceRecover(0) end)
+        end
+        if ui.itemHovered() then ui.setTooltip('Stuck, beached, or wedged in the pits? Repairs your car and drops it back on the racing line facing forward. Press it WHILE stuck -- a car that has already retired can\'t be brought back.') end
     end
-    if ui.itemHovered() then ui.setTooltip('Stuck, beached, or wedged in the pits? Repairs your car and drops it back on the racing line facing forward. Press it WHILE stuck -- a car that has already retired can\'t be brought back.') end
 
     -- save / session-only bar
     local as = S.autosave

@@ -1463,6 +1463,7 @@ function R.forceRecover(i, auto)
     if type(i) ~= 'number' or i < 0 then return false end
     local ok, sim = pcall(ac.getSim)
     if not ok or not sim then return false end
+    if not auto and sim.isInMainMenu then return false end   -- (0.16.6) a manual press on the pre-session / setup screen: the session has not started, leave the car in its box
     local done = false
     pcall(function()
         local car = ac.getCar(i); if not car then return end

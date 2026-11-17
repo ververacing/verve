@@ -1,3 +1,7 @@
+0.16.6
+- Verve's window is now in the setup screen too, so you can set up before the race; Reset my car waits until you are
+  driving.
+
 0.16.5
 - AI touring cars now get the same tyre-grip hint GT3 cars already get: up to x1.2 at AI level 100, ramping in from
   level 90. It stays at x1.2 above level 100 (Above-expert adds nothing for touring yet; those levels were not

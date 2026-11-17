@@ -1,5 +1,5 @@
 {
-  "version": "0.16.5",
+  "version": "0.16.6",
   "url": "https://github.com/ververacing/verve/releases/latest",
-  "summary": "AI touring cars now get the tyre-grip hint GT3 cars already get: faster laps and calmer opening laps."
+  "summary": "Verve's window is now in the setup screen too, so you can set up before the race; Reset my car waits until you are driving."
 }
