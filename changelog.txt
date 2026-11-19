@@ -1,3 +1,8 @@
+0.16.7
+- Fixed: on some setups 0.16.6 did not show Verve at all, neither in the race nor on the setup screen. The window is
+  back where it was in 0.16.5 (the app bar in the race). The setup-screen option is withdrawn until it works for
+  everyone. The Reset my car guard from 0.16.6 stays.
+
 0.16.6
 - Verve's window is now in the setup screen too, so you can set up before the race; Reset my car waits until you are
   driving.
