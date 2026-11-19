@@ -179,7 +179,17 @@ RELEASE_EXCEPTIONS = {"v0.16.6": dict(
     numstat={"Verve.lua": (13, 5), "lib/recovery.lua": (1, 0), "manifest.ini": (1, 1)},
     gate_row="rc0166b_mon_1",
     reason="owner decision 17 Nov 2026: display-only release; racing code unchanged from 0.16.5; "
-           "checked by the owner in game + one error-gate race")}
+           "checked by the owner in game + one error-gate race"),
+    # (v0.16.7) HOTFIX, owner decision 19 Nov 2026 via verve-47 ("Exception + 1 race"): 0.16.6 did not show Verve at all on
+    # some setups; the only runtime change from 0.16.6 (e0a46ac) is the manifest FLAGS line back to 0.16.5's (SETUP removed).
+    "v0.16.7": dict(
+    base="e0a46ac6e9d10c0ce46ed240c0d1864bc189497c",
+    blobs={"Verve.lua": "9dc75a6dc7402d2785d9dcecd1ba80eeaa41d8f7", "lib": "76fba9703aae8565f0135e9ca9270c2d5154d085",
+           "manifest.ini": "243d3de1f81cdccf9f766af59a14ead2adee5b8a"},
+    numstat={"manifest.ini": (1, 1)},
+    gate_row="rc0167b_mon_1",
+    reason="owner decision 19 Nov 2026: hotfix; only change from 0.16.6 is withdrawing the SETUP window flag "
+           "(back to the 0.16.5 manifest line); one error-gate race")}
 REL_EXC_PINNED = True     # every pin is checked (selftest seeds False)
 
 
@@ -1195,19 +1205,23 @@ def rule_checks():
     if not m or m.group(2) != "sgfnk":
         f.append("SUITE_RE does not read sgfnk as its own cell (got %r)" % (m and m.group(2)))
 
-    # (v0.16.6) the named release exception: exactly one, and it binds to its own version, tree and diff only
-    if sorted(RELEASE_EXCEPTIONS) != ["v0.16.6"]:
-        f.append("release exceptions are not exactly [v0.16.6]: %s" % sorted(RELEASE_EXCEPTIONS))
-    e6 = RELEASE_EXCEPTIONS.get("v0.16.6") or {}
-    pb, pn = dict(e6.get("blobs") or {}), dict(e6.get("numstat") or {})
-    if release_exception_problem("v0.16.6", "0.16.6", pb, pn) is not None:
-        f.append("the v0.16.6 release exception refuses its own pinned tree")
-    for what, args in (("another version", ("v0.16.6", "0.16.7", pb, pn)),
-                       ("an unnamed key", ("v0.16.7", "0.16.7", pb, pn)),
-                       ("a changed lib tree", ("v0.16.6", "0.16.6", dict(pb, lib="0" * 40), pn)),
-                       ("an extra changed file", ("v0.16.6", "0.16.6", pb, dict(pn, **{"lib/racecraft.lua": (1, 1)})))):
-        if release_exception_problem(*args) is None:
-            f.append("the v0.16.6 release exception accepted %s" % what)
+    # (v0.16.6, v0.16.7) the named release exceptions: exactly these, each bound to its own version, tree and diff only
+    if sorted(RELEASE_EXCEPTIONS) != ["v0.16.6", "v0.16.7"]:
+        f.append("release exceptions are not exactly [v0.16.6, v0.16.7]: %s" % sorted(RELEASE_EXCEPTIONS))
+    for key, other in (("v0.16.6", "v0.16.7"), ("v0.16.7", "v0.16.6")):
+        ver = key[1:]
+        ek = RELEASE_EXCEPTIONS.get(key) or {}
+        pb, pn = dict(ek.get("blobs") or {}), dict(ek.get("numstat") or {})
+        if release_exception_problem(key, ver, pb, pn) is not None:
+            f.append("the %s release exception refuses its own pinned tree" % key)
+        eo = RELEASE_EXCEPTIONS.get(other) or {}
+        for what, args in (("another version", (key, "0.16.9", pb, pn)),
+                           ("an unnamed key", ("v0.16.9", "0.16.9", pb, pn)),
+                           ("a changed lib tree", (key, ver, dict(pb, lib="0" * 40), pn)),
+                           ("an extra changed file", (key, ver, pb, dict(pn, **{"lib/racecraft.lua": (1, 1)}))),
+                           ("the other release's tree", (key, ver, dict(eo.get("blobs") or {}), pn))):
+            if release_exception_problem(*args) is None:
+                f.append("the %s release exception accepted %s" % (key, what))
 
     # The PC #2 deviation swaps sgf for sgfnk and nothing else; the default set keeps sgf.
     if "sgf" not in GATING_CELLS or "sgfnk" in GATING_CELLS:
