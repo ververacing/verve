@@ -1,5 +1,5 @@
 {
-  "version": "0.16.6",
+  "version": "0.16.7",
   "url": "https://github.com/ververacing/verve/releases/latest",
   "summary": "Fix: Verve shows again for everyone (0.16.6 did not appear at all on some setups). The setup-screen option is withdrawn for now."
 }
