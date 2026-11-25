@@ -20,7 +20,7 @@ local P = {}
 P.KEYS = {
     'intensity', 'rcIntensity', 'baseGrip', 'aboveExpert',
     'humanErrors', 'sliderCurve', 'careerCurve', 'raceStart',
-    'rescueCrashed', 'repairOnTrack', 'strategy', 'smarterDives',
+    'rescueCrashed', 'recoveryMode', 'ghostRejoin', 'repairOnTrack', 'strategy', 'smarterDives',
     'drsDiscipline', 'controlGrip', 'raceFeed',
 }
 P.SCHEMA = 1

@@ -140,7 +140,9 @@ local DEFAULTS = {
     ratingV2 = true,     -- DEFAULT 0.14.9; harness switch (lib/drivers.lua D.RATING_V2): real drivers rated as pros around a Veteran (owner 2026-09-29)
     classV2 = false,     -- harness switch (lib/classes.lua M.DETECT_V2): the v2 car-class detector (2026-09-30 inventory: 97 % vs 53 %)
     aboveExpert = 100,   -- (0.16.x, lib/tyrehint.lua R.HINT_ABOVE) the "past 100" control: 100 = off; up to 120 raises the GT clean-air hint
-    rescueCrashed = true, -- (0.16.1, community ask; lib/recovery.lua R.NO_REPOSITION) off: Verve never moves, repairs or protects a crashed car
+    rescueCrashed = true, -- (0.16.1, community ask; lib/recovery.lua R.NO_REPOSITION) off: Verve never moves, repairs or protects a crashed car. (0.16.8) kept in step with recoveryMode
+    recoveryMode = 'reposition', -- (0.16.8, owner-approved) Crashed cars: 'drive' (drive back) | 'reposition' (put back on track, the default) | 'off'
+    ghostRejoin = true,  -- (0.16.8) a rejoining AI car is ghosted (no collisions) for up to 5 s until clear
     smarterDives = false, -- (0.16.2, lgate_follow 2026-11-03; lib/strategy.lua S.LUNGE_MAX_M) on: AI only dives from <=12 m (fewer hopeless lunges, tighter apex, a little more contact). off (default) = 0.16.1
 }
 local CORE = { 'humanVar', 'classPhys', 'racecraft', 'recovery', 'crashRepair', 'troubleSpots' }
@@ -160,6 +162,8 @@ local S = ac.storage({
     classV2 = false,
     aboveExpert = 100,
     rescueCrashed = true,
+    recoveryMode = 'reposition',
+    ghostRejoin = true,
     smarterDives = false,
     autosave = true, schema = 1,
 })
@@ -174,6 +178,8 @@ if (S.schema or 1) < 2 then S.crashRepair = true; S.troubleSpots = true; S.schem
 -- --ai-level 80 applied 83 with the module default already flipped, because Verve.lua reassigns
 -- SLIDER_CURVE from the store every frame. Same shape as the 0.12 bump above. The option stays in the UI.
 if (S.schema or 1) < 3 then S.sliderCurve = false; S.schema = 3 end
+-- (0.16.8) rescueCrashed became the three-way recoveryMode: a stored 'off' (rescueCrashed false) carries over as 'off'.
+if (S.schema or 1) < 4 then S.recoveryMode = (S.rescueCrashed == false) and 'off' or 'reposition'; S.schema = 4 end
 local drsCd = {}
 local G = {}
 for k in pairs(DEFAULTS) do G[k] = S[k] end
@@ -308,6 +314,7 @@ function script.update(dt)
     if resetBind and not cspStoodDown then
         pcall(function() if resetBind:pressed() then Recovery.forceRecover(0) end end)
     end
+    pcall(Recovery.ghostTick)   -- (0.16.8) ghosts end on their own timers even while Verve is disabled
     if Harness then
         if not harnessApplied then
             harnessApplied = true
@@ -664,7 +671,9 @@ function script.update(dt)
     managed = n
 
     Recovery.ENABLED = G.recovery
-    Recovery.NO_REPOSITION = G.rescueCrashed == false   -- (0.16.1) off = stock AC's fate for a crashed car (no move, repair or hold)
+    Recovery.MODE = (G.recoveryMode == 'drive' or G.recoveryMode == 'off') and G.recoveryMode or 'reposition'   -- (0.16.8)
+    Recovery.NO_REPOSITION = Recovery.MODE == 'off' or G.rescueCrashed == false   -- (0.16.1) off = stock AC's fate for a crashed car (no move, repair or hold)
+    Recovery.GHOST_REJOIN = G.ghostRejoin ~= false and not Recovery.NO_REPOSITION
     Recovery.CRASH_REPAIR = G.crashRepair and not Recovery.NO_REPOSITION   -- crashRepair is core; the user's rescue switch still turns it off
     Recovery.REPAIR_BODY  = G.repairOnTrack ~= false
     if G.recovery then Recovery.update(dt) end
@@ -791,6 +800,8 @@ local TIP = {
     raceStart = 'How the AI launches and takes the first lap. Calm: staggered release and extra spacing into the first corners (the fewest first-lap pile-ups). Racing: half of that - backmarkers go for it, expect the occasional turn-1 tangle, as in real life. Stock: none of it, AC\'s own start.',
     aboveExpert = 'For when difficulty 100 is not hard enough. Above 100, GT3 cars at full difficulty get faster still, up to 120. 100 = off (the normal game). Other kinds of car are unchanged.',
     rescueCrashed = 'On: a stuck or wrecked car is repaired and put back on the track (the default). Off: crashed cars are left to the game: a car that can\'t continue retires, as in stock AC.',
+    recoveryMode = 'What Verve does with a crashed or stuck AI car. Drive back: it repairs the car and helps it drive back onto the track itself, waiting for a gap in traffic; if it cannot get out, it is put back on the track once. Reposition: it repairs the car and puts it back on the track (the default). Off: crashed cars are left to the game, as in stock AC.',
+    ghostRejoin = 'A car rejoining after a crash passes through other cars for up to 5 seconds, until it is clear, so a rejoin cannot cause a second crash. The rejoining car\'s lap is marked invalid, which can affect its best lap.',
     strategy = 'Planned manoeuvres on top of the reactive racecraft, per class (a GT driver out-brakes, a formula driver sets it up on the straight, a stock car slingshots). On at any difficulty whenever this is ticked; each car\'s own pace decides how much of the playbook it uses (a Rookie never switchbacks, a Veteran does).',
     smarterDives = 'Smarter dives: the AI only dives up the inside from close behind, about two and a half car lengths, so fewer hopeless lunges and tighter lines at the apex. In our tests a little more contact overall. Off = today\'s behaviour.',
 }
@@ -917,7 +928,13 @@ function script.windowQuick()
         setGnum('aboveExpert', ax)
         if ui.itemHovered() then ui.setTooltip(TIP.aboveExpert) end
     end
-    toggle('Rescue crashed cars', 'rescueCrashed', TIP.rescueCrashed)
+    do   -- (0.16.8) three-way Crashed cars (replaces the Rescue crashed cars toggle)
+        local names = { drive = 'Drive back', reposition = 'Reposition', off = 'Off' }
+        ui.text('Crashed cars'); ui.sameLine(150)
+        comboFor('##recModeQ', names[G.recoveryMode] or 'Reposition', G.recoveryMode, { 'drive', 'reposition', 'off' }, function(o) setG('recoveryMode', o); setG('rescueCrashed', o ~= 'off') end)
+        if ui.itemHovered() then ui.setTooltip(TIP.recoveryMode) end
+        if G.recoveryMode ~= 'off' then toggle('Ghost a rejoining car', 'ghostRejoin', TIP.ghostRejoin) end
+    end
     toggle('Tactics: set-up passes, late-brake lunges, switchbacks', 'strategy', TIP.strategy)
     ui.textColored('Everything else is in the Verve AI app window.', rgbm(0.6, 0.6, 0.6, 1))
 end
@@ -1046,7 +1063,13 @@ function script.windowMain()
         setGnum('aboveExpert', ax)
         if ui.itemHovered() then ui.setTooltip(TIP.aboveExpert) end
     end
-    toggle('Rescue crashed cars', 'rescueCrashed', TIP.rescueCrashed)
+    do   -- (0.16.8) three-way Crashed cars (replaces the Rescue crashed cars toggle)
+        local names = { drive = 'Drive back', reposition = 'Reposition', off = 'Off' }
+        ui.text('Crashed cars'); ui.sameLine(150)
+        comboFor('##recMode', names[G.recoveryMode] or 'Reposition', G.recoveryMode, { 'drive', 'reposition', 'off' }, function(o) setG('recoveryMode', o); setG('rescueCrashed', o ~= 'off') end)
+        if ui.itemHovered() then ui.setTooltip(TIP.recoveryMode) end
+        if G.recoveryMode ~= 'off' then toggle('Ghost a rejoining car', 'ghostRejoin', TIP.ghostRejoin) end
+    end
     toggle('Repair damage on track', 'repairOnTrack', 'When a crashed car is rescued (above). On: its body is repaired (the default). Off: it keeps its damage and pits for repairs like stock AC.')
     toggle('Tactics: set-up passes, late-brake lunges, switchbacks', 'strategy', TIP.strategy)
     toggle('Smarter dives', 'smarterDives', TIP.smarterDives)

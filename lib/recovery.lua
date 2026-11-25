@@ -9,6 +9,11 @@ local Troublespots = require('lib.troublespots')
 
 local R = {}
 R.ENABLED = true
+R.MODE = 'reposition'     -- (0.16.8) user setting recoveryMode: 'drive' | 'reposition' | 'off' (off = R.NO_REPOSITION, set by Verve.lua)
+R.GHOST_REJOIN = true     -- (0.16.8) user setting ghostRejoin: a rejoining AI car has collisions off until clear (T1 25 Nov: lap COUNT unaffected, the lap is marked invalid)
+R.GHOST_S = 5.0; R.GHOST_CLEAR_M = 15.0   -- ghost at most GHOST_S s, ended early once no car is within GHOST_CLEAR_M m (after 1 s)
+R.DRIVE_CAP_KMH = 50; R.DRIVE_THROTTLE = 0.6; R.DRIVE_NOPROG_S = 12; R.DRIVE_MAX_S = 30; R.DRIVE_HOLD_MAX_S = 8; R.DRIVE_EDGE_M = 8.0   -- Drive back (see R.driveBack)
+R.ORDER_RULE_M = 300      -- (0.16.8) a reposition never lands ahead of a car that was ahead in the running order and is within this far ahead of the stop spot
 R.NO_REPOSITION = false   -- (community 0.16.1) user setting rescueCrashed, inverted (off by default = today). true = no car is ever moved or repaired by Verve and
                           -- nothing holds it against AC's own retirement (Verve.lua also clears CRASH_REPAIR): stock AC's fate
 R.CRASH_REPAIR = false    -- experimental: repair a stuck car ON TRACK (no pit) and set it back on the racing line
@@ -263,7 +268,7 @@ R.gateMoves = 0            -- drops moved back before the last timing split so A
 R.GATE_MODE = 'back'       -- 'back' = drop on a straight just before the last split; 'twostep' = touch down before the split for a
                            -- few physics frames, then drop at the crash spot as usual (harness A/B: does the jump count as
                            -- crossing the split?); 'off' = no gating (the lap is lost past the last split)
-R.GATE_FIRST_M = 10000     -- DEFAULT 0.14.7 (0.14.6: 1000, 0.14.5: 500): every landing past split 1 goes back to it; 0 = off. >0 (m): with 2+ intermediate splits, gate to just before SPLIT 1 when that is at most this far
+R.GATE_FIRST_M = 1000      -- (0.16.8: 1000; owner-approved recovery plan 25 Nov: a set-back to split 1 cost 0.36-0.51 lap, so only drops near it) DEFAULT 0.14.7 (0.14.6: 1000, 0.14.5: 500): every landing past split 1 goes back to it; 0 = off. >0 (m): with 2+ intermediate splits, gate to just before SPLIT 1 when that is at most this far
                            -- back, else don't gate. AC credits the lap only if the car passes split 1 after its last teleport:
                            -- sector-1 landings 1039/1052 counted, sector 2 (the 'back' gate) 19/1865, last sector 0/80 (2026-09-26).
 R.GATE_FIRST_CAP = false   -- false = 0.14.5. true: a landing in the LAST sector (at or past the last intermediate split) is never gated back
@@ -473,6 +478,7 @@ function R.fwdSign() return trackFwdSign, fwdVotes end   -- (diagnostics)
 
 local function endRec(i)
     releaseControls(i)
+    if R.driveClear then R.driveClear(i, 'endRec') end   -- (0.16.8) a Drive back episode's caps never outlive the recovery
     recT[i] = nil; checkT[i] = nil; lastErr[i] = nil; knot[i] = nil
     stallRef[i] = nil; stallT[i] = nil; backupT[i] = nil
     if R.SAFEHOLD_PER_EPISODE then R.safeHold[i] = nil end   -- (R1) the gap wait is per EPISODE, not per session
@@ -524,6 +530,7 @@ local function applyTemps(i, temps)
     end
 end
 local function giveUp(i)
+    if R.driveClear then R.driveClear(i, 'giveup') end   -- (0.16.8) failsafe
     handedBack[i] = true
     endRec(i)
 end
@@ -565,6 +572,7 @@ end
 -- (to the car's OWN box, then held): AC's own retirement left wrecks in view for 160-540 s. Open risk (code review
 -- 2026-09-29): a grid larger than the track's pit boxes shares boxes - test that case before trusting it there.
 local function parkInPits(i, why)
+    if R.ghostEnd then R.ghostEnd(i, 'park') end; if R.driveClear then R.driveClear(i, 'park') end   -- (0.16.8) failsafes
     if parked[i] or not R.raceSession or i == 0 then return end   -- never the player's car: a human may take the wheel back
     -- (rescueCrashed off) no pit teleport and no hold: hand the car to AC for good (hopeless = no protection, no re-arming),
     -- so AC's own retirement decides its fate, as in stock AC
@@ -690,6 +698,30 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
             if not center then gateStage[i] = nil; return false end
         end
     end
+    -- (0.16.8) RUNNING-ORDER RULE: never land ahead of a car that was ahead of this one in the race and is on the road within
+    -- R.ORDER_RULE_M ahead of where it stopped; land just behind the rearmost such car instead (teleport audit 25 Nov: 303 of
+    -- 4929 drops gained 1-8 places, mostly past cars still stuck in the same lap-0 pile-up).
+    if (R.ORDER_RULE_M or 0) > 0 and trackLen and trackLen > 0 then
+        pcall(function()
+            local me = ac.getCar(i); if not me then return end
+            local fwd = ((progress - reqProgress) % 1) * trackLen
+            if fwd <= 0 or fwd > trackLen * 0.5 then return end              -- not a forward landing: nothing to pass
+            local rear = nil
+            for j = 0, sim.carsCount - 1 do
+                local o = j ~= i and ac.getCar(j)
+                if o and not o.isInPitlane and (o.racePosition or 99) < (me.racePosition or 99) then
+                    local d = ((o.splinePosition - reqProgress) % 1) * trackLen
+                    if d > 0 and d <= R.ORDER_RULE_M and d < fwd and (not rear or d < rear) then rear = d end
+                end
+            end
+            if rear then
+                local back = math.max(0, rear - 10)
+                progress = (reqProgress + back / trackLen) % 1
+                center = ac.trackProgressToWorldCoordinate(progress, false) or center
+                R.orderRuleN = (R.orderRuleN or 0) + 1
+            end
+        end)
+    end
     if not force and not dropSafe(sim, i, progress) then gateStage[i] = nil; return false end
     if force and R.DROP_SAFE_T > 0 and not callerSkip and not dropSafe(sim, i, progress) then   -- (not the gate's second stage)
         R.safeHold[i] = R.safeHold[i] or os.clock()          -- a forced drop still waits for the gap, but only so long
@@ -786,6 +818,7 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
         R.dropPend[i] = os.clock()                     -- pending until judgeDrops rules (a later drop of this car re-stamps it)
         pendingDrop[i] = { pos = pos, dir = dir, apiDir = apiDir, t = os.clock(), tries = 0 }   -- verify its heading next frame
         R.dropN = R.dropN + 1
+        if R.GHOST_REJOIN and i ~= 0 and R.ghostStart then R.ghostStart(i, 'drop') end   -- (0.16.8) ghosted rejoin
         dropCount[i] = (dropCount[i] or 0) + 1
         local sp = dropSpots[i] or {}; sp[#sp + 1] = reqProgress; if #sp > 6 then table.remove(sp, 1) end; dropSpots[i] = sp   -- the requested spot, not the gated one (2026-09-21)
     end
@@ -1207,6 +1240,13 @@ local carBody = function()
                     -- an off-track car that may not be repositioned goes back to AC's AI unprotected: it
                     -- drives out if it can (shallow run-off), else AC retires it
                     if offTrack and not dropsAllowed(i) then hopeless[i] = hopeless[i] or os.clock(); giveUp(i); return end
+                    -- (0.16.8) DRIVE BACK: an off-track car drives itself back (assisted) instead of being teleported; after a
+                    -- give-up it falls through to ONE reposition below (R.driveFailed), then AC as before.
+                    if offTrack and R.MODE == 'drive' and not R.driveFailed[i] then
+                        local res = R.driveBack(sim, i, car, progress, nearDist, dt)
+                        if res == 'driving' then return end
+                        if res == 'done' then offTrack = false end   -- back on the road under its own power: repaired in place below
+                    end
                     local placed = (not offTrack) or putBackOnLine(sim, i, progress, center, forceIt)
                     if placed then
                         repairBody(i, car)   -- fresh wing/body, in place
@@ -1366,6 +1406,8 @@ function R.suspLimp(i, car, spd, dt)
 end
 
 function R.reset()
+    if R.ghostEndAll then R.ghostEndAll('reset') end   -- (0.16.8) failsafe: no ghost survives a session reset
+    if R.driveClear then for k in pairs(R.driveFailed) do R.driveFailed[k] = nil end end
     R.holdT = {}
     R.settleUntil = os.clock() + R.SETTLE_S     -- see R.SETTLE_S: the next frames are still the old session's
     R.boxRescued = {}; R.boxRescueN = 0; R.boxSeenN = 0; R.boxTryN = 0; R.boxOkN = 0; R.safeHold = {}
@@ -1493,6 +1535,85 @@ function R.forceRecover(i, auto)
         end
     end)
     return done
+end
+
+-- ===================================================================================================================
+-- (0.16.8) Drive back and the ghosted rejoin. Owner-approved recovery plan, 25 Nov 2026 (design note
+-- pc2/recovery_modes_design_note_20261125.md). State lives here, outside carBody, so carBody's upvalue count is unchanged.
+-- ===================================================================================================================
+R.driveFailed = {}
+local DB, GH = {}, {}       -- Drive back episodes, ghosted cars (until = os.clock())
+function R.driveClear(i, why)
+    local st = DB[i]
+    if st then
+        DB[i] = nil
+        pcall(function() physics.setAITopSpeed(i, 1e9); physics.setAIThrottleLimit(i, 1) end)
+        -- recovery ended at racing speed (endRec at REJOIN_HANDBACK) during a Drive back episode: it drove itself back
+        if why == 'endRec' then R.driveOkN = (R.driveOkN or 0) + 1; if R.GHOST_REJOIN and i ~= 0 then R.ghostStart(i, 'drive') end end
+        pcall(function() ac.log(string.format('Verve: drive back car %d end (%s) after %.1f s', i, tostring(why), st.t or 0)) end)
+    end
+    if why == 'endRec' or why == 'reset' then R.driveFailed[i] = nil end
+end
+-- one frame of a Drive back episode: 'driving' (keep going), 'done' (on the road and moving), 'gaveup' (fall back)
+function R.driveBack(sim, i, car, progress, nearDist, dt)
+    local st = DB[i]
+    if not st then
+        st = { t = 0, best = nearDist, bestT = 0, hold = 0 }; DB[i] = st; R.driveN = (R.driveN or 0) + 1
+        repairBody(i, car)   -- repaired in place at the start (R.REPAIR_BODY = the user's repairOnTrack), then it drives back
+        pcall(function() ac.log(string.format('Verve: drive back car %d start, %.0f m from the line', i, nearDist)) end)
+    end
+    st.t = st.t + (dt or 0)
+    if nearDist < st.best - 1.0 then st.best = nearDist; st.bestT = st.t end
+    if (st.t - st.bestT) > R.DRIVE_NOPROG_S or st.t > R.DRIVE_MAX_S then
+        R.driveClear(i, 'gaveup'); R.driveFailed[i] = true; R.driveGaveUpN = (R.driveGaveUpN or 0) + 1
+        return 'gaveup'
+    end
+    local onRoad = nearDist <= 3.0 or math.abs(latOf(car.position)) <= 1.0
+    if onRoad and (car.speedKmh or 0) >= REJOIN_HANDBACK then
+        R.driveClear(i, 'done'); R.driveOkN = (R.driveOkN or 0) + 1
+        if R.GHOST_REJOIN and i ~= 0 then R.ghostStart(i, 'drive') end
+        return 'done'
+    end
+    pcall(function()
+        physics.preventAIFromRetiring(i); physics.setAIStopCounter(i, 0)
+        physics.setAIThrottleLimit(i, R.DRIVE_THROTTLE)
+        -- traffic check at the edge: hold while a car behind would reach the merge (dropSafe), at most DRIVE_HOLD_MAX_S
+        if nearDist <= R.DRIVE_EDGE_M and not onRoad and st.hold < R.DRIVE_HOLD_MAX_S and not dropSafe(sim, i, progress) then
+            st.hold = st.hold + (dt or 0); physics.setAITopSpeed(i, 0)
+        else
+            physics.setAITopSpeed(i, onRoad and 1e9 or R.DRIVE_CAP_KMH)
+        end
+    end)
+    return 'driving'
+end
+function R.ghostStart(i, why)
+    if not R.GHOST_REJOIN or i == 0 then return end
+    local ok = pcall(physics.disableCarCollisions, i, true)
+    if ok then GH[i] = { t0 = os.clock(), why = why }; R.ghostN = (R.ghostN or 0) + 1; pcall(function() ac.log(string.format('Verve: ghost car %d on (%s)', i, tostring(why))) end) end
+end
+function R.ghostEnd(i, why)
+    if GH[i] then local d = os.clock() - GH[i].t0; GH[i] = nil; pcall(physics.disableCarCollisions, i, false); pcall(function() ac.log(string.format('Verve: ghost car %d off (%s) after %.1f s', i, tostring(why), d)) end) end
+end
+function R.ghostEndAll(why) for i in pairs(GH) do R.ghostEnd(i, why) end end
+-- every frame from Verve.lua (also while Verve is disabled): end a ghost on its timer, once clear, in the pit lane, or retired
+function R.ghostTick()
+    if next(GH) == nil then return end
+    local now = os.clock()
+    for i, g in pairs(GH) do
+        local c = ac.getCar(i)
+        local done = not c or c.isInPitlane or c.isRetired or (now - g.t0) >= R.GHOST_S
+        if not done and (now - g.t0) >= 1.0 then
+            local clear = true
+            pcall(function()
+                for j = 0, ac.getSim().carsCount - 1 do
+                    local o = j ~= i and ac.getCar(j)
+                    if o and o.position:distance(c.position) < R.GHOST_CLEAR_M then clear = false; break end
+                end
+            end)
+            done = clear
+        end
+        if done then R.ghostEnd(i, 'tick') end
+    end
 end
 
 return R
