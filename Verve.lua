@@ -225,6 +225,21 @@ do
         end
     end)
 end
+-- another rolling start app installed: Race start can step aside for it ('otherRolling')
+local rsApp = false
+do
+    pcall(function()
+        io.scanDir(ac.getFolder(ac.FolderID.ACApps) .. '/lua/', 'rapidough1s_Rolling_Start_App*', function(name)
+            if io.dirExists(ac.getFolder(ac.FolderID.ACApps) .. '/lua/' .. name) then rsApp = true end
+        end)
+    end)
+end
+local RS_TAKEOVER_S = 10.2   -- s after its green before Verve takes over
+local rsGreen, rsGreenT, rsLogged, rsFuelLogged = false, nil, false, false
+if S.raceStart == 'otherRolling' and not rsApp then
+    S.raceStart = 'calm'; G.raceStart = 'calm'
+    pcall(ac.log, 'Verve: Race start was set to step aside for another rolling start app, which is not installed - back to Calm')
+end
 
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
 local managed = 0
@@ -246,6 +261,7 @@ end
 weekendSig = gridSignature()   -- seed: CSP never fires onSessionStart for the session running when Lua loads, so without this
                                -- the practice grid was wiped at practice -> qualifying (0.14.4 release review)
 local function sessionReset(restart)
+    rsGreen, rsGreenT, rsLogged, rsFuelLogged = false, nil, false, false   -- (rolling start) every session waits for its own green
     pcall(function() local okS, simR = pcall(ac.getSim); if okS and simR then Telemetry.abort(restart and 'restart' or 'session change', simR, telemetryCtx()) end end)
     pcall(Career.reset)
     pcall(Difficulty.reset)
@@ -538,7 +554,25 @@ function script.update(dt)
     gripFloor()   -- (0.16.3) after the harness hooks above (settings, presets, scripted changes), before any grip write
     local cspEffMin = (Harness and type(Harness.cspMin) == 'number' and Harness.cspMin) or CSP_MIN
     cspStoodDown = type(cspBuildCode) == 'number' and cspBuildCode < cspEffMin
-    if not G.enabled or cspStoodDown then
+    -- (otherRolling) in a Race session, Verve off (the disabled branch below) until the first car finishes lap 1 + RS_TAKEOVER_S.
+    local rsHold = false
+    if G.enabled and not cspStoodDown and rsApp and G.raceStart == 'otherRolling' then
+        local okR, simRS = pcall(ac.getSim)
+        if okR and simRS and simRS.raceSessionType == ac.SessionType.Race then
+            if not rsGreen then
+                for i = 0, simRS.carsCount - 1 do
+                    local c = ac.getCar(i)
+                    if c and (c.sessionLapCount or 0) > 0 then rsGreen = true; rsGreenT = 0; break end
+                end
+            elseif rsGreenT then rsGreenT = rsGreenT + dt end
+            rsHold = not rsGreen or (rsGreenT or 0) < RS_TAKEOVER_S
+            if not rsHold and not rsLogged then
+                rsLogged = true
+                pcall(ac.log, string.format('Verve: other rolling start app - green (first car past lap 1), Verve taking over %.1f s after it (lap-0 easing skipped)', RS_TAKEOVER_S))
+            end
+        end
+    end
+    if not G.enabled or cspStoodDown or rsHold then
         -- (local dev diagnostics still log a DISABLED race, so a baseline run can be compared; the race feed is an
         -- observer and keeps running too, so a stock-AI race gets the same timing card as a Verve race)
         -- (0.16) contactRecent in the DISABLED branch too, so diag's contact ring - and results.csv
@@ -562,7 +596,15 @@ function script.update(dt)
         -- (that path does feed at :543 then contacts at :544), so the one-frame lag is identical in both arms.
         if G.raceFeed then pcall(Contacts.update, dt) end
         pcall(Racecraft.offSwitch, false, false, Difficulty.stockLevel)   -- (0.15.1) switched off mid-session: hand the cars back, once
-        pcall(Fuel.offTick)                                                 -- (0.15.1) off across the green: no green load later
+        if rsHold and (G.timedFuel or G.shortFuel) then
+            -- the one write kept while standing aside: timed-race fuel (tank, aiLapsLeft), else AC's 1.2-lap load and pit loop return
+            Fuel.SHORT_FUEL = G.shortFuel == true; Fuel.TIMED = G.timedFuel == true
+            local okF, simF = pcall(ac.getSim)
+            if okF and simF then pcall(Fuel.update, simF, dt) end
+            if not rsFuelLogged then rsFuelLogged = true; pcall(ac.log, 'Verve: other rolling start app - Verve standing aside until its green (every AI write off except the timed-race fuel load)') end
+        else
+            pcall(Fuel.offTick)                                             -- (0.15.1) off across the green: no green load later
+        end
         pcall(TyreHint.offTick)                                             -- (0.16.x) a raised or cut tyre hint handed back, once
         return
     end
@@ -584,7 +626,7 @@ function script.update(dt)
     Human.HUMAN_ERRORS  = G.humanErrors
     Human.CLASS_PHYSICS = G.classPhys
     Racecraft.ENABLED     = G.racecraft
-    Racecraft.START_X     = ({ calm = 1.0, racing = 0.5, stock = 0.0 })[G.raceStart] or 1.0
+    Racecraft.START_X     = ({ calm = 1.0, racing = 0.5, stock = 0.0, otherRolling = (rsApp and 0.0 or 1.0) })[G.raceStart] or 1.0   -- otherRolling: no lap-0 easing
     Strategy.ENABLED      = G.strategy ~= false
     Strategy.LUNGE_MAX_M  = G.smarterDives and 12 or nil   -- (smarterDives, lgate_follow 2026-11-03) on: dive gate at 12 m centre-to-centre; off (default) = nil = 0.16.1 (no cap)
     Strategy.LUNGE_OVL    = G.smarterDives and -9 or 0.5   -- gate overlap floor when on; 0.5 default when off (unused while LUNGE_MAX_M is nil)
@@ -797,7 +839,7 @@ end
 -- (0.16.1) tooltips the main window and the compact quick-settings window (windowQuick) share, so the two never drift apart
 local TIP = {
     humanErrors = 'One visible mistake per driver every few laps: a late brake and lock-up, a missed apex, or a snap and lift. The rate follows pace, so a rookie errs every 2-3 laps, a midfielder every 4-5, a veteran every 9-15, and the quickest driver in a class less often still. Offs are rare and spins rarer. Formula, Prototype and Hypercar get half those off and spin odds, and on NASCAR and drift cars a mistake never becomes an off or a spin. Race sessions only, never the opening lap, never your own car.',
-    raceStart = 'How the AI launches and takes the first lap. Calm: staggered release and extra spacing into the first corners (the fewest first-lap pile-ups). Racing: half of that - backmarkers go for it, expect the occasional turn-1 tangle, as in real life. Stock: none of it, AC\'s own start.',
+    raceStart = 'How the AI launches and takes the first lap. Calm: staggered release and extra spacing into the first corners (the fewest first-lap pile-ups). Racing: half of that - backmarkers go for it, expect the occasional turn-1 tangle, as in real life. Stock: none of it, AC\'s own start.' .. (rsApp and ' Rolling Start app (rapidough): Verve steps aside in races until that app\'s green (the first car to finish the formation lap), then takes over about 10 s after the green, once the app hands back. Verve never holds the cars itself: if the app is not running a rolling start (a standing start, or its Enable box unticked), Verve simply joins about 10 s after the first car finishes lap 1.' or ''),
     aboveExpert = 'For when difficulty 100 is not hard enough. Above 100, GT3 cars at full difficulty get faster still, up to 120. 100 = off (the normal game). Other kinds of car are unchanged.',
     rescueCrashed = 'On: a stuck or wrecked car is repaired and put back on the track (the default). Off: crashed cars are left to the game: a car that can\'t continue retires, as in stock AC.',
     recoveryMode = 'What Verve does with a crashed or stuck AI car. Drive back: it repairs the car and helps it drive back onto the track itself, waiting for a gap in traffic; if it cannot get out, it is put back on the track once. Reposition: it repairs the car and puts it back on the track (the default). Off: crashed cars are left to the game, as in stock AC.',
@@ -918,9 +960,10 @@ function script.windowQuick()
     if ui.checkbox('Enable Verve', G.enabled) then setG('enabled', not G.enabled) end
     toggle('Human errors', 'humanErrors', TIP.humanErrors)
     do
-        local names = { calm = 'Calm', racing = 'Racing', stock = 'Stock' }
+        local names = { calm = 'Calm', racing = 'Racing', stock = 'Stock', otherRolling = 'Rolling Start app (rapidough)' }
         ui.text('Race start'); ui.sameLine(150)
-        comboFor('##raceStartQ', names[G.raceStart] or 'Calm', G.raceStart, { 'calm', 'racing', 'stock' }, function(o) setG('raceStart', o) end)
+        local rsOpts = rsApp and { 'otherRolling', 'calm', 'racing', 'stock' } or { 'calm', 'racing', 'stock' }   -- listed first when present
+        comboFor('##raceStartQ', names[G.raceStart] or 'Calm', G.raceStart, rsOpts, function(o) setG('raceStart', o) end)
         if ui.itemHovered() then ui.setTooltip(TIP.raceStart) end
     end
     do
@@ -1053,9 +1096,10 @@ function script.windowMain()
     toggle('Difficulty slider in lap-time steps (90 = +5%, 80 = +10%)', 'sliderCurve', 'AC\'s own level scale is not linear: on race cars 90 is 2% slower than 100 but 80 is 17% slower, and below that the AI gets erratic. On, the slider means measured lap-time steps for the car class you are racing: 100 = expert pace, 90 = +5%, 80 = +10%, 70 = +15%. Off, the raw AC level. Since 0042 the field always follows the slider: a grid whose opponents sit at other levels keeps its spacing and is shifted so the fastest car is at the slider.')
     toggle('Career: scale difficulty across the series', 'careerCurve', 'In AC career events the difficulty meter picks a pace band and each event moves you through it: soft first series, a real fight at the end, never leaving the band. Off = every career event at the meter\'s flat level. (Outside career the meter always applies as set.)')
     do
-        local names = { calm = 'Calm', racing = 'Racing', stock = 'Stock' }
+        local names = { calm = 'Calm', racing = 'Racing', stock = 'Stock', otherRolling = 'Rolling Start app (rapidough)' }
         ui.text('Race start'); ui.sameLine(150)
-        comboFor('##raceStart', names[G.raceStart] or 'Calm', G.raceStart, { 'calm', 'racing', 'stock' }, function(o) setG('raceStart', o) end)
+        local rsOpts = rsApp and { 'otherRolling', 'calm', 'racing', 'stock' } or { 'calm', 'racing', 'stock' }   -- listed first when present
+        comboFor('##raceStart', names[G.raceStart] or 'Calm', G.raceStart, rsOpts, function(o) setG('raceStart', o) end)
         if ui.itemHovered() then ui.setTooltip(TIP.raceStart) end
     end
     do
