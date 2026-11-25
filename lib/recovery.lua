@@ -701,6 +701,7 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
     -- (0.16.8) RUNNING-ORDER RULE: never land ahead of a car that was ahead of this one in the race and is on the road within
     -- R.ORDER_RULE_M ahead of where it stopped; land just behind the rearmost such car instead (teleport audit 25 Nov: 303 of
     -- 4929 drops gained 1-8 places, mostly past cars still stuck in the same lap-0 pile-up).
+    local orderMoved = false
     if (R.ORDER_RULE_M or 0) > 0 and trackLen and trackLen > 0 then
         pcall(function()
             local me = ac.getCar(i); if not me then return end
@@ -715,14 +716,17 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
                 end
             end
             if rear then
-                local back = math.max(0, rear - 10)
+                -- 30 m behind it (verve-47 review: the drop's 8 m/s push would reach a car stopped 10 m ahead); the moved landing
+                -- then goes through the same dropSafe hold / force timings below as any drop
+                local back = math.max(0, rear - 30)
                 progress = (reqProgress + back / trackLen) % 1
                 center = ac.trackProgressToWorldCoordinate(progress, false) or center
-                R.orderRuleN = (R.orderRuleN or 0) + 1
+                orderMoved = true
             end
         end)
     end
-    if not force and not dropSafe(sim, i, progress) then gateStage[i] = nil; return false end
+    if orderMoved then R.orderMovedN = (R.orderMovedN or 0) + 1 end
+    if not force and not dropSafe(sim, i, progress) then gateStage[i] = nil; if orderMoved then R.orderHeldN = (R.orderHeldN or 0) + 1 end; return false end
     if force and R.DROP_SAFE_T > 0 and not callerSkip and not dropSafe(sim, i, progress) then   -- (not the gate's second stage)
         R.safeHold[i] = R.safeHold[i] or os.clock()          -- a forced drop still waits for the gap, but only so long
         if os.clock() - R.safeHold[i] < R.DROP_SAFE_HOLD then gateStage[i] = nil; return false end
@@ -1242,7 +1246,7 @@ local carBody = function()
                     if offTrack and not dropsAllowed(i) then hopeless[i] = hopeless[i] or os.clock(); giveUp(i); return end
                     -- (0.16.8) DRIVE BACK: an off-track car drives itself back (assisted) instead of being teleported; after a
                     -- give-up it falls through to ONE reposition below (R.driveFailed), then AC as before.
-                    if offTrack and R.MODE == 'drive' and not R.driveFailed[i] then
+                    if offTrack and R.MODE == 'drive' and i ~= 0 and not R.driveFailed[i] then   -- AI only: car 0 is never in Drive back
                         local res = R.driveBack(sim, i, car, progress, nearDist, dt)
                         if res == 'driving' then return end
                         if res == 'done' then offTrack = false end   -- back on the road under its own power: repaired in place below
@@ -1407,7 +1411,7 @@ end
 
 function R.reset()
     if R.ghostEndAll then R.ghostEndAll('reset') end   -- (0.16.8) failsafe: no ghost survives a session reset
-    if R.driveClear then for k in pairs(R.driveFailed) do R.driveFailed[k] = nil end end
+    if R.driveClearAll then R.driveClearAll('reset') end   -- (0.16.8) failsafe: no Drive back cap survives a reset
     R.holdT = {}
     R.settleUntil = os.clock() + R.SETTLE_S     -- see R.SETTLE_S: the next frames are still the old session's
     R.boxRescued = {}; R.boxRescueN = 0; R.boxSeenN = 0; R.boxTryN = 0; R.boxOkN = 0; R.safeHold = {}
@@ -1595,10 +1599,26 @@ function R.ghostEnd(i, why)
     if GH[i] then local d = os.clock() - GH[i].t0; GH[i] = nil; pcall(physics.disableCarCollisions, i, false); pcall(function() ac.log(string.format('Verve: ghost car %d off (%s) after %.1f s', i, tostring(why), d)) end) end
 end
 function R.ghostEndAll(why) for i in pairs(GH) do R.ghostEnd(i, why) end end
+function R.driveClearAll(why) for i in pairs(DB) do R.driveClear(i, why) end; for k in pairs(R.driveFailed) do R.driveFailed[k] = nil end end
+local capsRepT = 0
 -- every frame from Verve.lua (also while Verve is disabled): end a ghost on its timer, once clear, in the pit lane, or retired
 function R.ghostTick()
-    if next(GH) == nil then return end
     local now = os.clock()
+    -- (0.16.8) Drive back caps end for a car that retired or entered the pit lane (endRec / park / give-up / reset clear the rest)
+    for i in pairs(DB) do
+        local c = ac.getCar(i)
+        if not c or c.isRetired or c.isInPitlane then R.driveClear(i, 'tick') end
+    end
+    -- the smoke gate's evidence: which cars Verve still has capped or ghosted, every 30 s while any Verve recovery state exists
+    if now - capsRepT > 30 and (R.driveN or R.ghostN) then
+        capsRepT = now
+        local a, b = {}, {}
+        for i in pairs(DB) do a[#a + 1] = tostring(i) end
+        for i in pairs(GH) do b[#b + 1] = tostring(i) end
+        pcall(function() ac.log(string.format('Verve: caps report: drive-capped [%s] ghosted [%s] | drive starts %d ok %d gave up %d | ghosts %d | order moved %d held %d',
+            table.concat(a, ','), table.concat(b, ','), R.driveN or 0, R.driveOkN or 0, R.driveGaveUpN or 0, R.ghostN or 0, R.orderMovedN or 0, R.orderHeldN or 0)) end)
+    end
+    if next(GH) == nil then return end
     for i, g in pairs(GH) do
         local c = ac.getCar(i)
         local done = not c or c.isInPitlane or c.isRetired or (now - g.t0) >= R.GHOST_S
