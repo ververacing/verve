@@ -13,6 +13,9 @@ R.MODE = 'reposition'     -- (0.16.8) user setting recoveryMode: 'drive' | 'repo
 R.GHOST_REJOIN = true     -- (0.16.8) user setting ghostRejoin: a rejoining AI car has collisions off until clear (T1 25 Nov: lap COUNT unaffected, the lap is marked invalid)
 R.GHOST_S = 5.0; R.GHOST_CLEAR_M = 15.0   -- ghost at most GHOST_S s, ended early once no car is within GHOST_CLEAR_M m (after 1 s)
 R.DRIVE_CAP_KMH = 50; R.DRIVE_THROTTLE = 0.6; R.DRIVE_NOPROG_S = 12; R.DRIVE_MAX_S = 30; R.DRIVE_HOLD_MAX_S = 8; R.DRIVE_EDGE_M = 8.0   -- Drive back (see R.driveBack)
+R.SPREAD_DROPS = true     -- (0.16.9 draft, owner yes 25 Nov) DEV off switch, not a user setting: a drop within DROP_NEAR (18 m) of another
+                          -- car's drop in the last 3 s steps back (18-63 m per car, up to 3 steps; car 0: one step, only under 4.5 m)
+R.recentDrops = {}; R.spreadN = 0; R.spreadLog = {}   -- (SPREAD_DROPS) the last 3 s of drops {i, t, prog}; spreads done; their rows
 R.ORDER_RULE_M = 300      -- (0.16.8) a reposition never lands ahead of a car that was ahead in the running order and is within this far ahead of the stop spot
 R.NO_REPOSITION = false   -- (community 0.16.1) user setting rescueCrashed, inverted (off by default = today). true = no car is ever moved or repaired by Verve and
                           -- nothing holds it against AC's own retirement (Verve.lua also clears CRASH_REPAIR): stock AC's fate
@@ -656,12 +659,14 @@ end
 -- Put an OFF-TRACK (beached) car back on the racing line at its own progress, facing forward, just
 -- off to the roomier side. A beached car can't drive itself across the gravel, so this is what actually
 -- gets it to REJOIN. Gated by dropSafe unless `force` (a last-resort so a car is never abandoned).
-local function putBackOnLine(sim, i, progress, center, force, skipGate)
+local function putBackOnLine(sim, i, progress, center, force, skipGate, stopProgress)
     -- (rescueCrashed off) backstop for every AI caller (gate stage, box rescue's forceRecover, rescues). Car 0 is exempt:
     -- the player's 'Reset my car' button (Verve.lua) stays; every automatic path to car 0 is already shut by dropsAllowed
     if R.NO_REPOSITION and i ~= 0 then return false end
     if not center then return false end
-    local reqProgress = progress     -- where the car got stuck (the gate moves the landing spot; the escape must see the corner)
+    local reqProgress = stopProgress or progress   -- where the car got stuck (the gate moves the landing spot; the escape must see the corner).
+                                                   -- (0.16.9 draft) a caller that staggers the landing passes the TRUE stop, so the order rule
+                                                   -- measures from it (the pile-up rescue's 18-63 m forward hop bypassed it: 169 of 303 audit gains)
     local callerSkip = skipGate      -- the gate's second stage passes true (the same-spot escape sets skipGate itself below)
     local retrying = false
     if R.GATE_FAIL_RETRY and type(R.gateRetry[i]) == 'number' then   -- (R.GATE_FAIL_RETRY) its gated landing failed: back where it stopped
@@ -731,6 +736,35 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
         end)
     end
     if orderMoved then R.orderMovedN = (R.orderMovedN or 0) + 1 end
+    -- (0.16.9 draft, R.SPREAD_DROPS) SPREAD BEFORE DROP: forced drops skip dropSafe, so a pile-up's cars landed on one spot (ghi_imo_2:
+    -- 3 cars within 4 m, 0.17 m centre gap; 2.8% of 2569 archived drops within a car length). If another car's drop in the last 3 s
+    -- is within DROP_NEAR of this landing, step BACK (never ahead: the order rule still holds) by this car's STAGGER_BASE +
+    -- hash01(i*17) * STAGGER_RANGE, up to 3 steps. Never back across the timing line (same lap count = a lap gained), and a gated
+    -- landing never more than GATE_BACK_MAX behind its gate spot (it stays before the split). Car 0 (Reset my car): one step, only
+    -- for another drop under 4.5 m.
+    if R.SPREAD_DROPS and trackLen and trackLen > 0 then
+        local rd, now = R.recentDrops, os.clock()
+        for k = #rd, 1, -1 do if now - rd[k].t > 3 then table.remove(rd, k) end end
+        local p0, steps, why = progress, 0, nil
+        local nearM, maxSteps = (i == 0) and 4.5 or DROP_NEAR * trackLen, (i == 0) and 1 or 3
+        while steps < maxSteps do
+            local hitCar = nil
+            for _, d in ipairs(rd) do
+                if d.i ~= i and math.abs((d.prog - progress + 0.5) % 1 - 0.5) * trackLen < nearM then hitCar = d.i; break end
+            end
+            if not hitCar then break end
+            local np = progress - (STAGGER_BASE + hash01(i * 17) * STAGGER_RANGE)
+            if np < 0 then why = 'line'; break end                                -- never back across the timing line
+            if gated and p0 - np > GATE_BACK_MAX then why = 'gatecap'; break end  -- a gated landing stays before its split
+            progress = np; steps = steps + 1; why = 'car ' .. hitCar
+        end
+        if steps > 0 then
+            center = ac.trackProgressToWorldCoordinate(progress, false) or center
+            R.spreadN = R.spreadN + 1
+            R.spreadLog[#R.spreadLog + 1] = { i = i, from = p0, to = progress, steps = steps, why = why }
+            pcall(function() ac.log(string.format('Verve: spread car %d from %.4f to %.4f (%d step(s), %s)', i, p0, progress, steps, tostring(why))) end)
+        end
+    end
     if not force and not dropSafe(sim, i, progress) then gateStage[i] = nil; if orderMoved then R.orderHeldN = (R.orderHeldN or 0) + 1 end; return false end
     if force and R.DROP_SAFE_T > 0 and not callerSkip and not dropSafe(sim, i, progress) then   -- (not the gate's second stage)
         R.safeHold[i] = R.safeHold[i] or os.clock()          -- a forced drop still waits for the gap, but only so long
@@ -827,6 +861,7 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
         R.dropPend[i] = os.clock()                     -- pending until judgeDrops rules (a later drop of this car re-stamps it)
         pendingDrop[i] = { pos = pos, dir = dir, apiDir = apiDir, t = os.clock(), tries = 0 }   -- verify its heading next frame
         R.dropN = R.dropN + 1
+        R.recentDrops[#R.recentDrops + 1] = { i = i, t = os.clock(), prog = progress }   -- (SPREAD_DROPS) the landing actually used
         if R.GHOST_REJOIN and i ~= 0 and R.ghostStart then R.ghostStart(i, 'drop') end   -- (0.16.8) ghosted rejoin
         dropCount[i] = (dropCount[i] or 0) + 1
         local sp = dropSpots[i] or {}; sp[#sp + 1] = reqProgress; if #sp > 6 then table.remove(sp, 1) end; dropSpots[i] = sp   -- the requested spot, not the gated one (2026-09-21)
@@ -1181,7 +1216,7 @@ local carBody = function()
                     rescueWaitT[i] = (rescueWaitT[i] or 0) + dt
                     local stagger = (progress + STAGGER_BASE + hash01(i * 17) * STAGGER_RANGE) % 1
                     local sc = ac.trackProgressToWorldCoordinate(stagger, false)
-                    if putBackOnLine(sim, i, stagger, sc or center, rescueWaitT[i] > RESCUE_FORCE_T) then
+                    if putBackOnLine(sim, i, stagger, sc or center, rescueWaitT[i] > RESCUE_FORCE_T, nil, progress) then   -- (0.16.9) true stop for the order rule
                         rescueN[i] = (rescueN[i] or 0) + 1; rescued[i] = true; rescueWaitT[i] = nil; knot[i] = nil
                         repairBody(i, car)
                         releaseControls(i)                            -- the drop hands the car to AC's AI: give it the controls
@@ -1415,6 +1450,7 @@ function R.suspLimp(i, car, spd, dt)
 end
 
 function R.reset()
+    R.recentDrops = {}; R.spreadN = 0; R.spreadLog = {}   -- (SPREAD_DROPS) per session
     if R.ghostEndAll then R.ghostEndAll('reset') end   -- (0.16.8) failsafe: no ghost survives a session reset
     if R.driveClearAll then R.driveClearAll('reset') end   -- (0.16.8) failsafe: no Drive back cap survives a reset
     R.holdT = {}
