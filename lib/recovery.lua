@@ -702,11 +702,16 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate)
     -- R.ORDER_RULE_M ahead of where it stopped; land just behind the rearmost such car instead (teleport audit 25 Nov: 303 of
     -- 4929 drops gained 1-8 places, mostly past cars still stuck in the same lap-0 pile-up).
     local orderMoved = false
-    if (R.ORDER_RULE_M or 0) > 0 and trackLen and trackLen > 0 then
+    -- (25 Nov fix) never on a GATED landing: a set-back passes nobody, and with GATE_FIRST_M 10000 a set-back of more than half a
+    -- lap read as a forward move under the old unsigned wrap (ghost run ghi_imo_1: car 6 sent from 0.851 to 0.886, past the last
+    -- split, lap lost). fwd is the UNWRAPPED race-distance move now: a teleport never changes AC's lap count, so the landing is on
+    -- the car's current lap and (landing - stop) is its true move in race order (> 0 = ahead). Any wrap reads a > 0.5-lap set-back
+    -- as a forward move (tools/order_rule_test.py S3).
+    if (R.ORDER_RULE_M or 0) > 0 and trackLen and trackLen > 0 and not gated then
         pcall(function()
             local me = ac.getCar(i); if not me then return end
-            local fwd = ((progress - reqProgress) % 1) * trackLen
-            if fwd <= 0 or fwd > trackLen * 0.5 then return end              -- not a forward landing: nothing to pass
+            local fwd = (progress - reqProgress) * trackLen
+            if fwd <= 0 then return end                                      -- not a forward landing: nothing to pass
             local rear = nil
             for j = 0, sim.carsCount - 1 do
                 local o = j ~= i and ac.getCar(j)
