@@ -72,6 +72,11 @@ pcall(function()
     if Harness and type(Harness.troublespots) == 'table' then for k, v in pairs(Harness.troublespots) do Troublespots[k] = v end end
 end)
 local harnessApplied, autopilotArmed, harnessT = false, false, 0
+-- (0.16.8, community ask) "Reset my car" can be bound to a key or controller button. CSP's own bindable control:
+-- unbound until the player assigns it in the Verve window (no default key, so it cannot clash with anything).
+-- pcall: a CSP without ac.ControlButton simply has no bind, and the window button still works.
+local resetBind = nil
+pcall(function() resetBind = ac.ControlButton('__APP_VERVE_RESET_MY_CAR') end)
 local frameMs, frameN, luaErrors = 0, 0, 0     -- Verve's own cost per frame and errors swallowed by pcall (telemetry)
 -- (2026-10-27, owner item 34) module:line of the FIRST swallowed error this session, for the anonymous report.
 -- THE LIMIT, written into the change: this is EXTRACTED (a file name and a line number only), never stripped from
@@ -298,6 +303,11 @@ end
 
 function script.update(dt)
     local tFrame0 = os.preciseClock and os.preciseClock() or os.clock()
+    -- (0.16.8) the Reset my car bind: the same call as the window button, so the same guards apply (car 0 only, and
+    -- R.forceRecover refuses a manual press on the pre-session / setup screen). Works with the window closed.
+    if resetBind and not cspStoodDown then
+        pcall(function() if resetBind:pressed() then Recovery.forceRecover(0) end end)
+    end
     if Harness then
         if not harnessApplied then
             harnessApplied = true
@@ -954,6 +964,11 @@ function script.windowMain()
             pcall(function() Recovery.forceRecover(0) end)
         end
         if ui.itemHovered() then ui.setTooltip('Stuck, beached, or wedged in the pits? Repairs your car and drops it back on the racing line facing forward. Press it WHILE stuck -- a car that has already retired can\'t be brought back.') end
+    end
+    if resetBind then
+        ui.text('Reset my car key'); ui.sameLine(150)
+        pcall(function() resetBind:control(vec2(200, 0)) end)
+        if ui.itemHovered() then ui.setTooltip('Click, then press a key or a controller button to use Reset my car without opening this window. Right-click it for more options.') end
     end
 
     -- save / session-only bar
