@@ -20,7 +20,10 @@ src = subprocess.run(["git", "-C", HERE, "show", "%s:lib/recovery.lua" % ref], c
 L = 4864.1; NEAR, SB, SR, GBM = 18 / L, 18 / L, 45 / L, 0.03
 def hash01(n):
     x = (n * 2654435761) % 2147483647; x = (x * 1103515245 + 12345) % 2147483647; return x / 2147483647
+fnames = set(re.findall(r"^function R\.(\w+)\(", src, re.M)); assigned = set(re.findall(r"\bR\.(\w+)\s*=[^=]", src))
+clash = sorted(fnames & assigned)
 wired = {
+    "no R.* name is both a function and an assigned value (25 Nov: R.recentDrops clash, %s)" % (clash or "none"): not clash,
     "signature has stopProgress": "local function putBackOnLine(sim, i, progress, center, force, skipGate, stopProgress)" in src,
     "reqProgress = stopProgress or progress": "local reqProgress = stopProgress or progress" in src,
     "rescue passes its true stop": "rescueWaitT[i] > RESCUE_FORCE_T, nil, progress)" in src,
@@ -28,7 +31,7 @@ wired = {
     "line guard (np < 0)": "if np < 0 then why = 'line'; break end" in src,
     "gate cap (GATE_BACK_MAX)": "if gated and p0 - np > GATE_BACK_MAX then" in src,
     "car 0: 4.5 m, one step": "(i == 0) and 4.5 or DROP_NEAR * trackLen, (i == 0) and 1 or 3" in src,
-    "drops recorded": "R.recentDrops[#R.recentDrops + 1] = { i = i, t = os.clock(), prog = progress }" in src,
+    "drops recorded": "R.spreadRecent[#R.spreadRecent + 1] = { i = i, t = os.clock(), prog = progress }" in src,
     "spread after the order rule, before the force check": src.find("if R.SPREAD_DROPS and trackLen") > src.find("if orderMoved then R.orderMovedN") > 0 and src.find("if R.SPREAD_DROPS and trackLen") < src.find("if not force and not dropSafe(sim, i, progress)"),
 }
 SPREAD = wired["spread block present (R.SPREAD_DROPS)"]; TRUESTOP = wired["reqProgress = stopProgress or progress"] and wired["rescue passes its true stop"]
