@@ -268,7 +268,7 @@ R.gateMoves = 0            -- drops moved back before the last timing split so A
 R.GATE_MODE = 'back'       -- 'back' = drop on a straight just before the last split; 'twostep' = touch down before the split for a
                            -- few physics frames, then drop at the crash spot as usual (harness A/B: does the jump count as
                            -- crossing the split?); 'off' = no gating (the lap is lost past the last split)
-R.GATE_FIRST_M = 1000      -- (0.16.8: 1000; owner-approved recovery plan 25 Nov: a set-back to split 1 cost 0.36-0.51 lap, so only drops near it) DEFAULT 0.14.7 (0.14.6: 1000, 0.14.5: 500): every landing past split 1 goes back to it; 0 = off. >0 (m): with 2+ intermediate splits, gate to just before SPLIT 1 when that is at most this far
+R.GATE_FIRST_M = 10000     -- (owner decision 25 Nov, 'Send back, keep the lap': back to 10000 after the 0.16.8 draft's 1000; AC credits a lap only if the car passes split 1 after its last teleport - 26 Sep: sector-1 landings 1039/1052 credited, sector 2 19/1865, last sector 0/80 - so a landing left past split 1 costs a whole lap, more than a set-back's 0.36-0.51 lap) DEFAULT 0.14.7 (0.14.6: 1000, 0.14.5: 500): every landing past split 1 goes back to it; 0 = off. >0 (m): with 2+ intermediate splits, gate to just before SPLIT 1 when that is at most this far
                            -- back, else don't gate. AC credits the lap only if the car passes split 1 after its last teleport:
                            -- sector-1 landings 1039/1052 counted, sector 2 (the 'back' gate) 19/1865, last sector 0/80 (2026-09-26).
 R.GATE_FIRST_CAP = false   -- false = 0.14.5. true: a landing in the LAST sector (at or past the last intermediate split) is never gated back
