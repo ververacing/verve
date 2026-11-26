@@ -863,6 +863,7 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate, stopProg
         R.dropN = R.dropN + 1
         R.spreadRecent[#R.spreadRecent + 1] = { i = i, t = os.clock(), prog = progress }   -- (SPREAD_DROPS) the landing actually used
         if R.GHOST_REJOIN and i ~= 0 and R.ghostStart then R.ghostStart(i, 'drop') end   -- (0.16.8) ghosted rejoin
+        if R.driveClear then R.driveClear(i, 'drop') end   -- (25 Nov fix) a drop ends any open Drive back episode (its caps never outlive it)
         dropCount[i] = (dropCount[i] or 0) + 1
         local sp = dropSpots[i] or {}; sp[#sp + 1] = reqProgress; if #sp > 6 then table.remove(sp, 1) end; dropSpots[i] = sp   -- the requested spot, not the gated one (2026-09-21)
     end
@@ -1286,7 +1287,9 @@ local carBody = function()
                     if offTrack and not dropsAllowed(i) then hopeless[i] = hopeless[i] or os.clock(); giveUp(i); return end
                     -- (0.16.8) DRIVE BACK: an off-track car drives itself back (assisted) instead of being teleported; after a
                     -- give-up it falls through to ONE reposition below (R.driveFailed), then AC as before.
-                    if offTrack and R.MODE == 'drive' and i ~= 0 and not R.driveFailed[i] then   -- AI only: car 0 is never in Drive back
+                    -- (25 Nov fix) an OPEN episode keeps running on the road too (it used to stop being called once the car was on the
+                    -- road, so it was never closed: tow_imo_1 left 6 cars 'drive-capped' for the rest of the race)
+                    if (offTrack or (R.driveOpen and R.driveOpen(i))) and R.MODE == 'drive' and i ~= 0 and not R.driveFailed[i] then   -- AI only: car 0 is never in Drive back
                         local res = R.driveBack(sim, i, car, progress, nearDist, dt)
                         if res == 'driving' then return end
                         if res == 'done' then offTrack = false end   -- back on the road under its own power: repaired in place below
@@ -1608,7 +1611,7 @@ function R.driveBack(sim, i, car, progress, nearDist, dt)
         pcall(function() ac.log(string.format('Verve: drive back car %d start, %.0f m from the line', i, nearDist)) end)
     end
     st.t = st.t + (dt or 0)
-    if nearDist < st.best - 1.0 then st.best = nearDist; st.bestT = st.t end
+    if nearDist < st.best - 1.0 or (car.speedKmh or 0) > 5 then st.best = math.min(st.best, nearDist); st.bestT = st.t end   -- (25 Nov) moving counts as progress on the road
     if (st.t - st.bestT) > R.DRIVE_NOPROG_S or st.t > R.DRIVE_MAX_S then
         R.driveClear(i, 'gaveup'); R.driveFailed[i] = true; R.driveGaveUpN = (R.driveGaveUpN or 0) + 1
         return 'gaveup'
@@ -1621,6 +1624,9 @@ function R.driveBack(sim, i, car, progress, nearDist, dt)
     end
     pcall(function()
         physics.preventAIFromRetiring(i); physics.setAIStopCounter(i, 0)
+        if onRoad then   -- (25 Nov fix) on the road: release AC's hold every frame and lift the Drive back throttle limit
+            pcall(physics.setAINoInput, i, false, false); physics.setAIThrottleLimit(i, 1); physics.setAITopSpeed(i, 1e9); return
+        end
         physics.setAIThrottleLimit(i, R.DRIVE_THROTTLE)
         -- traffic check at the edge: hold while a car behind would reach the merge (dropSafe), at most DRIVE_HOLD_MAX_S
         if nearDist <= R.DRIVE_EDGE_M and not onRoad and st.hold < R.DRIVE_HOLD_MAX_S and not dropSafe(sim, i, progress) then
@@ -1640,6 +1646,7 @@ function R.ghostEnd(i, why)
     if GH[i] then local d = os.clock() - GH[i].t0; GH[i] = nil; pcall(physics.disableCarCollisions, i, false); pcall(function() ac.log(string.format('Verve: ghost car %d off (%s) after %.1f s', i, tostring(why), d)) end) end
 end
 function R.ghostEndAll(why) for i in pairs(GH) do R.ghostEnd(i, why) end end
+function R.driveOpen(i) return DB[i] ~= nil end   -- (25 Nov fix) carBody keeps an open episode running
 function R.driveClearAll(why) for i in pairs(DB) do R.driveClear(i, why) end; for k in pairs(R.driveFailed) do R.driveFailed[k] = nil end end
 local capsRepT = 0
 -- every frame from Verve.lua (also while Verve is disabled): end a ghost on its timer, once clear, in the pit lane, or retired
