@@ -1457,7 +1457,7 @@ function R.suspLimp(i, car, spd, dt)
 end
 
 function R.reset()
-    R.spreadRecent = {}; R.spreadN = 0; R.spreadLog = {}   -- (SPREAD_DROPS) per session
+    R.spreadRecent = {}; R.spreadN = 0; R.spreadLog = {}; R.orderHeldCar = {}   -- (SPREAD_DROPS; rc2 order counters) per session
     if R.ghostEndAll then R.ghostEndAll('reset') end   -- (0.16.8) failsafe: no ghost survives a session reset
     if R.driveClearAll then R.driveClearAll('reset') end   -- (0.16.8) failsafe: no Drive back cap survives a reset
     R.holdT = {}
