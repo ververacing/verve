@@ -1,3 +1,18 @@
+0.16.8
+- Crashed cars: Reposition is smarter. A car stopped late in the lap is sent back to keep its lap (as before), never
+  lands ahead of a car that was ahead of it, and cars reset at the same moment are spread out instead of landing on top
+  of each other.
+- Crashed cars: a car stopped just before the finish line is no longer put back across it (which cost it a lap); it is
+  sent back like any other late-lap stop and keeps the lap.
+- Crashed cars: a rejoining car is ghosted (passes through other cars) for up to 5 s until it is clear. Option: "Ghost a
+  rejoining car".
+- Crashed cars: the setting is now Reposition or Off. Drive back (letting a stuck car drive itself back onto the track)
+  is not in this version: in testing, AC's own AI too often would not drive out of a pile-up. A setting saved as Drive
+  back loads as Reposition.
+- Reset my car can be bound to a key or controller button.
+- Race start: if you use another rolling start app, Verve can now step aside until its green flag. For a standing start
+  with that app, choose Calm or Racing instead.
+
 0.16.7
 - Fixed: on some setups 0.16.6 did not show Verve at all, neither in the race nor on the setup screen. The window is
   back where it was in 0.16.5 (the app bar in the race). The setup-screen option is withdrawn until it works for
