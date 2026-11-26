@@ -180,6 +180,8 @@ if (S.schema or 1) < 2 then S.crashRepair = true; S.troubleSpots = true; S.schem
 if (S.schema or 1) < 3 then S.sliderCurve = false; S.schema = 3 end
 -- (0.16.8) rescueCrashed became the three-way recoveryMode: a stored 'off' (rescueCrashed false) carries over as 'off'.
 if (S.schema or 1) < 4 then S.recoveryMode = (S.rescueCrashed == false) and 'off' or 'reposition'; S.schema = 4 end
+-- (0.16.8, Drive back hidden) a saved 'drive' from a 0.16.8 test build loads as Reposition; Drive back is a DEV switch only (R.DRIVE_DEV)
+if S.recoveryMode == 'drive' then S.recoveryMode = 'reposition' end
 local drsCd = {}
 local G = {}
 for k in pairs(DEFAULTS) do G[k] = S[k] end
@@ -713,7 +715,7 @@ function script.update(dt)
     managed = n
 
     Recovery.ENABLED = G.recovery
-    Recovery.MODE = (G.recoveryMode == 'drive' or G.recoveryMode == 'off') and G.recoveryMode or 'reposition'   -- (0.16.8)
+    Recovery.MODE = (G.recoveryMode == 'off' and 'off') or (G.recoveryMode == 'drive' and Recovery.DRIVE_DEV and 'drive') or 'reposition'   -- (0.16.8) Drive back only with the DEV switch
     Recovery.NO_REPOSITION = Recovery.MODE == 'off' or G.rescueCrashed == false   -- (0.16.1) off = stock AC's fate for a crashed car (no move, repair or hold)
     Recovery.GHOST_REJOIN = G.ghostRejoin ~= false and not Recovery.NO_REPOSITION
     Recovery.CRASH_REPAIR = G.crashRepair and not Recovery.NO_REPOSITION   -- crashRepair is core; the user's rescue switch still turns it off
@@ -842,7 +844,7 @@ local TIP = {
     raceStart = 'How the AI launches and takes the first lap. Calm: staggered release and extra spacing into the first corners (the fewest first-lap pile-ups). Racing: half of that - backmarkers go for it, expect the occasional turn-1 tangle, as in real life. Stock: none of it, AC\'s own start.' .. (rsApp and ' Rolling Start app (rapidough): Verve steps aside in races until that app\'s green (the first car to finish the formation lap), then takes over about 10 s after the green, once the app hands back. Verve never holds the cars itself: if the app is not running a rolling start (a standing start, or its Enable box unticked), Verve simply joins about 10 s after the first car finishes lap 1. For a standing start with that app, choose Calm or Racing instead.' or ''),
     aboveExpert = 'For when difficulty 100 is not hard enough. Above 100, GT3 cars at full difficulty get faster still, up to 120. 100 = off (the normal game). Other kinds of car are unchanged.',
     rescueCrashed = 'On: a stuck or wrecked car is repaired and put back on the track (the default). Off: crashed cars are left to the game: a car that can\'t continue retires, as in stock AC.',
-    recoveryMode = 'What Verve does with a crashed or stuck AI car. Drive back: it repairs the car and helps it drive back onto the track itself, waiting for a gap in traffic; if it cannot get out, it is put back on the track once. Reposition: it repairs the car and puts it back on the track (the default). Off: crashed cars are left to the game, as in stock AC.',
+    recoveryMode = 'What Verve does with a crashed or stuck AI car. Reposition: it repairs the car and puts it back on the track (the default). Off: crashed cars are left to the game, as in stock AC.',
     ghostRejoin = 'A car rejoining after a crash passes through other cars for up to 5 seconds, until it is clear, so a rejoin cannot cause a second crash. The rejoining car\'s lap is marked invalid, which can affect its best lap.',
     strategy = 'Planned manoeuvres on top of the reactive racecraft, per class (a GT driver out-brakes, a formula driver sets it up on the straight, a stock car slingshots). On at any difficulty whenever this is ticked; each car\'s own pace decides how much of the playbook it uses (a Rookie never switchbacks, a Veteran does).',
     smarterDives = 'Smarter dives: the AI only dives up the inside from close behind, about two and a half car lengths, so fewer hopeless lunges and tighter lines at the apex. In our tests a little more contact overall. Off = today\'s behaviour.',
@@ -974,7 +976,7 @@ function script.windowQuick()
     do   -- (0.16.8) three-way Crashed cars (replaces the Rescue crashed cars toggle)
         local names = { drive = 'Drive back', reposition = 'Reposition', off = 'Off' }
         ui.text('Crashed cars'); ui.sameLine(150)
-        comboFor('##recModeQ', names[G.recoveryMode] or 'Reposition', G.recoveryMode, { 'drive', 'reposition', 'off' }, function(o) setG('recoveryMode', o); setG('rescueCrashed', o ~= 'off') end)
+        comboFor('##recModeQ', names[G.recoveryMode] or 'Reposition', G.recoveryMode, { 'reposition', 'off' }, function(o) setG('recoveryMode', o); setG('rescueCrashed', o ~= 'off') end)
         if ui.itemHovered() then ui.setTooltip(TIP.recoveryMode) end
         if G.recoveryMode ~= 'off' then toggle('Ghost a rejoining car', 'ghostRejoin', TIP.ghostRejoin) end
     end
@@ -1110,7 +1112,7 @@ function script.windowMain()
     do   -- (0.16.8) three-way Crashed cars (replaces the Rescue crashed cars toggle)
         local names = { drive = 'Drive back', reposition = 'Reposition', off = 'Off' }
         ui.text('Crashed cars'); ui.sameLine(150)
-        comboFor('##recMode', names[G.recoveryMode] or 'Reposition', G.recoveryMode, { 'drive', 'reposition', 'off' }, function(o) setG('recoveryMode', o); setG('rescueCrashed', o ~= 'off') end)
+        comboFor('##recMode', names[G.recoveryMode] or 'Reposition', G.recoveryMode, { 'reposition', 'off' }, function(o) setG('recoveryMode', o); setG('rescueCrashed', o ~= 'off') end)
         if ui.itemHovered() then ui.setTooltip(TIP.recoveryMode) end
         if G.recoveryMode ~= 'off' then toggle('Ghost a rejoining car', 'ghostRejoin', TIP.ghostRejoin) end
     end

@@ -9,7 +9,9 @@ local Troublespots = require('lib.troublespots')
 
 local R = {}
 R.ENABLED = true
-R.MODE = 'reposition'     -- (0.16.8) user setting recoveryMode: 'drive' | 'reposition' | 'off' (off = R.NO_REPOSITION, set by Verve.lua)
+R.MODE = 'reposition'     -- (0.16.8) user setting recoveryMode: 'reposition' | 'off' (off = R.NO_REPOSITION, set by Verve.lua); 'drive' only with R.DRIVE_DEV
+R.DRIVE_DEV = false       -- (0.16.8) DEV switch, not a user setting: Drive back is hidden (tows 1-3, 25 Nov: AC's AI won't drive out of a pile-up);
+                          -- a harness row can still test it with --recovery {"DRIVE_DEV":true} --settings {"recoveryMode":"drive"}
 R.GHOST_REJOIN = true     -- (0.16.8) user setting ghostRejoin: a rejoining AI car has collisions off until clear (T1 25 Nov: lap COUNT unaffected, the lap is marked invalid)
 R.GHOST_S = 5.0; R.GHOST_CLEAR_M = 15.0   -- ghost at most GHOST_S s, ended early once no car is within GHOST_CLEAR_M m (after 1 s)
 R.DRIVE_CAP_KMH = 50; R.DRIVE_THROTTLE = 0.6; R.DRIVE_NOPROG_S = 12; R.DRIVE_MAX_S = 30; R.DRIVE_HOLD_MAX_S = 8; R.DRIVE_EDGE_M = 8.0   -- Drive back (see R.driveBack)
