@@ -23,6 +23,7 @@ def hash01(n):
 fnames = set(re.findall(r"^function R\.(\w+)\(", src, re.M)); assigned = set(re.findall(r"\bR\.(\w+)\s*=[^=]", src))
 clash = sorted(fnames & assigned)
 wired = {
+    "spread logged once, when the drop goes ahead (rc2)": ("local spreadPend = nil" in src and "if spreadPend then" in src and src.find("if spreadPend then") > src.find("R.spreadRecent[#R.spreadRecent + 1]")),
     "no R.* name is both a function and an assigned value (25 Nov: R.recentDrops clash, %s)" % (clash or "none"): not clash,
     "signature has stopProgress": "local function putBackOnLine(sim, i, progress, center, force, skipGate, stopProgress)" in src,
     "reqProgress = stopProgress or progress": "local reqProgress = stopProgress or progress" in src,

@@ -742,6 +742,7 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate, stopProg
     -- hash01(i*17) * STAGGER_RANGE, up to 3 steps. Never back across the timing line (same lap count = a lap gained), and a gated
     -- landing never more than GATE_BACK_MAX behind its gate spot (it stays before the split). Car 0 (Reset my car): one step, only
     -- for another drop under 4.5 m.
+    local spreadPend = nil   -- (rc2) the spread is logged and counted ONCE, when the drop goes ahead (a held drop re-runs this every frame)
     if R.SPREAD_DROPS and trackLen and trackLen > 0 then
         local rd, now = R.spreadRecent, os.clock()
         for k = #rd, 1, -1 do if now - rd[k].t > 3 then table.remove(rd, k) end end
@@ -760,9 +761,7 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate, stopProg
         end
         if steps > 0 then
             center = ac.trackProgressToWorldCoordinate(progress, false) or center
-            R.spreadN = R.spreadN + 1
-            R.spreadLog[#R.spreadLog + 1] = { i = i, from = p0, to = progress, steps = steps, why = why }
-            pcall(function() ac.log(string.format('Verve: spread car %d from %.4f to %.4f (%d step(s), %s)', i, p0, progress, steps, tostring(why))) end)
+            spreadPend = { i = i, from = p0, to = progress, steps = steps, why = why }
         end
     end
     if not force and not dropSafe(sim, i, progress) then gateStage[i] = nil; if orderMoved then R.orderHeldN = (R.orderHeldN or 0) + 1 end; return false end
@@ -862,6 +861,10 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate, stopProg
         pendingDrop[i] = { pos = pos, dir = dir, apiDir = apiDir, t = os.clock(), tries = 0 }   -- verify its heading next frame
         R.dropN = R.dropN + 1
         R.spreadRecent[#R.spreadRecent + 1] = { i = i, t = os.clock(), prog = progress }   -- (SPREAD_DROPS) the landing actually used
+        if spreadPend then   -- (rc2) once per drop: row 6 of the rc comparison logged one held drop's spread 154 times
+            R.spreadN = R.spreadN + 1; R.spreadLog[#R.spreadLog + 1] = spreadPend
+            pcall(function() ac.log(string.format('Verve: spread car %d from %.4f to %.4f (%d step(s), %s)', i, spreadPend.from, spreadPend.to, spreadPend.steps, tostring(spreadPend.why))) end)
+        end
         if R.GHOST_REJOIN and i ~= 0 and R.ghostStart then R.ghostStart(i, 'drop') end   -- (0.16.8) ghosted rejoin
         if R.driveClear then R.driveClear(i, 'drop') end   -- (25 Nov fix) a drop ends any open Drive back episode (its caps never outlive it)
         dropCount[i] = (dropCount[i] or 0) + 1
