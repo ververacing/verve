@@ -1682,8 +1682,8 @@ function R.ghostTick()
         local a, b = {}, {}
         for i in pairs(DB) do a[#a + 1] = tostring(i) end
         for i in pairs(GH) do b[#b + 1] = tostring(i) end
-        pcall(function() ac.log(string.format('Verve: caps report: drive-capped [%s] ghosted [%s] | drive starts %d ok %d gave up %d | ghosts %d | order moved %d held %d',
-            table.concat(a, ','), table.concat(b, ','), R.driveN or 0, R.driveOkN or 0, R.driveGaveUpN or 0, R.ghostN or 0, R.orderMovedN or 0, R.orderHeldN or 0)) end)
+        pcall(function() ac.log(string.format('Verve: caps report: drive-capped [%s] ghosted [%s] | drive starts %d ok %d gave up %d | ghosts %d | order moved %d held %d | wrap-gated %d',
+            table.concat(a, ','), table.concat(b, ','), R.driveN or 0, R.driveOkN or 0, R.driveGaveUpN or 0, R.ghostN or 0, R.orderMovedN or 0, R.orderHeldN or 0, R.wrapGateN or 0)) end)   -- (xlfix) wrap-gated drops
     end
     if next(GH) == nil then return end
     for i, g in pairs(GH) do
