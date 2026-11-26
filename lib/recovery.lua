@@ -16,6 +16,7 @@ R.DRIVE_CAP_KMH = 50; R.DRIVE_THROTTLE = 0.6; R.DRIVE_NOPROG_S = 12; R.DRIVE_MAX
 R.SPREAD_DROPS = true     -- (0.16.9 draft, owner yes 25 Nov) DEV off switch, not a user setting: a drop within DROP_NEAR (18 m) of another
                           -- car's drop in the last 3 s steps back (18-63 m per car, up to 3 steps; car 0: one step, only under 4.5 m)
 R.spreadRecent = {}; R.spreadN = 0; R.spreadLog = {}   -- (SPREAD_DROPS; NOT R.recentDrops, which is the diagnostics accessor below) the last 3 s of drops {i, t, prog}; spreads done; their rows
+R.orderHeldCar = {}       -- (rc2) a held drop counts once in R.orderHeldN
 R.ORDER_RULE_M = 300      -- (0.16.8) a reposition never lands ahead of a car that was ahead in the running order and is within this far ahead of the stop spot
 R.NO_REPOSITION = false   -- (community 0.16.1) user setting rescueCrashed, inverted (off by default = today). true = no car is ever moved or repaired by Verve and
                           -- nothing holds it against AC's own retirement (Verve.lua also clears CRASH_REPAIR): stock AC's fate
@@ -735,7 +736,6 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate, stopProg
             end
         end)
     end
-    if orderMoved then R.orderMovedN = (R.orderMovedN or 0) + 1 end
     -- (0.16.9 draft, R.SPREAD_DROPS) SPREAD BEFORE DROP: forced drops skip dropSafe, so a pile-up's cars landed on one spot (ghi_imo_2:
     -- 3 cars within 4 m, 0.17 m centre gap; 2.8% of 2569 archived drops within a car length). If another car's drop in the last 3 s
     -- is within DROP_NEAR of this landing, step BACK (never ahead: the order rule still holds) by this car's STAGGER_BASE +
@@ -764,7 +764,7 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate, stopProg
             spreadPend = { i = i, from = p0, to = progress, steps = steps, why = why }
         end
     end
-    if not force and not dropSafe(sim, i, progress) then gateStage[i] = nil; if orderMoved then R.orderHeldN = (R.orderHeldN or 0) + 1 end; return false end
+    if not force and not dropSafe(sim, i, progress) then gateStage[i] = nil; if orderMoved and not R.orderHeldCar[i] then R.orderHeldCar[i] = true; R.orderHeldN = (R.orderHeldN or 0) + 1 end; return false end   -- (rc2) once per held drop, not per frame
     if force and R.DROP_SAFE_T > 0 and not callerSkip and not dropSafe(sim, i, progress) then   -- (not the gate's second stage)
         R.safeHold[i] = R.safeHold[i] or os.clock()          -- a forced drop still waits for the gap, but only so long
         if os.clock() - R.safeHold[i] < R.DROP_SAFE_HOLD then gateStage[i] = nil; return false end
@@ -860,6 +860,7 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate, stopProg
         R.dropPend[i] = os.clock()                     -- pending until judgeDrops rules (a later drop of this car re-stamps it)
         pendingDrop[i] = { pos = pos, dir = dir, apiDir = apiDir, t = os.clock(), tries = 0 }   -- verify its heading next frame
         R.dropN = R.dropN + 1
+        if orderMoved then R.orderMovedN = (R.orderMovedN or 0) + 1 end; R.orderHeldCar[i] = nil   -- (rc2) counted once, when the drop goes ahead
         R.spreadRecent[#R.spreadRecent + 1] = { i = i, t = os.clock(), prog = progress }   -- (SPREAD_DROPS) the landing actually used
         if spreadPend then   -- (rc2) once per drop: row 6 of the rc comparison logged one held drop's spread 154 times
             R.spreadN = R.spreadN + 1; R.spreadLog[#R.spreadLog + 1] = spreadPend

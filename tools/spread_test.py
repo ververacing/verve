@@ -23,6 +23,7 @@ def hash01(n):
 fnames = set(re.findall(r"^function R\.(\w+)\(", src, re.M)); assigned = set(re.findall(r"\bR\.(\w+)\s*=[^=]", src))
 clash = sorted(fnames & assigned)
 wired = {
+    "order counters per drop, not per frame (rc2)": ("R.orderHeldCar[i] = true" in src and src.find("if orderMoved then R.orderMovedN") > src.find("R.dropN = R.dropN + 1") > 0),
     "spread logged once, when the drop goes ahead (rc2)": ("local spreadPend = nil" in src and "if spreadPend then" in src and src.find("if spreadPend then") > src.find("R.spreadRecent[#R.spreadRecent + 1]")),
     "no R.* name is both a function and an assigned value (25 Nov: R.recentDrops clash, %s)" % (clash or "none"): not clash,
     "signature has stopProgress": "local function putBackOnLine(sim, i, progress, center, force, skipGate, stopProgress)" in src,
@@ -33,7 +34,7 @@ wired = {
     "gate cap (GATE_BACK_MAX)": "if gated and p0 - np > GATE_BACK_MAX then" in src,
     "car 0: 4.5 m, one step": "(i == 0) and 4.5 or DROP_NEAR * trackLen, (i == 0) and 1 or 3" in src,
     "drops recorded": "R.spreadRecent[#R.spreadRecent + 1] = { i = i, t = os.clock(), prog = progress }" in src,
-    "spread after the order rule, before the force check": src.find("if R.SPREAD_DROPS and trackLen") > src.find("if orderMoved then R.orderMovedN") > 0 and src.find("if R.SPREAD_DROPS and trackLen") < src.find("if not force and not dropSafe(sim, i, progress)"),
+    "spread after the order rule, before the force check": src.find("if R.SPREAD_DROPS and trackLen") > src.find("if (R.ORDER_RULE_M or 0) > 0 and trackLen") > 0 and src.find("if R.SPREAD_DROPS and trackLen") < src.find("if not force and not dropSafe(sim, i, progress)"),   # (rc2) anchor: the order rule itself (its counter moved to the drop)
 }
 SPREAD = wired["spread block present (R.SPREAD_DROPS)"]; TRUESTOP = wired["reqProgress = stopProgress or progress"] and wired["rescue passes its true stop"]
 def spread(i, prog, recent, gated=False):
