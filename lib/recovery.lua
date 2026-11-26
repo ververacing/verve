@@ -690,6 +690,19 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate, stopProg
             if not escapeLogged[i] then escapeLogged[i] = true; pcall(function() ac.log(string.format('Verve: car %d dropped past its trouble spot (%.3f)', i, progress)) end) end   -- once per car
         end
     end
+    -- (xlfix, 26 Nov) WRAP GUARD: a caller's forward stagger (the pile-up / lone-car rescue adds +0.004..+0.014 BEFORE the gate) that
+    -- carried the landing past the timing line relative to the TRUE stop is gated from the true stop instead. The wrapped landing read
+    -- as a sector-1 spot and skipped the gate: xl_imo_4 stopped at 0.9981, landed at 0.00367, and lost the lap (lapCount unchanged at
+    -- the teleport). From the true stop, gate-first sends it back to split 1 (about 70% of a lap of road, the lap kept). Only an
+    -- unwrapped move < -0.5 lap counts (a teleport never changes AC's lap count; see the order rule). The same-spot escape's
+    -- skipGate is left alone: passing its corner is its point, and it pays the lap by design.
+    local wrapGated = false   -- counted once, when the drop goes ahead (a held drop re-runs this every frame)
+    if not skipGate and stopProgress and progress < stopProgress - 0.5 then
+        progress = stopProgress
+        center = ac.trackProgressToWorldCoordinate(progress, false)
+        if not center then return false end
+        wrapGated = true
+    end
     local gated = false
     if R.GATE_MODE ~= 'off' and not skipGate then
         local gp
@@ -860,6 +873,7 @@ local function putBackOnLine(sim, i, progress, center, force, skipGate, stopProg
         R.dropPend[i] = os.clock()                     -- pending until judgeDrops rules (a later drop of this car re-stamps it)
         pendingDrop[i] = { pos = pos, dir = dir, apiDir = apiDir, t = os.clock(), tries = 0 }   -- verify its heading next frame
         R.dropN = R.dropN + 1
+        if wrapGated then R.wrapGateN = (R.wrapGateN or 0) + 1 end   -- (xlfix) once per drop
         if orderMoved then R.orderMovedN = (R.orderMovedN or 0) + 1 end; R.orderHeldCar[i] = nil   -- (rc2) counted once, when the drop goes ahead
         R.spreadRecent[#R.spreadRecent + 1] = { i = i, t = os.clock(), prog = progress }   -- (SPREAD_DROPS) the landing actually used
         if spreadPend then   -- (rc2) once per drop: row 6 of the rc comparison logged one held drop's spread 154 times
@@ -1458,6 +1472,7 @@ end
 
 function R.reset()
     R.spreadRecent = {}; R.spreadN = 0; R.spreadLog = {}; R.orderHeldCar = {}   -- (SPREAD_DROPS; rc2 order counters) per session
+    R.wrapGateN = 0   -- (xlfix) wrap-guard drops this session
     if R.ghostEndAll then R.ghostEndAll('reset') end   -- (0.16.8) failsafe: no ghost survives a session reset
     if R.driveClearAll then R.driveClearAll('reset') end   -- (0.16.8) failsafe: no Drive back cap survives a reset
     R.holdT = {}
