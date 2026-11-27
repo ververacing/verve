@@ -1,5 +1,5 @@
 {
-  "version": "0.16.7",
+  "version": "0.16.8",
   "url": "https://github.com/ververacing/verve/releases/latest",
   "summary": "Crashed cars: smarter Reposition that keeps the lap, keeps the running order and spreads out cars reset together; an optional ghosted rejoin. Reset my car can be bound to a key."
 }
